@@ -142,25 +142,41 @@ async function createServicePrincipalWithRetry(
  * client holding a secret nobody recorded, plus an identity entry on a
  * customer's site. Failures here are reported rather than thrown, because the
  * cause of the run's failure is the more useful error to surface.
+ *
+ * `cause` is the error that triggered rollback. It is only inspected in the
+ * one state where its shape changes what should be told to the operator: a
+ * site permission grant that was attempted but produced no id. Whenever
+ * rollback runs with that state, `cause` is always the error grantSitePermission
+ * itself threw, because sitePermissionId is assigned synchronously the instant
+ * that call resolves, with no other step able to fail in between.
  */
-async function rollback(graph: SetupGraph, partial: PartialSetup, notice: (message: string) => void): Promise<void> {
+async function rollback(
+  graph: SetupGraph,
+  partial: PartialSetup,
+  notice: (message: string) => void,
+  cause: unknown,
+): Promise<void> {
   const sitePermissionId = partial.sitePermissionId;
   if (partial.sitePermissionAttempted) {
     if (sitePermissionId === undefined) {
-      // No request is issued, because there is nothing to address it to. The
-      // id is the last path segment of DELETE /sites/{id}/permissions/{id}, so
-      // a delete built without one cannot reach the permission Graph may have
-      // created; it only ever appeared to clean up because Graph rejected it.
-      // The notice is unconditional for the same reason: a possibly orphaned
-      // grant on a customer's site is exactly what the operator has to be told
-      // about, and hanging that on a failed delete meant a delete that
-      // happened to succeed would have said nothing at all.
-      notice(
-        `The site permission grant to ${partial.appId} on site ${partial.siteId} failed before its response could ` +
-          "be read, so it is not known whether Graph created it, and its id is unknown, which leaves this command " +
-          `no way to remove it. Check GET /sites/${partial.siteId}/permissions for an entry granted to this app ` +
-          "and remove it manually if one is there.",
-      );
+      // A GraphRequestError means Graph answered with a real status, such as
+      // the 403 a not-yet-propagated bootstrap grant produces: the request was
+      // refused and nothing was created, so there is no orphaned grant to go
+      // hunt for on the customer's site. Sending the operator after one on the
+      // likeliest failure of this whole design would be a false alarm on
+      // every attempt. The genuinely ambiguous case is different in kind: a
+      // response Graph accepted but that this command could not read (a non-JSON
+      // 2xx body, or one missing the id field), surfaced as a plain Error. Only
+      // that case means Graph may have created the permission, and only that
+      // case gets the notice below.
+      if (!(cause instanceof GraphRequestError)) {
+        notice(
+          `The site permission grant to ${partial.appId} on site ${partial.siteId} failed before its response ` +
+            "could be read, so it is not known whether Graph created it, and its id is unknown, which leaves this " +
+            `command no way to remove it. Check GET /sites/${partial.siteId}/permissions, using the bootstrap ` +
+            "application's own token, for an entry granted to this app, and remove it manually if one is there.",
+        );
+      }
     } else {
       // Best-effort: the permission may already be gone, which Graph reports
       // as a 404. That failure is reported rather than thrown, because the
@@ -170,7 +186,8 @@ async function rollback(graph: SetupGraph, partial: PartialSetup, notice: (messa
       } catch (error) {
         notice(
           `Could not remove the site permission granted to ${partial.appId} on site ${partial.siteId}: ` +
-            `${detail(error)}. Remove it with DELETE /sites/${partial.siteId}/permissions/${sitePermissionId}.`,
+            `${detail(error)}. Remove it with DELETE /sites/${partial.siteId}/permissions/${sitePermissionId}, ` +
+            "using the bootstrap application's own token.",
         );
       }
     }
@@ -261,7 +278,7 @@ export async function runSetup(graph: SetupGraph, args: SetupArgs, hooks: SetupH
 
     return { appId, objectId, secret: secretText, siteId, verification: { confirmed: true } };
   } catch (error) {
-    await rollback(graph, { objectId, appId, siteId, sitePermissionId, sitePermissionAttempted }, notice);
+    await rollback(graph, { objectId, appId, siteId, sitePermissionId, sitePermissionAttempted }, notice, error);
     throw error;
   }
 }
@@ -298,8 +315,15 @@ export async function runCreateBootstrap(
       `An application named "${args.displayName}" already exists in this tenant (application id ${existing.appId}). ` +
         "Creating a second grant issuer would leave two tenant-wide SharePoint credentials that are hard to tell " +
         `apart. Set IW_BOOTSTRAP_CLIENT_ID to ${existing.appId} and IW_BOOTSTRAP_CLIENT_SECRET to its secret and ` +
-        "run the normal setup instead. If that secret was never recorded or has expired, delete the existing " +
-        "application and run this again, or pass --name to give this one a distinct name.",
+        "run the normal setup instead. If that secret was never recorded or has expired, or if this application's " +
+        "Sites.FullControl.All permission was never consented, delete the existing application and run this " +
+        // The preflight this same command's normal-run path performs
+        // (assertBootstrapToken, in steps.ts) sends an operator whose bootstrap
+        // token lacks the role back here with --create-bootstrap. Without this
+        // clause, an application this command itself created for exactly that
+        // reason would refuse the operator's only prescribed next step and
+        // offer no route past it.
+        "again, or pass --name to give this one a distinct name.",
     );
   }
 

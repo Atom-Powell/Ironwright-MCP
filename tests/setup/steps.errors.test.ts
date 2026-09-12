@@ -72,7 +72,7 @@ describe("interpretVerification failures", () => {
     if (outcome.ok) return;
     expect(outcome.message).toBe(
       "The app was denied access and its token could not be read, so neither cause can be ruled out. This run " +
-        "rolled back everything it created, so nothing it made is left in the tenant to inspect. Wait a minute " +
+        "rolled back what it created; anything it could not remove is named in the notices above. Wait a minute " +
         "and run this command again, signed in as a Privileged Role Administrator or Global Administrator, since " +
         "the Application Administrator role cannot consent a Microsoft Graph application permission and a " +
         "directory change made moments earlier can also need a little time. An attempt whose token can be read " +
@@ -88,13 +88,13 @@ describe("interpretVerification failures", () => {
     if (outcome.ok) return;
     expect(outcome.message).toBe(
       "The app was denied access, and its token carries no Sites.Selected role, so the application permission is " +
-        "not in effect in this tenant yet. This run rolled back everything it created, so no registration, " +
-        "secret, or grant is left behind and there is nothing in the tenant to consent to now. The role " +
-        "assignment this run made is itself what grants that consent, so the likeliest cause is that it had not " +
-        "reached a newly issued token yet; wait a minute and run this command again. If a second attempt fails " +
-        "the same way, the assignment is not taking effect: granting admin consent for a Microsoft Graph " +
-        "application permission needs Privileged Role Administrator or Global Administrator, because the " +
-        "Application Administrator role can consent to every API except Microsoft Graph.",
+        "not in effect in this tenant yet. This run rolled back what it created; anything it could not remove is " +
+        "named in the notices above. The role assignment this run made is itself what grants that consent, so " +
+        "the likeliest cause is that it had not reached a newly issued token yet; wait a minute and run this " +
+        "command again. If a second attempt fails the same way, the assignment is not taking effect: granting " +
+        "admin consent for a Microsoft Graph application permission needs Privileged Role Administrator or " +
+        "Global Administrator, because the Application Administrator role can consent to every API except " +
+        "Microsoft Graph.",
     );
   });
 
@@ -119,21 +119,34 @@ describe("interpretVerification failures", () => {
     }
   });
 
-  it("blames credentials rather than permissions on 401", () => {
+  it("does not send the operator to check credentials this run is about to delete on 401", () => {
+    // This status comes from verifyAppAccess's own call, made with a token
+    // that was already minted successfully for the run's new application.
+    // Telling the operator to check that application's tenant id, client id,
+    // or secret would send them after an object this run rolls back, and
+    // implies the token was never acquired at all, which by this point it was.
     const outcome = interpretVerification(401, "", undeterminable);
 
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.reason).toBe("token");
-    expect(outcome.message).toContain("client secret");
+    expect(outcome.message).not.toContain("Could not acquire");
+    expect(outcome.message).toMatch(/rolled back what it created/);
+    expect(outcome.message).toMatch(/will not help/i);
   });
 
-  it("blames the site URL on 404", () => {
+  it("does not blame the site URL on 404, since this run already resolved it", () => {
+    // resolveSite already proved this exact URL correct with the operator's
+    // own token earlier in the same run. A 404 here is from the new
+    // application's token instead, so the site URL is not in question.
     const outcome = interpretVerification(404, "", consented);
 
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.reason).toBe("not-found");
+    expect(outcome.message).not.toMatch(/check the site url/i);
+    expect(outcome.message).toContain("already resolved this exact site");
+    expect(outcome.message).toMatch(/rolled back what it created/);
   });
 
   it("includes the raw body for an unrecognized status", () => {

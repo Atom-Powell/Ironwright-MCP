@@ -234,21 +234,28 @@ export function assertBootstrapToken(token: string): void {
   }
 }
 
+// interpretVerification is a pure function of status, body and evidence: it
+// runs before rollback and has no way to observe whether rollback succeeds.
+// Every message below that follows from a rolled-back outcome uses this
+// fragment rather than asserting "nothing is left behind" itself, because that
+// assertion can be false: rollback can fail, and when it does, runSetup emits
+// its own notice naming exactly what could not be removed, printed ahead of
+// this message. Deferring to that notice, rather than repeating a claim this
+// function cannot verify, is what keeps the two from contradicting each other.
+const ROLLBACK_NOTE =
+  "This run rolled back what it created; anything it could not remove is named in the notices above.";
+
 // Written for a run that rolled back, which is what a missing role on the
-// verification token produces. Nothing this run created still exists, so the
-// remedy cannot send the operator to the portal to consent a registration that
-// was deleted seconds earlier. It also does not claim consent was never
-// granted: this command performs the role assignment itself, and reaching
-// verification at all means that call succeeded, so an assignment that has not
-// yet surfaced in a freshly issued token is the likelier reading of the
-// evidence.
+// verification token produces. It does not claim consent was never granted:
+// this command performs the role assignment itself, and reaching verification
+// at all means that call succeeded, so an assignment that has not yet surfaced
+// in a freshly issued token is the likelier reading of the evidence.
 const CONSENT_REMEDY =
-  "This run rolled back everything it created, so no registration, secret, or grant is left behind and there is " +
-  "nothing in the tenant to consent to now. The role assignment this run made is itself what grants that consent, " +
-  "so the likeliest cause is that it had not reached a newly issued token yet; wait a minute and run this command " +
-  "again. If a second attempt fails the same way, the assignment is not taking effect: granting admin consent for " +
-  "a Microsoft Graph application permission needs Privileged Role Administrator or Global Administrator, because " +
-  "the Application Administrator role can consent to every API except Microsoft Graph.";
+  `${ROLLBACK_NOTE} The role assignment this run made is itself what grants that consent, so the likeliest cause ` +
+  "is that it had not reached a newly issued token yet; wait a minute and run this command again. If a second " +
+  "attempt fails the same way, the assignment is not taking effect: granting admin consent for a Microsoft Graph " +
+  "application permission needs Privileged Role Administrator or Global Administrator, because the Application " +
+  "Administrator role can consent to every API except Microsoft Graph.";
 
 // Written for a run that kept what it created, which is what a 403 from a
 // token carrying the role produces. The role proves the application permission
@@ -269,13 +276,27 @@ const GRANT_REMEDY =
 // that rolled back, so joining them would tell the operator both at once. This
 // case rolls back, and its own honest content is short.
 const UNDETERMINED_CAUSE_MESSAGE =
-  "The app was denied access and its token could not be read, so neither cause can be ruled out. This run rolled " +
-  "back everything it created, so nothing it made is left in the tenant to inspect. Wait a minute and run this " +
-  "command again, signed in as a Privileged Role Administrator or Global Administrator, since the Application " +
-  "Administrator role cannot consent a Microsoft Graph application permission and a directory change made " +
-  "moments earlier can also need a little time. An attempt whose token can be read will name which of the two " +
-  "causes applies; if the token cannot be read then either, report that, because an unreadable application " +
-  "token is a defect in this command rather than a tenant setting.";
+  `The app was denied access and its token could not be read, so neither cause can be ruled out. ${ROLLBACK_NOTE} ` +
+  "Wait a minute and run this command again, signed in as a Privileged Role Administrator or Global " +
+  "Administrator, since the Application Administrator role cannot consent a Microsoft Graph application " +
+  "permission and a directory change made moments earlier can also need a little time. An attempt whose token " +
+  "can be read will name which of the two causes applies; if the token cannot be read then either, report that, " +
+  "because an unreadable application token is a defect in this command rather than a tenant setting.";
+
+// Written for the two statuses verifyAppAccess can see that are not 403: the
+// call already has a token in hand (acquireAppToken succeeded before this
+// status was ever read) and the site itself was already resolved, with the
+// operator's own token, earlier in this same run. So a 401 here is not a
+// credential the operator can inspect, and a 404 here is not evidence the
+// site URL is wrong: both would name causes this run has already disproved.
+const APP_TOKEN_REMEDY =
+  `${ROLLBACK_NOTE} Checking the tenant id, client id, or secret will not help: this call used a token minted ` +
+  "moments ago for this run's own application, so a stale or not-yet-propagated token is the likelier cause. " +
+  "Wait a minute and run this command again.";
+
+const SITE_VISIBILITY_REMEDY =
+  `${ROLLBACK_NOTE} Wait a minute and run this command again: the per-site grant this run just issued may not ` +
+  "have reached this application yet.";
 
 /**
  * Sites.Selected produces two different 403s with two different remedies, and
@@ -328,7 +349,7 @@ export function interpretVerification(
     return {
       ok: false,
       reason: "token",
-      message: "Could not acquire an application token. Check the tenant id, client id, and client secret.",
+      message: `The application's own token was rejected by Graph on this call, even though it was minted moments ago for this run's new application. ${APP_TOKEN_REMEDY}`,
     };
   }
 
@@ -336,7 +357,7 @@ export function interpretVerification(
     return {
       ok: false,
       reason: "not-found",
-      message: "The site was not found. Check the site URL, including its /sites/ segment.",
+      message: `The site was not found by this application's own token, even though this run already resolved this exact site with the signed-in operator's token earlier in the same run. Graph can return 404, not 403, when an application lacks access to a site it cannot see, so this is not evidence the site URL is wrong. ${SITE_VISIBILITY_REMEDY}`,
     };
   }
 

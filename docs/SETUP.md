@@ -75,7 +75,9 @@ rotates the secret on the wrong one. Pass `--name` if you would rather call it s
 The command refuses to run if an application with that name already exists, rather than adding
 a second holder of `Sites.FullControl.All` that looks identical to the first. It names the
 existing application and what to do with it. If its secret was never recorded or has expired,
-delete that application and run this again.
+or if its `Sites.FullControl.All` permission was never consented, delete that application and
+run this again. That last case is what an operator following the normal run's own preflight
+message reaches this command for, so it is a supported path here, not a dead end.
 
 The command signs you in with a device code, resolves Microsoft Graph's own service principal
 to find the real `Sites.FullControl.All` application role id, creates the application and its

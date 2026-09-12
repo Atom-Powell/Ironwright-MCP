@@ -5,6 +5,7 @@
 
 import { SetupFailedError } from "./errors.js";
 import { GraphRequestError } from "./graph-error.js";
+import { BOOTSTRAP_SECRET_LIFETIME_DAYS } from "./steps.js";
 
 export interface ParsedArgs {
   tenantId: string;
@@ -207,6 +208,36 @@ export function describeSignInFailure(error: unknown): string {
 }
 
 /**
+ * The full `--create-bootstrap` success block, printed on stdout. A pure
+ * function, rather than inline console.log calls in main.ts, so its wording
+ * can be pinned by a test.
+ *
+ * The secret's expiry is stated here because this block is the only place
+ * IW_BOOTSTRAP_CLIENT_SECRET is ever shown; docs/SETUP.md covers the expiry
+ * too, but an operator who copies the value straight from the terminal has no
+ * reason to go read it there first.
+ *
+ * The consent sentence is not a "still needs consent" notice: for an
+ * application permission, the appRoleAssignedTo call runCreateBootstrap just
+ * made *is* admin consent, and it only succeeds for a signed-in Privileged
+ * Role Administrator or Global Administrator in the first place. If this
+ * prints at all, that call already succeeded, so the permission is already
+ * usable.
+ */
+export function describeBootstrapSuccess(result: { appId: string; secret: string }): string {
+  return (
+    "Bootstrap application created. Store these as the grant-issuing application's credentials, not in the " +
+    "repository.\n" +
+    `  IW_BOOTSTRAP_CLIENT_ID=${result.appId}\n` +
+    `  IW_BOOTSTRAP_CLIENT_SECRET=${result.secret}\n` +
+    `This secret expires in ${BOOTSTRAP_SECRET_LIFETIME_DAYS} days; recreate it with --create-bootstrap when it ` +
+    "does. Its Sites.FullControl.All application permission is already admin-consented: the role assignment this " +
+    "command just made is what performs that for an application permission, so there is no separate consent step " +
+    "to do in the portal. Set the two values above and run this command again without --create-bootstrap."
+  );
+}
+
+/**
  * True for the two calls that use the bootstrap application's app-only token
  * rather than the signed-in operator's: grantSitePermission's POST and
  * deleteSitePermission's rollback DELETE, both against
@@ -261,6 +292,24 @@ function nextStepForGraphFailure(error: GraphRequestError): string {
 
   if (error.status === 401) {
     return "The signed-in token was rejected. Sign in again.";
+  }
+
+  // Same reasoning as the 403 and 401 branches above, and for the same
+  // underlying reason interpretVerification's own 404 remedy was rewritten:
+  // this call runs after resolveSite already proved the site URL correct, so
+  // a 404 here is not that. Graph can mask a site an application cannot see
+  // as 404 rather than 403, which the 403 branch above already names as the
+  // likely cause for this exact path family.
+  if (error.status === 404 && isSitePermissionsPath(error.path)) {
+    return (
+      "This call runs on the bootstrap application's own token, and this run already resolved this exact site " +
+      "with the signed-in user's token earlier, so this is not evidence the site URL is wrong. Graph can return " +
+      "404, not 403, when an application lacks access to a site it cannot see. The likely cause is the same as a " +
+      "403 here: the bootstrap application's Sites.FullControl.All permission is not admin-consented in this " +
+      "tenant, or consent granted moments earlier by --create-bootstrap has not yet reached a freshly issued " +
+      "token. Confirm IW_BOOTSTRAP_CLIENT_ID and IW_BOOTSTRAP_CLIENT_SECRET name a bootstrap application created " +
+      "with --create-bootstrap, and if the permission is already consented, wait a short while and try again."
+    );
   }
 
   if (error.status === 404) {

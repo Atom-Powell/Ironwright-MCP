@@ -75,10 +75,10 @@ describe("runSetup verification diagnostics", () => {
     expect(result.verification.message).toMatch(/propagat/);
   });
 
-  it("surfaces a credential problem separately from a permission problem", async () => {
+  it("surfaces a token-rejected problem separately from a permission problem", async () => {
     const fake = fakeGraph({ verifyAppAccess: async () => ({ status: 401, body: "", appRoles: undefined }) });
 
-    await expect(run(fake)).rejects.toThrow(/client secret/);
+    await expect(run(fake)).rejects.toThrow(/token was rejected/);
   });
 
   it("does not swallow a failure from the grant call itself", async () => {
@@ -242,6 +242,51 @@ describe("runSetup rollback", () => {
     const notices = fake.notices.join("\n");
     expect(notices).toMatch(/not known whether/i);
     expect(notices).toContain("GET /sites/site-1/permissions");
+    // The operator's own token is refused on this endpoint family; naming the
+    // bootstrap application's token here is what keeps this notice from
+    // sending them after a call that would just be refused again.
+    expect(notices).toMatch(/bootstrap application's own token/i);
+  });
+
+  it("does not send the operator hunting for a grant that Graph plainly refused to create", async () => {
+    // A GraphRequestError here means Graph answered with a real status - the
+    // likeliest case being a 403 from a bootstrap application whose consent
+    // has not propagated yet - so nothing was created and there is no
+    // orphaned grant on the customer's site to go check for. Sending the
+    // operator after one anyway, on the likeliest failure of this whole
+    // design, is exactly the false alarm this gate exists to prevent.
+    const fake = fakeGraph({
+      grantSitePermission: async () => {
+        throw new GraphRequestError({
+          method: "POST",
+          path: "/sites/site-1/permissions",
+          status: 403,
+          body: JSON.stringify({ error: { code: "Authorization_RequestDenied" } }),
+        });
+      },
+    });
+
+    await expect(run(fake)).rejects.toThrow(GraphRequestError);
+    const notices = fake.notices.join("\n");
+    expect(notices).not.toMatch(/not known whether/i);
+    expect(notices).not.toContain("GET /sites/site-1/permissions");
+  });
+
+  it("still sends the operator to check for an orphaned grant when the outcome is genuinely ambiguous", async () => {
+    // The ambiguous case is a response Graph accepted but this command could
+    // not read (a plain Error, not a GraphRequestError), so Graph may really
+    // have created the permission. Only the plainly-refused case above loses
+    // the notice; this one must keep it in full.
+    const fake = fakeGraph({
+      grantSitePermission: async () => {
+        throw new Error("Graph POST /sites/site-1/permissions returned 201 without a usable \"id\" field.");
+      },
+    });
+
+    await expect(run(fake)).rejects.toThrow(/without a usable/);
+    const notices = fake.notices.join("\n");
+    expect(notices).toMatch(/not known whether/i);
+    expect(notices).toContain("GET /sites/site-1/permissions");
   });
 
   it("tolerates a rollback delete failing for a permission whose id is known, reporting it rather than masking the original error", async () => {
@@ -267,6 +312,10 @@ describe("runSetup rollback", () => {
     expect((caught as Error).message).not.toMatch(/itemNotFound/);
     expect(fake.notices.join("\n")).toContain("itemNotFound");
     expect(fake.notices.join("\n")).toContain("DELETE /sites/site-1/permissions/permission-1");
+    // Same reasoning as the unknown-id notice: this delete runs on the
+    // bootstrap application's token, not the operator's, so the manual
+    // follow-up has to name that token too.
+    expect(fake.notices.join("\n")).toMatch(/bootstrap application's own token/i);
   });
 
   it("reports the registration for manual deletion when rollback itself fails, without masking the cause", async () => {
@@ -280,6 +329,44 @@ describe("runSetup rollback", () => {
     await expect(run(fake)).rejects.toThrow(SetupFailedError);
     expect(fake.notices.join("\n")).toContain("app-1");
     expect(fake.notices.join("\n")).toMatch(/delete it manually/i);
+  });
+
+  it("composes a non-contradictory transcript when rollback itself fails, pinning both pieces together", async () => {
+    // The defect this guards against: interpretVerification's message once
+    // asserted, unconditionally, that rollback left nothing behind, while a
+    // failed rollback's own notice - printed to stderr immediately before it
+    // - told the operator to delete a registration by hand. Each message read
+    // fine on its own; only the composed transcript showed the contradiction,
+    // so only a test that pins both together, from the same run, can catch it
+    // coming back.
+    const fake = fakeGraph({
+      verifyAppAccess: async () => ({ status: 403, body: "{}", appRoles: [] }),
+      deleteApplication: async () => {
+        throw new Error("Graph DELETE /applications/object-1 failed with 403: Authorization_RequestDenied");
+      },
+    });
+
+    let caught: unknown;
+    try {
+      await run(fake);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(SetupFailedError);
+    const finalMessage = (caught as Error).message;
+    const notices = fake.notices.join("\n");
+
+    // The rollback notice names exactly what could not be removed.
+    expect(notices).toContain("app-1");
+    expect(notices).toMatch(/delete it manually/i);
+
+    // The verification message must not repeat the old, now-false claim that
+    // rollback left nothing behind, and must defer to the notices above it
+    // instead of asserting an outcome it has no way to observe.
+    expect(finalMessage).not.toMatch(/no registration, secret, or grant is left behind/);
+    expect(finalMessage).not.toMatch(/nothing (it made is left|is left behind)/i);
+    expect(finalMessage).toMatch(/anything it could not remove is named in the notices above/);
   });
 
   it("confirms the rollback when it succeeds, so no credential is assumed to be loose", async () => {
@@ -313,14 +400,14 @@ describe("runSetup verification failure outcomes match what the run actually did
       name: "a token that carries no roles",
       appRoles: [],
       keepsApplication: false,
-      claims: /rolled back everything it created/,
+      claims: /rolled back what it created/,
       forbids: /kept, not rolled back/,
     },
     {
       name: "a token that could not be read",
       appRoles: undefined,
       keepsApplication: false,
-      claims: /rolled back everything it created/,
+      claims: /rolled back what it created/,
       forbids: /kept, not rolled back/,
     },
   ];

@@ -212,6 +212,35 @@ describe("describeSetupFailure", () => {
     expect(message).toContain("The signed-in token was rejected. Sign in again.");
   });
 
+  it("does not blame the site URL for a 404 on the per-site grant, since this run already resolved it", () => {
+    // resolveSite already proved this exact site URL correct with the
+    // signed-in operator's own token, earlier in the same run, before
+    // grantSitePermission ever ran on the bootstrap application's token. The
+    // generic 404 branch below names a cause this run has already disproved;
+    // this path family needs the same isSitePermissionsPath treatment the 403
+    // and 401 branches above already get.
+    const message = describeSetupFailure(
+      new GraphRequestError({
+        method: "POST",
+        path: "/sites/site-1/permissions",
+        status: 404,
+        body: '{"error":{"code":"itemNotFound"}}',
+      }),
+    );
+
+    expect(message).not.toContain("Check the site URL");
+    expect(message).toContain("this run already resolved this exact site");
+    expect(message).toContain("Sites.FullControl.All");
+  });
+
+  it("still blames the site URL for a 404 that is not on the per-site grant path", () => {
+    const message = describeSetupFailure(
+      new GraphRequestError({ method: "GET", path: "/sites/contoso.sharepoint.com:/sites/Example", status: 404, body: "itemNotFound" }),
+    );
+
+    expect(message).toContain("Check the site URL, including its /sites/ segment.");
+  });
+
   it("names throttling as worth retrying", () => {
     const message = describeSetupFailure(
       new GraphRequestError({ method: "POST", path: "/applications", status: 429, body: "throttled" }),

@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_DEVICE_CODE_CLIENT_ID,
   acquireTokenWithRetry,
+  describeBootstrapSuccess,
   describeSignInFailure,
   extractAccessToken,
   once,
   parseArgs,
 } from "../../src/setup/cli.js";
+import { BOOTSTRAP_SECRET_LIFETIME_DAYS } from "../../src/setup/steps.js";
 
 const baseArgv = ["node", "main.js", "--tenant=tenant-1", "--site=https://contoso.sharepoint.com/sites/Example"];
 
@@ -73,6 +75,31 @@ describe("describeSignInFailure", () => {
     expect(message).not.toMatch(/register a bootstrap/i);
     expect(message).toContain("public-client sign-in application");
     expect(message).toContain("not the bootstrap application");
+  });
+});
+
+describe("describeBootstrapSuccess", () => {
+  it("prints both credentials", () => {
+    const message = describeBootstrapSuccess({ appId: "app-1", secret: "secret-1" });
+
+    expect(message).toContain("IW_BOOTSTRAP_CLIENT_ID=app-1");
+    expect(message).toContain("IW_BOOTSTRAP_CLIENT_SECRET=secret-1");
+  });
+
+  it("states the secret's expiry in the one place the secret itself is ever shown", () => {
+    // Someone who copies IW_BOOTSTRAP_CLIENT_SECRET straight from this
+    // output, without separately reading docs/SETUP.md, has to learn its
+    // lifetime here or not at all.
+    const message = describeBootstrapSuccess({ appId: "app-1", secret: "secret-1" });
+
+    expect(message).toMatch(new RegExp(`expires in ${BOOTSTRAP_SECRET_LIFETIME_DAYS} days`));
+  });
+
+  it("does not claim a separate consent step is still needed", () => {
+    const message = describeBootstrapSuccess({ appId: "app-1", secret: "secret-1" });
+
+    expect(message).toContain("already admin-consented");
+    expect(message).not.toMatch(/needs? (to be )?consent/i);
   });
 });
 

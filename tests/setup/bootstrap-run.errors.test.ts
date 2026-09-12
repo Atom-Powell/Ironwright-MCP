@@ -119,5 +119,29 @@ describe("runCreateBootstrap duplicate guard", () => {
     expect(message).toContain("IW_BOOTSTRAP_CLIENT_ID");
     expect(message).toMatch(/--name/);
   });
+
+  it("covers the case the preflight's own remedy sends the operator here for: an unconsented grant issuer", async () => {
+    // steps.ts's assertBootstrapToken tells an operator whose bootstrap token
+    // lacks Sites.FullControl.All to re-run with --create-bootstrap. That
+    // always hits this guard, because the unconsented application is the one
+    // this command itself created. Without an unconsented-permission escape
+    // hatch here, alongside the unrecorded/expired-secret one, that prescribed
+    // next step would be refused with no route past it.
+    const { graph } = fakeGraph({
+      findApplicationByDisplayName: async () => ({ objectId: "existing-obj", appId: "existing-app" }),
+    });
+
+    let caught: unknown;
+    try {
+      await runCreateBootstrap(graph, { displayName: "Ironwright Grant Issuer" });
+    } catch (error) {
+      caught = error;
+    }
+
+    const message = (caught as Error).message;
+    expect(message).toMatch(/consented/i);
+    expect(message).toContain("Sites.FullControl.All");
+    expect(message).toMatch(/delete the existing application and run this again/i);
+  });
 });
 

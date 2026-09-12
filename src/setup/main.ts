@@ -2,6 +2,7 @@ import { DeviceCodeCredential } from "@azure/identity";
 import { createFetchSetupGraph } from "./adapter.js";
 import {
   acquireTokenWithRetry,
+  describeBootstrapSuccess,
   describeSetupFailure,
   describeSignInFailure,
   extractAccessToken,
@@ -126,21 +127,7 @@ async function main(): Promise<void> {
       { onNotice: (message) => console.error(message) },
     );
 
-    console.log(
-      "Bootstrap application created. Store these as the grant-issuing application's credentials, not in the repository.",
-    );
-    console.log(`  IW_BOOTSTRAP_CLIENT_ID=${result.appId}`);
-    console.log(`  IW_BOOTSTRAP_CLIENT_SECRET=${result.secret}`);
-    // Not a "still needs consent" notice: for an application permission, the
-    // appRoleAssignedTo call runCreateBootstrap just made *is* admin consent,
-    // and it only succeeds for a signed-in Privileged Role Administrator or
-    // Global Administrator in the first place. If this line prints at all,
-    // that call already succeeded, so the permission is already usable.
-    console.log(
-      "Its Sites.FullControl.All application permission is already admin-consented: the role assignment this " +
-        "command just made is what performs that for an application permission, so there is no separate consent " +
-        "step to do in the portal. Set the two values above and run this command again without --create-bootstrap.",
-    );
+    console.log(describeBootstrapSuccess(result));
     return;
   }
 
