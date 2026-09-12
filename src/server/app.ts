@@ -71,5 +71,57 @@ export function createApp(opts: AppOptions): express.Express {
   app.get("/mcp", methodNotAllowed);
   app.delete("/mcp", methodNotAllowed);
 
+  // Without these last two handlers Express answers with its own error page,
+  // which is HTML carrying library frames and the server's install path, and is
+  // not a JSON-RPC error at all, so an MCP client reads it as a transport
+  // failure rather than as a protocol error it can report.
+  app.use((_req, res) => {
+    res.status(404).json({
+      jsonrpc: "2.0",
+      error: { code: -32600, message: "Not found. This server answers MCP requests on POST /mcp." },
+      id: null,
+    });
+  });
+
+  app.use(((error, _req, res, next) => {
+    // A failure after the response started belongs to Express's own handler,
+    // which is the only thing that can destroy the socket cleanly.
+    if (res.headersSent) {
+      next(error);
+      return;
+    }
+
+    const detail = error as { type?: unknown; status?: unknown; statusCode?: unknown };
+    if (detail.type === "entity.parse.failed") {
+      res.status(400).json({
+        jsonrpc: "2.0",
+        error: { code: -32700, message: "Parse error: the request body is not valid JSON." },
+        id: null,
+      });
+      return;
+    }
+
+    // Body-parser rejections other than a parse failure, an oversized body most
+    // of all, arrive with their own 4xx status. Anything without one is a bug in
+    // this server rather than a bad request, so it is logged and reported as an
+    // internal error with nothing of the stack in the response.
+    const status = typeof detail.status === "number" ? detail.status : detail.statusCode;
+    if (typeof status === "number" && status >= 400 && status < 500) {
+      res.status(status).json({
+        jsonrpc: "2.0",
+        error: { code: -32600, message: "Invalid request." },
+        id: null,
+      });
+      return;
+    }
+
+    console.error("unhandled error on an MCP request", error);
+    res.status(500).json({
+      jsonrpc: "2.0",
+      error: { code: -32603, message: "Internal error." },
+      id: null,
+    });
+  }) satisfies express.ErrorRequestHandler);
+
   return app;
 }
