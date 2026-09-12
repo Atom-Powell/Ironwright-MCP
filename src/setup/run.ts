@@ -138,26 +138,33 @@ async function createServicePrincipalWithRetry(
  * cause of the run's failure is the more useful error to surface.
  */
 async function rollback(graph: SetupGraph, partial: PartialSetup, notice: (message: string) => void): Promise<void> {
+  const sitePermissionId = partial.sitePermissionId;
   if (partial.sitePermissionAttempted) {
-    // The id may be unknown here (the grant call threw before its response
-    // could be read), so this delete is itself best-effort: it may be removing
-    // a permission that was never created, which Graph reports as a 404. That
-    // failure is tolerated and reported the same way every other rollback
-    // failure is, rather than thrown, because the run's own failure is the
-    // more useful error to surface.
-    try {
-      await graph.deleteSitePermission(partial.siteId, partial.sitePermissionId ?? "");
-    } catch (error) {
-      if (partial.sitePermissionId === undefined) {
+    if (sitePermissionId === undefined) {
+      // No request is issued, because there is nothing to address it to. The
+      // id is the last path segment of DELETE /sites/{id}/permissions/{id}, so
+      // a delete built without one cannot reach the permission Graph may have
+      // created; it only ever appeared to clean up because Graph rejected it.
+      // The notice is unconditional for the same reason: a possibly orphaned
+      // grant on a customer's site is exactly what the operator has to be told
+      // about, and hanging that on a failed delete meant a delete that
+      // happened to succeed would have said nothing at all.
+      notice(
+        `The site permission grant to ${partial.appId} on site ${partial.siteId} failed before its response could ` +
+          "be read, so it is not known whether Graph created it, and its id is unknown, which leaves this command " +
+          `no way to remove it. Check GET /sites/${partial.siteId}/permissions for an entry granted to this app ` +
+          "and remove it manually if one is there.",
+      );
+    } else {
+      // Best-effort: the permission may already be gone, which Graph reports
+      // as a 404. That failure is reported rather than thrown, because the
+      // run's own failure is the more useful error to surface.
+      try {
+        await graph.deleteSitePermission(partial.siteId, sitePermissionId);
+      } catch (error) {
         notice(
-          `The site permission grant to ${partial.appId} on site ${partial.siteId} failed before its response could ` +
-            `be read, so it is not known whether Graph created it, and a cleanup attempt failed too: ${detail(error)}. ` +
-            `Check GET /sites/${partial.siteId}/permissions for an entry granted to this app and remove it manually if present.`,
-        );
-      } else {
-        notice(
-          `Could not remove the site permission granted to ${partial.appId} on site ${partial.siteId}: ${detail(error)}. ` +
-            `Remove it with DELETE /sites/${partial.siteId}/permissions/${partial.sitePermissionId}.`,
+          `Could not remove the site permission granted to ${partial.appId} on site ${partial.siteId}: ` +
+            `${detail(error)}. Remove it with DELETE /sites/${partial.siteId}/permissions/${sitePermissionId}.`,
         );
       }
     }
