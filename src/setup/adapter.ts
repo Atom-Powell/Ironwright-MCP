@@ -1,13 +1,13 @@
 import { GraphRequestError } from "./graph-error.js";
 import { appRolesFromAccessToken } from "./steps.js";
-import type { AppRegistrationRequest, AppRoleAssignmentRequest, SitePermissionRequest } from "./steps.js";
+import type { AppRegistrationRequest, AppRoleAssignmentRequest, GraphAppRole, SitePermissionRequest } from "./steps.js";
 
 export interface SetupGraph {
   resolveSite(sitePath: string): Promise<{ siteId: string }>;
   createApplication(request: AppRegistrationRequest): Promise<{ objectId: string; appId: string }>;
   addPassword(objectId: string): Promise<{ secretText: string }>;
   createServicePrincipal(appId: string): Promise<{ objectId: string }>;
-  resolveServicePrincipal(appId: string): Promise<{ objectId: string }>;
+  resolveServicePrincipal(appId: string): Promise<{ objectId: string; appRoles: GraphAppRole[] }>;
   grantAppRole(request: AppRoleAssignmentRequest): Promise<void>;
   grantSitePermission(siteId: string, request: SitePermissionRequest): Promise<{ permissionId: string }>;
   verifyAppAccess(args: {
@@ -132,9 +132,20 @@ export function createFetchSetupGraph(
     async resolveServicePrincipal(appId) {
       // Addressed by appId rather than filtered, because the key-lookup form is
       // exact: a $filter query would need paging and could return nothing for a
-      // resource that certainly exists in the tenant.
-      const response = await graphRequest(accessToken, "GET", `/servicePrincipals(appId='${appId}')`);
-      return { objectId: requireFields(response, ["id"]).id };
+      // resource that certainly exists in the tenant. $select is narrowed to the
+      // two fields this command actually uses, since the full service principal
+      // object is large.
+      const response = await graphRequest(
+        accessToken,
+        "GET",
+        `/servicePrincipals(appId='${appId}')?$select=id,appRoles`,
+      );
+      const found = requireFields(response, ["id"]);
+      const body = typeof response.value === "object" && response.value !== null ? response.value : {};
+      const appRoles = Array.isArray((body as { appRoles?: unknown }).appRoles)
+        ? ((body as { appRoles: unknown[] }).appRoles as GraphAppRole[])
+        : [];
+      return { objectId: found.id, appRoles };
     },
 
     async grantAppRole(request) {

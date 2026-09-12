@@ -4,15 +4,45 @@
 // hardcoded.
 export const MICROSOFT_GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000";
 
-// The fixed id of Microsoft Graph's Sites.Selected application permission. App
-// role ids are stable across tenants because they belong to the resource
-// application's own manifest.
-export const SITES_SELECTED_APP_ROLE_ID = "883ea226-0bf2-4a8f-9f9d-92c9162a727d";
-
 // How Sites.Selected appears in the roles claim of an application token. Its
 // presence is the only direct evidence that admin consent was actually granted,
 // which is what separates the two causes of a 403 from the site.
 export const SITES_SELECTED_ROLE_CLAIM = "Sites.Selected";
+
+// The claim name for the bootstrap application's permission. A second app role
+// id is about to be needed for it, and it is looked up the same way as
+// Sites.Selected's rather than hardcoded, for the same reason.
+export const SITES_FULL_CONTROL_ROLE_CLAIM = "Sites.FullControl.All";
+
+export interface GraphAppRole {
+  id: string;
+  value: string;
+}
+
+/**
+ * Looked up rather than hardcoded. The command already fetches Graph's service
+ * principal to get the resourceId for a role assignment, and that same response
+ * carries every app role Graph publishes, so a constant GUID here would be an
+ * unverified copy of data already in hand.
+ */
+export function appRoleIdByValue(appRoles: GraphAppRole[], value: string): string {
+  const match = appRoles.find((role) => role.value === value);
+  if (match === undefined) {
+    throw new Error(
+      `Microsoft Graph does not publish an application role named "${value}". This usually means the service principal response was truncated or the role was renamed; report it with the value shown here.`,
+    );
+  }
+  return match.id;
+}
+
+// The registration request below is built before any application exists, so
+// there is no service principal response to look this id up in yet -- unlike
+// the role assignment, which runs after that lookup and is why it no longer
+// hardcodes anything. This value is still safe to hardcode here because it
+// only *requests* the permission: Entra validates it server-side and rejects
+// the request outright if it is ever wrong, rather than silently assigning the
+// wrong role the way a bad id in an assignment call would.
+const SITES_SELECTED_APP_ROLE_ID_FOR_REGISTRATION = "883ea226-0bf2-4a8f-9f9d-92c9162a727d";
 
 export interface RequiredResourceAccess {
   resourceAppId: string;
@@ -76,7 +106,7 @@ export function buildAppRegistrationRequest(displayName: string): AppRegistratio
     requiredResourceAccess: [
       {
         resourceAppId: MICROSOFT_GRAPH_APP_ID,
-        resourceAccess: [{ id: SITES_SELECTED_APP_ROLE_ID, type: "Role" }],
+        resourceAccess: [{ id: SITES_SELECTED_APP_ROLE_ID_FOR_REGISTRATION, type: "Role" }],
       },
     ],
   };
@@ -90,11 +120,12 @@ export function buildAppRegistrationRequest(displayName: string): AppRegistratio
 export function buildAppRoleAssignmentRequest(args: {
   principalId: string;
   resourceId: string;
+  appRoleId: string;
 }): AppRoleAssignmentRequest {
   return {
     principalId: args.principalId,
     resourceId: args.resourceId,
-    appRoleId: SITES_SELECTED_APP_ROLE_ID,
+    appRoleId: args.appRoleId,
   };
 }
 

@@ -2,11 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { SetupGraph } from "../../src/setup/adapter.js";
 import { runSetup } from "../../src/setup/run.js";
 import type { AppRegistrationRequest } from "../../src/setup/steps.js";
-import {
-  MICROSOFT_GRAPH_APP_ID,
-  SITES_SELECTED_APP_ROLE_ID,
-  SITES_SELECTED_ROLE_CLAIM,
-} from "../../src/setup/steps.js";
+import { MICROSOFT_GRAPH_APP_ID, SITES_SELECTED_ROLE_CLAIM } from "../../src/setup/steps.js";
+
+const SITES_SELECTED_ROLE_ID = "role-selected";
 
 function fakeGraph(overrides: Partial<SetupGraph> = {}): { graph: SetupGraph; calls: string[] } {
   const calls: string[] = [];
@@ -29,7 +27,7 @@ function fakeGraph(overrides: Partial<SetupGraph> = {}): { graph: SetupGraph; ca
     },
     resolveServicePrincipal: async (appId) => {
       calls.push(`resolveServicePrincipal:${appId}`);
-      return { objectId: "graph-sp-1" };
+      return { objectId: "graph-sp-1", appRoles: [{ id: SITES_SELECTED_ROLE_ID, value: SITES_SELECTED_ROLE_CLAIM }] };
     },
     grantAppRole: async (request) => {
       calls.push(`grantAppRole:${request.principalId}:${request.resourceId}:${request.appRoleId}`);
@@ -71,7 +69,7 @@ describe("runSetup", () => {
       "addPassword:object-1",
       "createServicePrincipal:app-1",
       `resolveServicePrincipal:${MICROSOFT_GRAPH_APP_ID}`,
-      `grantAppRole:sp-1:graph-sp-1:${SITES_SELECTED_APP_ROLE_ID}`,
+      `grantAppRole:sp-1:graph-sp-1:${SITES_SELECTED_ROLE_ID}`,
       "grantSitePermission:site-1:write",
       "verifyAppAccess",
     ]);
@@ -92,7 +90,9 @@ describe("runSetup", () => {
     expect(request?.requiredResourceAccess).toEqual([
       {
         resourceAppId: MICROSOFT_GRAPH_APP_ID,
-        resourceAccess: [{ id: SITES_SELECTED_APP_ROLE_ID, type: "Role" }],
+        // Same known-stable role id asserted in steps.test.ts: the registration
+        // request cannot look this up, since no service principal exists yet.
+        resourceAccess: [{ id: "883ea226-0bf2-4a8f-9f9d-92c9162a727d", type: "Role" }],
       },
     ]);
   });

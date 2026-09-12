@@ -3,6 +3,7 @@ import { SetupFailedError } from "./errors.js";
 import {
   MICROSOFT_GRAPH_APP_ID,
   SITES_SELECTED_ROLE_CLAIM,
+  appRoleIdByValue,
   buildAppRegistrationRequest,
   buildAppRoleAssignmentRequest,
   buildSitePermissionRequest,
@@ -101,6 +102,7 @@ export async function runSetup(graph: SetupGraph, args: SetupArgs, hooks: SetupH
       buildAppRoleAssignmentRequest({
         principalId: servicePrincipal.objectId,
         resourceId: graphServicePrincipal.objectId,
+        appRoleId: appRoleIdByValue(graphServicePrincipal.appRoles, SITES_SELECTED_ROLE_CLAIM),
       }),
     );
 

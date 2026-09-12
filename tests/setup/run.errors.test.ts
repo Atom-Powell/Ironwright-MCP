@@ -19,7 +19,10 @@ function fakeGraph(overrides: Partial<SetupGraph> = {}): Fake {
     },
     addPassword: async () => ({ secretText: "secret-1" }),
     createServicePrincipal: async () => ({ objectId: "sp-1" }),
-    resolveServicePrincipal: async () => ({ objectId: "graph-sp-1" }),
+    resolveServicePrincipal: async () => ({
+      objectId: "graph-sp-1",
+      appRoles: [{ id: "role-selected", value: SITES_SELECTED_ROLE_CLAIM }],
+    }),
     grantAppRole: async () => {},
     grantSitePermission: async () => ({ permissionId: "permission-1" }),
     verifyAppAccess: async () => ({ status: 200, body: "{}", appRoles: [SITES_SELECTED_ROLE_CLAIM] }),

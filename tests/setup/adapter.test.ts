@@ -87,20 +87,43 @@ describe("createFetchSetupGraph", () => {
     expect(calls[0]?.body).toEqual({ appId: "app-1" });
   });
 
-  it("resolves a service principal by application id", async () => {
-    const calls = stubFetch([{ status: 200, body: JSON.stringify({ id: "graph-sp-1" }) }]);
+  it("resolves a service principal by application id, along with its app roles", async () => {
+    const calls = stubFetch([
+      {
+        status: 200,
+        body: JSON.stringify({
+          id: "graph-sp-1",
+          appRoles: [{ id: "role-selected", value: "Sites.Selected" }],
+        }),
+      },
+    ]);
 
     const result = await graph().resolveServicePrincipal("00000003-0000-0000-c000-000000000000");
 
-    expect(result).toEqual({ objectId: "graph-sp-1" });
+    expect(result).toEqual({
+      objectId: "graph-sp-1",
+      appRoles: [{ id: "role-selected", value: "Sites.Selected" }],
+    });
     expect(calls[0]?.url).toBe(
-      "https://graph.microsoft.com/v1.0/servicePrincipals(appId='00000003-0000-0000-c000-000000000000')",
+      "https://graph.microsoft.com/v1.0/servicePrincipals(appId='00000003-0000-0000-c000-000000000000')?$select=id,appRoles",
     );
+  });
+
+  it("returns an empty app role list when the service principal response carries none", async () => {
+    stubFetch([{ status: 200, body: JSON.stringify({ id: "graph-sp-1" }) }]);
+
+    const result = await graph().resolveServicePrincipal("00000003-0000-0000-c000-000000000000");
+
+    expect(result).toEqual({ objectId: "graph-sp-1", appRoles: [] });
   });
 
   it("assigns the app role on the resource service principal, which is the admin consent step", async () => {
     const calls = stubFetch([{ status: 201, body: JSON.stringify({ id: "assignment-1" }) }]);
-    const request = buildAppRoleAssignmentRequest({ principalId: "sp-1", resourceId: "graph-sp-1" });
+    const request = buildAppRoleAssignmentRequest({
+      principalId: "sp-1",
+      resourceId: "graph-sp-1",
+      appRoleId: "role-selected",
+    });
 
     await graph().grantAppRole(request);
 

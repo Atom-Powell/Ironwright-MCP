@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appRolesFromAccessToken, interpretVerification } from "../../src/setup/steps.js";
+import { appRoleIdByValue, appRolesFromAccessToken, interpretVerification } from "../../src/setup/steps.js";
 
 const consented = { sitesSelectedRolePresent: true };
 const notConsented = { sitesSelectedRolePresent: false };
@@ -98,6 +98,18 @@ describe("interpretVerification failures", () => {
     expect(outcome.message).toContain("error code");
     expect(outcome.message).toContain("report");
     expect(outcome.message).not.toContain("transient");
+  });
+});
+
+describe("appRoleIdByValue rejections", () => {
+  it("names the missing role and does not return a guess", () => {
+    expect(() => appRoleIdByValue([{ id: "a", value: "Sites.Selected" }], "Sites.FullControl.All")).toThrow(
+      /Sites\.FullControl\.All/,
+    );
+  });
+
+  it("rejects an empty role list rather than returning undefined", () => {
+    expect(() => appRoleIdByValue([], "Sites.Selected")).toThrow();
   });
 });
 

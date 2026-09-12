@@ -1,14 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
   MICROSOFT_GRAPH_APP_ID,
-  SITES_SELECTED_APP_ROLE_ID,
+  appRoleIdByValue,
   appRolesFromAccessToken,
   buildAppRegistrationRequest,
   buildAppRoleAssignmentRequest,
   buildSitePermissionRequest,
   interpretVerification,
   siteIdPathFromUrl,
+  SITES_FULL_CONTROL_ROLE_CLAIM,
 } from "../../src/setup/steps.js";
+
+// The known-stable value of Microsoft Graph's Sites.Selected application role,
+// asserted here as a literal because the production code that requests it on a
+// registration cannot look it up (no service principal exists to query yet);
+// see the comment on SITES_SELECTED_APP_ROLE_ID_FOR_REGISTRATION in steps.ts.
+const SITES_SELECTED_APP_ROLE_ID = "883ea226-0bf2-4a8f-9f9d-92c9162a727d";
 
 function fakeAccessToken(payload: unknown): string {
   const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
@@ -31,11 +38,13 @@ describe("buildAppRegistrationRequest", () => {
 });
 
 describe("buildAppRoleAssignmentRequest", () => {
-  it("assigns the Sites.Selected app role from the new service principal to Microsoft Graph", () => {
-    expect(buildAppRoleAssignmentRequest({ principalId: "sp-1", resourceId: "graph-sp-1" })).toEqual({
+  it("assigns the given app role from the new service principal to Microsoft Graph", () => {
+    expect(
+      buildAppRoleAssignmentRequest({ principalId: "sp-1", resourceId: "graph-sp-1", appRoleId: "role-selected" }),
+    ).toEqual({
       principalId: "sp-1",
       resourceId: "graph-sp-1",
-      appRoleId: SITES_SELECTED_APP_ROLE_ID,
+      appRoleId: "role-selected",
     });
   });
 });
@@ -113,5 +122,20 @@ describe("appRolesFromAccessToken", () => {
 describe("interpretVerification", () => {
   it("treats 200 as success", () => {
     expect(interpretVerification(200, "{}", { sitesSelectedRolePresent: true })).toEqual({ ok: true });
+  });
+});
+
+describe("appRoleIdByValue", () => {
+  const roles = [
+    { id: "role-selected", value: "Sites.Selected" },
+    { id: "role-full", value: "Sites.FullControl.All" },
+  ];
+
+  it("finds a role id by its value", () => {
+    expect(appRoleIdByValue(roles, "Sites.Selected")).toBe("role-selected");
+  });
+
+  it("finds the full control role", () => {
+    expect(appRoleIdByValue(roles, SITES_FULL_CONTROL_ROLE_CLAIM)).toBe("role-full");
   });
 });
