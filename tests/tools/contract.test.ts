@@ -1,6 +1,31 @@
 import { describe, expect, it } from "vitest";
 import { ALL_TOOLS } from "../../src/tools/registry.js";
-import { requiredSentence } from "../../src/tools/kinds.js";
+import { SAFETY_SENTENCES, requiredSentence } from "../../src/tools/kinds.js";
+
+describe("safety sentences", () => {
+  // Pinned as literals. Every other assertion derives the expected sentence from
+  // this same constant, so rewriting one to "Safe to run." would keep the whole
+  // suite green while gutting the description contract it exists to enforce.
+  it("says exactly what each kind of tool does", () => {
+    expect(SAFETY_SENTENCES.read).toBe("Read-only: this tool makes no changes and is safe to repeat.");
+    expect(SAFETY_SENTENCES.plan).toBe(
+      "Not read-only: this tool saves a plan for review. It makes no changes to the repository, and repeated calls create separate plans.",
+    );
+    expect(SAFETY_SENTENCES.destructiveWrite).toBe(
+      "Destructive: this tool changes the repository when confirmed. It defaults to a dry run, and repeated calls are not idempotent.",
+    );
+    expect(SAFETY_SENTENCES.additiveWrite).toBe(
+      "Not read-only: this tool creates missing items in the repository when confirmed. It defaults to a dry run and skips items that already exist.",
+    );
+  });
+
+  it("maps each kind to its own sentence", () => {
+    expect(requiredSentence("read", false)).toBe(SAFETY_SENTENCES.read);
+    expect(requiredSentence("plan", false)).toBe(SAFETY_SENTENCES.plan);
+    expect(requiredSentence("write", true)).toBe(SAFETY_SENTENCES.destructiveWrite);
+    expect(requiredSentence("write", false)).toBe(SAFETY_SENTENCES.additiveWrite);
+  });
+});
 
 describe("tool contract", () => {
   it("registers at least one tool", () => {

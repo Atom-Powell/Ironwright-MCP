@@ -36,6 +36,9 @@ describe("write gate over the wire", () => {
   it("does not advertise write tools when writes are disabled", async () => {
     const names = await listToolNames(await startServer(false));
 
+    // The count, not only the names: a write tool that slipped through under a
+    // name nobody thought to assert on would pass every check below.
+    expect(names).toHaveLength(7);
     expect(names).toContain("reconcile_workbook_vs_repository");
     expect(names).toContain("generate_rename_plan");
     expect(names).not.toContain("execute_rename_plan");
@@ -78,6 +81,7 @@ describe("write gate over the wire", () => {
   it("advertises write tools when writes are enabled", async () => {
     const names = await listToolNames(await startServer(true));
 
+    expect(names).toHaveLength(10);
     expect(names).toContain("execute_rename_plan");
     expect(names).toContain("execute_move_plan");
     expect(names).toContain("replicate_template");

@@ -18,6 +18,27 @@ describe("selectTools", () => {
   });
 });
 
+describe("loadConfig port", () => {
+  it("defaults to 3000 when PORT is absent", () => {
+    expect(loadConfig({}).port).toBe(3000);
+  });
+
+  it("reads a valid PORT", () => {
+    expect(loadConfig({ PORT: "8080" }).port).toBe(8080);
+  });
+
+  it.each(["3000abc", "3000 ", " 3000", "80.5", "0x1f", "", "eighty"])(
+    "rejects the malformed port %j rather than reading a number out of the front of it",
+    (value) => {
+      expect(() => loadConfig({ PORT: value })).toThrow(/PORT/);
+    },
+  );
+
+  it.each(["0", "65536", "-1"])("rejects the out-of-range port %j", (value) => {
+    expect(() => loadConfig({ PORT: value })).toThrow(/PORT/);
+  });
+});
+
 describe("loadConfig write gate", () => {
   it("disables writes when the variable is absent", () => {
     expect(loadConfig({}).allowWrites).toBe(false);

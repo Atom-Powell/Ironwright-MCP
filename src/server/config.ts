@@ -11,7 +11,10 @@ export interface ServerConfig {
  */
 export function loadConfig(env: NodeJS.ProcessEnv): ServerConfig {
   const rawPort = env.PORT ?? "3000";
-  const port = Number.parseInt(rawPort, 10);
+  // Matched before parsing, because parseInt stops at the first character it
+  // cannot read: "3000abc" would otherwise start a server on 3000 and give an
+  // operator no sign that the value they set was wrong.
+  const port = /^\d+$/.test(rawPort) ? Number.parseInt(rawPort, 10) : Number.NaN;
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
     throw new Error(`PORT must be an integer between 1 and 65535, received "${rawPort}"`);
   }

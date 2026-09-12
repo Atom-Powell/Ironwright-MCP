@@ -30,6 +30,8 @@ npm run setup -- --tenant=<tenant-id> --site=https://<tenant>.sharepoint.com/sit
 
 Omit `--write` to grant read only site access, which is the right choice for a deployment that will never run remediation.
 
+Setup runs from a development install, which is what a plain `npm install` in a clone gives you. It is the only thing in this repository that needs `@azure/identity`, and that package pulls in an interactive authentication stack that has no business inside a container holding bulk write credentials, so it is a development dependency along with the TypeScript runner the command is launched with. A production install made with `--omit=dev` runs the server and not this command.
+
 The command signs you in with a device code, then runs the sequence above under your own token. Verification is the part worth keeping. It uses a token minted for the new app rather than yours, because an administrator's token can read the site whether or not any of this worked, so verifying with your own credentials would report success against a server that cannot actually run.
 
 ## The device code sign in and its client id
