@@ -12,10 +12,32 @@ the application and its service principal were created, and the Microsoft Graph 
 assignment (the admin-consent step) completed. Rollback then deleted the registration and left
 no secret behind, which is the first live confirmation that the rollback works.
 
-One cause remains to be excluded before this is final: whether the signed-in account held
-SharePoint Administrator or site owner rights on the target site. If it did, the documented
-application-permission-only restriction is confirmed and the bootstrap redesign below is
-required.
+**Confirmed 2026-09-12.** The signed-in account was Global Administrator on that tenant and
+site, which removes the insufficient-rights explanation. The documented
+application-permission-only restriction holds, and the bootstrap redesign below is required
+before the setup command can complete.
+
+The bootstrap carries a tradeoff that needs an explicit decision rather than an assumption.
+Granting the new application `Sites.FullControl.All`, minting its app-only token, having it
+issue its own per-site grant, and then removing the role assignment does reach the right
+steady state: the application ends holding only `Sites.Selected` plus one site grant. But
+removing a role assignment does not revoke an already-issued token, so for the remainder of
+that token's lifetime, roughly an hour, a credential with tenant-wide full control over every
+SharePoint site exists. It never leaves the setup process and is never written down, but it
+exists, and this project's whole security posture is built on refusing exactly that grant.
+
+Three options, none obviously correct:
+
+1. Accept the bootstrap and its token window, documenting it plainly. Fully scripted.
+2. Keep the command as it is through the app registration, consent, and service principal, and
+   have the operator issue the one per-site grant themselves with a documented command. This
+   reintroduces a manual step, though only one, and the command still removes the other five.
+3. Have the operator pre-create a separate, long-lived bootstrap application that holds
+   `Sites.FullControl.All` permanently and is used only for issuing grants. Moves the standing
+   privilege into an app whose only job is grants, rather than into the server's own identity.
+
+Option 3 is worth a hard look: it keeps the server's identity clean, makes the privileged
+thing small and auditable, and is a one-time setup per tenant rather than per run.
 
 A defect in our own diagnostic surfaced here. The 403 message lists directory-role causes and
 never mentions that the endpoint may not accept a delegated token at all, which was already
