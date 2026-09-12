@@ -35,11 +35,20 @@ export interface SetupHooks {
   sleep?: (ms: number) => Promise<void>;
 }
 
+/**
+ * Whether the run could prove the new application can reach the site. An
+ * unconfirmed run is not a failed one: it leaves a live application and a live
+ * grant behind, so the caller has to print the credentials and say plainly that
+ * something was left in the tenant.
+ */
+export type VerificationResult = { confirmed: true } | { confirmed: false; message: string };
+
 export interface SetupResult {
   appId: string;
   objectId: string;
   secret: string;
   siteId: string;
+  verification: VerificationResult;
 }
 
 interface PartialSetup {
@@ -217,9 +226,21 @@ export async function runSetup(graph: SetupGraph, args: SetupArgs, hooks: SetupH
       sitesSelectedRolePresent:
         verification.appRoles === undefined ? undefined : verification.appRoles.includes(SITES_SELECTED_ROLE_CLAIM),
     });
+    // A refusal from a token that carries the role is the one failed
+    // verification that must not roll back. It says the application permission
+    // is consented and the per-site grant this run issued seconds ago exists,
+    // so the configuration is correct and Entra has not caught up. Deleting a
+    // correct application and a correct grant over that timing artifact
+    // destroys work that is right and makes the next attempt start over, which
+    // is a worse outcome than reporting an unconfirmed success. Every other
+    // failure still rolls back, because in every other case what was created is
+    // either wrong or unprovable.
+    if (!outcome.ok && outcome.reason === "role-present-refused") {
+      return { appId, objectId, secret: secretText, siteId, verification: { confirmed: false, message: outcome.message } };
+    }
     if (!outcome.ok) throw new SetupFailedError(outcome);
 
-    return { appId, objectId, secret: secretText, siteId };
+    return { appId, objectId, secret: secretText, siteId, verification: { confirmed: true } };
   } catch (error) {
     await rollback(graph, { objectId, appId, siteId, sitePermissionId, sitePermissionAttempted }, notice);
     throw error;

@@ -79,11 +79,15 @@ describe("acquireTokenWithRetry failures", () => {
 describe("describeSetupFailure", () => {
   it("reports a verification failure as the setup failing, with its own message", () => {
     const message = describeSetupFailure(
-      new SetupFailedError({ ok: false, reason: "grant-missing", message: "the per-site grant is missing" }),
+      new SetupFailedError({
+        ok: false,
+        reason: "permission-not-consented",
+        message: "the application permission is not in effect",
+      }),
     );
 
     expect(message).toContain("Setup failed");
-    expect(message).toContain("the per-site grant is missing");
+    expect(message).toContain("the application permission is not in effect");
   });
 
   it("names the directory role behind a refused app registration", () => {

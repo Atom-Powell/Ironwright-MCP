@@ -167,7 +167,8 @@ token for the calls this command makes on their behalf.
 
 ## Output
 
-The normal run prints four values when it succeeds:
+The normal run prints four values when it succeeds, and the same four when it finishes without
+being able to confirm access:
 
 - `AZURE_TENANT_ID`
 - `AZURE_CLIENT_ID`
@@ -185,7 +186,13 @@ site permission granted here.
 
 ## What a failed run leaves behind
 
-Nothing, if the rollback succeeds. A failed normal run that got as far as creating the app
+Nothing, if the rollback succeeds, with one deliberate exception described in the next
+section: a run whose verification call is refused by a token that does carry the
+`Sites.Selected` role keeps everything it made, because that combination means the
+configuration is right and the directory has not caught up. That run prints its four values
+and says plainly that an application and a grant are now live in the tenant.
+
+Every other failure rolls back. A failed normal run that got as far as creating the app
 registration deletes it again, along with the site permission if one was granted by then.
 Deleting the registration also removes its service principal and the client secret held on it,
 so a failed attempt does not leave a working credential in the tenant. A failed
@@ -203,20 +210,34 @@ The normal run maps a failed verification call to a cause rather than passing th
 through, because the causes do not read the way you would expect.
 
 A 403 has two possible causes and they need opposite fixes, so the command tells them apart by
-reading the roles claim of the token it just used to verify. A token carrying no
-`Sites.Selected` role means the application permission was never admin-consented, which needs a
-Privileged Role Administrator or Global Administrator rather than another run of this command.
-A token that carries the role and is still refused does not mean the per-site grant is absent:
-this command already issued that grant moments earlier using the bootstrap application's token,
-so the likelier explanation is that the grant has not propagated to this site yet. Wait and
-check again before assuming anything failed. If it is still refused afterward, confirm with
-`GET /sites/{site-id}/permissions` whether an entry for this app exists on this site at all;
-if it does not, or names a different site, an administrator has to issue it directly with
-`POST /sites/{site-id}/permissions` using the bootstrap application's own token.
+reading the roles claim of the token it just used to verify.
+
+A token that carries the `Sites.Selected` role and is still refused is the case the command
+treats as a success it could not confirm. The role proves the application permission is in
+effect, and the command issued the per-site grant itself moments earlier, so the configuration
+is correct and the likeliest remaining explanation is that the grant has not propagated to this
+site yet. Destroying a correct application and a correct grant over that is the wrong response,
+so the command keeps both, prints the four values exactly as a confirmed run does, and says
+that access could not be confirmed yet. Nothing needs creating again. Wait a short while and
+try the app's own access again, and if it is still refused, check
+`GET /sites/{site-id}/permissions` for an entry naming this app; if none is there an
+administrator can issue one with `POST /sites/{site-id}/permissions` using the bootstrap
+application's own token.
+
+A token carrying no `Sites.Selected` role means the application permission is not in effect.
+That run rolls back, so there is nothing left in the tenant to consent to afterward. The role
+assignment the command makes is itself the consent, and reaching verification means that call
+already succeeded, so the likeliest cause is that the assignment had not reached a newly issued
+token yet. Wait a minute and run the command again. A second attempt that fails the same way
+means the assignment is not taking effect, which needs a Privileged Role Administrator or
+Global Administrator.
+
+A token that could not be read leaves both causes open, and that run rolls back too.
 
 A 401 means the credentials are wrong. A 404 means the site URL is wrong. Anything else is
 printed with the full response body from Graph, since it does not match a cause this command
 already recognizes.
 
-Re-running the command is not a repair. It creates a second app registration with a second
-secret rather than fixing the first one.
+Running the command again after a rollback is how you retry, since the rollback left nothing
+behind. Running it again after a run that kept its application is not a repair: it would create
+a second app registration with a second secret rather than fixing the first one.

@@ -73,7 +73,13 @@ describe("runSetup", () => {
       "grantSitePermission:site-1:write",
       "verifyAppAccess",
     ]);
-    expect(result).toEqual({ appId: "app-1", objectId: "object-1", secret: "secret-1", siteId: "site-1" });
+    expect(result).toEqual({
+      appId: "app-1",
+      objectId: "object-1",
+      secret: "secret-1",
+      siteId: "site-1",
+      verification: { confirmed: true },
+    });
   });
 
   it("requests the Sites.Selected application permission on the registration itself, using the looked-up id", async () => {

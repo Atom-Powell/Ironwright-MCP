@@ -144,7 +144,24 @@ async function main(): Promise<void> {
     { onNotice: (message) => console.error(message) },
   );
 
-  console.log("Setup complete. Store these as deployment secrets, not in the repository.");
+  // An unconfirmed verification prints the credentials exactly as a success
+  // does, because the application and its grant are live either way and the
+  // secret is shown once. What changes is that the operator has to be told a
+  // run that could not confirm access still left both behind, since
+  // docs/SETUP.md's older promise was that a run either succeeds or leaves
+  // nothing. The exit code stays zero for the same reason the credentials are
+  // printed: something real exists now and a wrapper that discards the output
+  // of a failed run would throw away the only copy of the secret.
+  if (result.verification.confirmed) {
+    console.log("Setup complete. Store these as deployment secrets, not in the repository.");
+  } else {
+    console.log(
+      "Setup finished without confirming access. It kept what it created: the app registration, its client " +
+        "secret, and the per-site permission grant are all live in this tenant now, and no second run is needed.",
+    );
+    console.log(result.verification.message);
+    console.log("Store these as deployment secrets, not in the repository.");
+  }
   console.log(`  AZURE_TENANT_ID=${tenantId}`);
   console.log(`  AZURE_CLIENT_ID=${result.appId}`);
   console.log(`  AZURE_CLIENT_SECRET=${result.secret}`);

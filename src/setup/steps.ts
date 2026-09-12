@@ -72,7 +72,13 @@ export type VerificationOutcome =
       ok: false;
       reason:
         | "permission-not-consented"
-        | "grant-missing"
+        // Named for the evidence rather than for a cause, because the cause is
+        // exactly what this case cannot establish: the token proves the role is
+        // there and the run issued the grant itself, so the refusal says only
+        // that access could not be confirmed yet. The former name,
+        // "grant-missing", asserted a cause that the message beneath it had
+        // already stopped claiming.
+        | "role-present-refused"
         | "cause-undetermined"
         | "token"
         | "not-found"
@@ -193,40 +199,61 @@ export function assertBootstrapToken(token: string): void {
   }
 }
 
+// Written for a run that rolled back, which is what a missing role on the
+// verification token produces. Nothing this run created still exists, so the
+// remedy cannot send the operator to the portal to consent a registration that
+// was deleted seconds earlier. It also does not claim consent was never
+// granted: this command performs the role assignment itself, and reaching
+// verification at all means that call succeeded, so an assignment that has not
+// yet surfaced in a freshly issued token is the likelier reading of the
+// evidence.
 const CONSENT_REMEDY =
-  "Grant admin consent for Microsoft Graph's Sites.Selected application permission to this app registration. " +
-  "A Privileged Role Administrator or Global Administrator has to do that, because the Application Administrator " +
-  "role can consent to every API except Microsoft Graph. An assignment made moments ago can also take a short " +
-  "time to appear in a newly issued token.";
+  "This run rolled back everything it created, so no registration, secret, or grant is left behind and there is " +
+  "nothing in the tenant to consent to now. The role assignment this run made is itself what grants that consent, " +
+  "so the likeliest cause is that it had not reached a newly issued token yet; wait a minute and run this command " +
+  "again. If a second attempt fails the same way, the assignment is not taking effect: granting admin consent for " +
+  "a Microsoft Graph application permission needs Privileged Role Administrator or Global Administrator, because " +
+  "the Application Administrator role can consent to every API except Microsoft Graph.";
 
-// Written for the bootstrap flow, where this command itself just issued the
-// per-site grant with the bootstrap application's token. A 403 with the role
-// present therefore does not mean the grant was never requested; it means
-// either that request has not propagated yet, or it landed somewhere other
-// than this site. Both causes get an action, not just a diagnosis: a message
-// that names a cause and leaves the operator nowhere to go for it is the same
-// defect this remedy exists to remove. Re-running the command is never
-// suggested, here or in CONSENT_REMEDY, because it registers a second
-// application rather than repairing this one.
+// Written for a run that kept what it created, which is what a 403 from a
+// token carrying the role produces. The role proves the application permission
+// is in effect and this command issued the per-site grant itself moments
+// earlier, so the configuration is correct and only Entra is behind. Telling
+// the operator to inspect or re-issue the grant would name objects that are
+// still there, which is the point of keeping them.
 const GRANT_REMEDY =
-  "This command already issued the per-site grant moments ago, so a 403 here has one of two causes. The likelier " +
-  "one is that the grant has not propagated to this site yet: wait a short while and check access again before " +
-  "assuming anything failed. If it is still refused afterward, confirm with GET /sites/{site-id}/permissions " +
-  "whether an entry for this app actually exists on this site; if it does not, or names a different site, an " +
-  "administrator has to issue it directly with POST /sites/{site-id}/permissions using the bootstrap application's " +
-  "own token, naming the app id reported above. Running this command again will not fix either cause: it creates a " +
-  "second, separate application registration instead of repairing this one.";
+  "The application and its per-site grant were kept, not rolled back: the token shows the configuration is " +
+  "correct, so nothing here needs creating again. This command issued the per-site grant moments ago, so the " +
+  "likeliest cause is that the grant has not propagated to this site yet. Wait a short while and try the app's " +
+  "own access again. If it is still refused, check GET /sites/{site-id}/permissions for an entry naming this app, " +
+  "and if none is there an administrator can issue one with POST /sites/{site-id}/permissions using the bootstrap " +
+  "application's own token.";
+
+// A separate message rather than the two above concatenated. They now describe
+// opposite outcomes, one for a run that kept its application and one for a run
+// that rolled back, so joining them would tell the operator both at once. This
+// case rolls back, and its own honest content is short.
+const UNDETERMINED_CAUSE_MESSAGE =
+  "The app was denied access and its token could not be read, so neither cause can be ruled out. This run rolled " +
+  "back everything it created, so nothing it made is left in the tenant to inspect. Confirm that Microsoft " +
+  "Graph's Sites.Selected application permission is admin-consented for this tenant, which needs a Privileged " +
+  "Role Administrator or Global Administrator because the Application Administrator role can consent to every " +
+  "API except Microsoft Graph, then run this command again. An attempt whose token can be read will name which " +
+  "of the two causes applies.";
 
 /**
  * Sites.Selected produces two different 403s with two different remedies, and
  * telling them apart is the reason this command exists rather than another app
  * registration walkthrough. A token with no Sites.Selected role means the
- * application permission was never admin-consented. A token that carries the
- * role and is still refused means the per-site grant this command already
- * issued has not taken effect on this site, either because it has not
- * propagated yet or because it landed on a different site; it does not mean
- * the grant is absent. Neither cause is fixed by re-running this command,
- * which would create a second registration, so neither message suggests it.
+ * application permission is not in effect. A token that carries the role and is
+ * still refused means the configuration is right and access could not be
+ * confirmed yet; it does not mean the grant is absent.
+ *
+ * Each message also has to match what the run does with that outcome, which is
+ * not the same for both: the role-present case keeps its application and grant,
+ * and every other case rolls back. A remedy that names an object the run just
+ * deleted is the defect these messages exist to avoid, so they are written per
+ * outcome rather than assembled from shared fragments.
  */
 export function interpretVerification(
   status: number,
@@ -240,24 +267,24 @@ export function interpretVerification(
       return {
         ok: false,
         reason: "permission-not-consented",
-        message: `The app was denied access, and its token carries no Sites.Selected role, so the application permission itself is not consented in this tenant. ${CONSENT_REMEDY}`,
+        message: `The app was denied access, and its token carries no Sites.Selected role, so the application permission is not in effect in this tenant yet. ${CONSENT_REMEDY}`,
       };
     }
 
     if (evidence.sitesSelectedRolePresent === true) {
       return {
         ok: false,
-        reason: "grant-missing",
-        message: `The app was denied access even though its token carries the Sites.Selected role, so the application permission is consented and the per-site grant has not taken effect on this site yet. ${GRANT_REMEDY}`,
+        reason: "role-present-refused",
+        message: `The app was denied access even though its token carries the Sites.Selected role, so the application permission is consented and the app's access could not be confirmed yet. ${GRANT_REMEDY}`,
       };
     }
 
-    // Labeled for what it is. Reporting this as grant-missing would be the same
-    // confident wrong answer the old diagnostic gave, one layer down.
+    // Labeled for what it is. Reporting this as a specific cause would be the
+    // same confident wrong answer the old diagnostic gave, one layer down.
     return {
       ok: false,
       reason: "cause-undetermined",
-      message: `The app was denied access and its token could not be read, so both causes are still open. Check the application permission first: ${CONSENT_REMEDY} If the role is present, an unpropagated or misdirected per-site grant is the remaining cause, not an absent one. ${GRANT_REMEDY}`,
+      message: UNDETERMINED_CAUSE_MESSAGE,
     };
   }
 

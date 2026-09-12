@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SetupGraph } from "../../src/setup/adapter.js";
+import type { SetupResult } from "../../src/setup/run.js";
 import { SetupFailedError, runSetup } from "../../src/setup/run.js";
 import { SITES_SELECTED_ROLE_CLAIM } from "../../src/setup/steps.js";
 
@@ -61,12 +62,15 @@ describe("runSetup verification diagnostics", () => {
     );
   });
 
-  it("blames the per-site grant only when the application permission is demonstrably consented", async () => {
+  it("names propagation, not a missing grant, when the application permission is demonstrably consented", async () => {
     const fake = fakeGraph({
       verifyAppAccess: async () => ({ status: 403, body: "{}", appRoles: [SITES_SELECTED_ROLE_CLAIM] }),
     });
 
-    await expect(run(fake)).rejects.toThrow(/propagat/);
+    const result = (await run(fake)) as SetupResult;
+
+    if (result.verification.confirmed) throw new Error("expected an unconfirmed verification");
+    expect(result.verification.message).toMatch(/propagat/);
   });
 
   it("surfaces a credential problem separately from a permission problem", async () => {
@@ -104,7 +108,13 @@ describe("runSetup service principal replication lag", () => {
 
     expect(attempts).toBe(2);
     expect(slept).toEqual([3000]);
-    expect(result).toEqual({ appId: "app-1", objectId: "object-1", secret: "secret-1", siteId: "site-1" });
+    expect(result).toEqual({
+      appId: "app-1",
+      objectId: "object-1",
+      secret: "secret-1",
+      siteId: "site-1",
+      verification: { confirmed: true },
+    });
   });
 
   it("does not retry a failure that is not the replication-lag error code", async () => {
@@ -229,5 +239,87 @@ describe("runSetup rollback", () => {
 
     await expect(run(fake)).rejects.toThrow(SetupFailedError);
     expect(fake.notices.join("\n")).toMatch(/rolled back/i);
+  });
+});
+
+describe("runSetup verification failure outcomes match what the run actually did", () => {
+  // The defect these pin: every remedy used to tell the operator to act on
+  // objects the run had already deleted, and the whole-string pins in
+  // steps.errors.test.ts could not catch that because nothing asserted the
+  // message alongside the rollback behavior that produced it.
+  const cases: {
+    name: string;
+    appRoles: string[] | undefined;
+    keepsApplication: boolean;
+    claims: RegExp;
+    forbids: RegExp;
+  }[] = [
+    {
+      name: "a token that carries the role",
+      appRoles: [SITES_SELECTED_ROLE_CLAIM],
+      keepsApplication: true,
+      claims: /kept, not rolled back/,
+      forbids: /rolled back everything it created/,
+    },
+    {
+      name: "a token that carries no roles",
+      appRoles: [],
+      keepsApplication: false,
+      claims: /rolled back everything it created/,
+      forbids: /kept, not rolled back/,
+    },
+    {
+      name: "a token that could not be read",
+      appRoles: undefined,
+      keepsApplication: false,
+      claims: /rolled back everything it created/,
+      forbids: /kept, not rolled back/,
+    },
+  ];
+
+  it.each(cases)("$name", async ({ appRoles, keepsApplication, claims, forbids }) => {
+    const fake = fakeGraph({ verifyAppAccess: async () => ({ status: 403, body: "{}", appRoles }) });
+
+    let message: string;
+    if (keepsApplication) {
+      const result = (await run(fake)) as SetupResult;
+      if (result.verification.confirmed) throw new Error("expected an unconfirmed verification");
+      message = result.verification.message;
+    } else {
+      let caught: unknown;
+      try {
+        await run(fake);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(SetupFailedError);
+      message = (caught as Error).message;
+    }
+
+    const deleted = fake.calls.filter((call) => call.startsWith("delete"));
+    expect(deleted.length > 0).toBe(!keepsApplication);
+    expect(message).toMatch(claims);
+    expect(message).not.toMatch(forbids);
+  });
+
+  it("returns the credentials, not an error, when the role is present and access is unconfirmed", async () => {
+    const fake = fakeGraph({
+      verifyAppAccess: async () => ({ status: 403, body: "{}", appRoles: [SITES_SELECTED_ROLE_CLAIM] }),
+    });
+
+    const result = (await run(fake)) as SetupResult;
+
+    expect(result.appId).toBe("app-1");
+    expect(result.secret).toBe("secret-1");
+    expect(result.siteId).toBe("site-1");
+    expect(fake.calls).toEqual(["createApplication"]);
+  });
+
+  it("reports a confirmed verification on a successful run, so the caller can tell the two apart", async () => {
+    const fake = fakeGraph();
+
+    const result = (await run(fake)) as SetupResult;
+
+    expect(result.verification).toEqual({ confirmed: true });
   });
 });
