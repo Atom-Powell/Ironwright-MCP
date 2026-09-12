@@ -364,6 +364,12 @@ document settles, and omits `describe_workbook` from its tool table.
 
 ## Watch items
 
+Phase 1's reviews left open questions and carried-forward risks that later phases must read.
+They are recorded in `docs/PHASE-1-FOLLOW-UPS.md`. Three of them require a decision before
+phase 2 begins: whether the per-site grant accepts a delegated token, which delegated scopes
+the setup sign-in must request, and how the MCP endpoint authenticates callers.
+
+
 If Microsoft ships first-party reconciliation or batch tree inventory in Work IQ, the correct
 response is to shrink this server's surface to the reconciliation delta rather than compete on
 primitives.
