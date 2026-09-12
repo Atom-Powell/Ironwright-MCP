@@ -214,4 +214,113 @@ describe("token routing", () => {
     expect(calls[1]?.url).toContain("/sites/site-1/permissions");
     expect(calls[1]?.authorization).toBe("Bearer BOOTSTRAP");
   });
+
+  // Table-driven over every SetupGraph method, not just the two exercised
+  // above: five of them (createApplication, addPassword,
+  // createServicePrincipal, resolveServicePrincipal, grantAppRole) had no
+  // authorization assertion at all, so misrouting one to the bootstrap or app
+  // token would have passed the suite. This closes that gap for the current
+  // ten methods and for any added later.
+  const ADMIN = "ADMIN-TOKEN";
+  const BOOTSTRAP = "BOOTSTRAP-TOKEN";
+  const APP = "APP-TOKEN";
+
+  function tokenRoutingGraph(): ReturnType<typeof createFetchSetupGraph> {
+    return createFetchSetupGraph({
+      adminToken: ADMIN,
+      acquireAppToken: async () => APP,
+      acquireBootstrapToken: async () => BOOTSTRAP,
+    });
+  }
+
+  const authorizationCases: {
+    name: string;
+    token: string;
+    status: number;
+    body: string;
+    call: (graph: ReturnType<typeof createFetchSetupGraph>) => Promise<unknown>;
+  }[] = [
+    {
+      name: "resolveSite",
+      token: ADMIN,
+      status: 200,
+      body: JSON.stringify({ id: "site-1" }),
+      call: (g) => g.resolveSite("host:/sites/x"),
+    },
+    {
+      name: "createApplication",
+      token: ADMIN,
+      status: 201,
+      body: JSON.stringify({ id: "object-1", appId: "app-1" }),
+      call: (g) => g.createApplication(buildAppRegistrationRequest("App", "role-1")),
+    },
+    {
+      name: "addPassword",
+      token: ADMIN,
+      status: 200,
+      body: JSON.stringify({ secretText: "secret-1" }),
+      call: (g) => g.addPassword("object-1"),
+    },
+    {
+      name: "createServicePrincipal",
+      token: ADMIN,
+      status: 201,
+      body: JSON.stringify({ id: "sp-1" }),
+      call: (g) => g.createServicePrincipal("app-1"),
+    },
+    {
+      name: "resolveServicePrincipal",
+      token: ADMIN,
+      status: 200,
+      body: JSON.stringify({ id: "graph-sp-1", appRoles: [] }),
+      call: (g) => g.resolveServicePrincipal("00000003-0000-0000-c000-000000000000"),
+    },
+    {
+      name: "grantAppRole",
+      token: ADMIN,
+      status: 201,
+      body: "{}",
+      call: (g) =>
+        g.grantAppRole(
+          buildAppRoleAssignmentRequest({ principalId: "sp-1", resourceId: "graph-sp-1", appRoleId: "role-1" }),
+        ),
+    },
+    {
+      name: "grantSitePermission",
+      token: BOOTSTRAP,
+      status: 201,
+      body: JSON.stringify({ id: "permission-1" }),
+      call: (g) =>
+        g.grantSitePermission("site-1", buildSitePermissionRequest({ appId: "app-1", appDisplayName: "App", write: true })),
+    },
+    {
+      name: "verifyAppAccess",
+      token: APP,
+      status: 200,
+      body: '{"id":"drive-1"}',
+      call: (g) => g.verifyAppAccess({ appId: "app-1", secret: "secret-1", siteId: "site-1" }),
+    },
+    {
+      name: "deleteSitePermission",
+      token: BOOTSTRAP,
+      status: 204,
+      body: "",
+      call: (g) => g.deleteSitePermission("site-1", "permission-1"),
+    },
+    {
+      name: "deleteApplication",
+      token: ADMIN,
+      status: 204,
+      body: "",
+      call: (g) => g.deleteApplication("object-1"),
+    },
+  ];
+
+  it.each(authorizationCases)("uses the expected token for $name", async ({ token, status, body, call }) => {
+    const calls = stubFetch([{ status, body }]);
+
+    await call(tokenRoutingGraph());
+
+    expect(calls[0]?.authorization).toBe(`Bearer ${token}`);
+  });
 });

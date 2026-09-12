@@ -56,7 +56,7 @@ describe("runCreateBootstrap", () => {
     // the task brief's original sketch): buildAppRegistrationRequest needs the
     // real Sites.FullControl.All app role id at creation time, the same way
     // runSetup resolves Graph's service principal before registering its own
-    // application. See task-4-report.md for why this reorders the brief's array.
+    // application.
     expect(calls).toEqual([
       "resolveServicePrincipal",
       "createApplication:Ironwright Grant Issuer",
@@ -66,6 +66,7 @@ describe("runCreateBootstrap", () => {
     ]);
     expect(calls).not.toContain("resolveSite");
     expect(calls).not.toContain("grantSitePermission");
+    expect(calls).not.toContain("verifyAppAccess");
     expect(result).toEqual({ appId: "app-1", objectId: "obj-1", secret: "secret-1" });
   });
 });

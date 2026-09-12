@@ -63,4 +63,28 @@ describe("runCreateBootstrap rollback", () => {
     );
     expect(calls).toEqual(["createApplication", "deleteApplication:obj-1"]);
   });
+
+  it("attempts no rollback when Graph's service principal cannot be resolved", async () => {
+    const { graph, calls } = fakeGraph({
+      resolveServicePrincipal: async () => {
+        throw new Error("Graph GET /servicePrincipals(appId='...') failed with 404: Request_ResourceNotFound");
+      },
+    });
+
+    await expect(runCreateBootstrap(graph, { displayName: "Ironwright Grant Issuer" })).rejects.toThrow(
+      /Request_ResourceNotFound/,
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it("attempts no rollback when Graph does not publish the requested app role", async () => {
+    const { graph, calls } = fakeGraph({
+      resolveServicePrincipal: async () => ({ objectId: "graph-sp", appRoles: [] }),
+    });
+
+    await expect(runCreateBootstrap(graph, { displayName: "Ironwright Grant Issuer" })).rejects.toThrow(
+      /Sites\.FullControl\.All/,
+    );
+    expect(calls).toEqual([]);
+  });
 });
