@@ -128,6 +128,9 @@ dist/
 coverage/
 *.log
 
+# Scratch space for plan-execution artifacts (briefs, reports, review packages).
+.superpowers/
+
 # Profiles carry real site IDs, client names, and workbook paths. They are
 # deployment configuration and never belong in this repository. The synthetic
 # example under examples/profiles/ is the only committed profile.
@@ -161,6 +164,13 @@ import tseslint from "typescript-eslint";
 export default tseslint.config(
   { ignores: ["dist/**", "coverage/**", "node_modules/**"] },
   ...tseslint.configs.recommended,
+  {
+    rules: {
+      // Underscore-prefixed parameters are deliberate placeholders: a signature
+      // fixed early so later tasks do not have to touch every call site.
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+    },
+  },
   {
     files: ["src/domain/**/*.ts"],
     rules: {
@@ -1156,20 +1166,20 @@ describe("tool contract", () => {
     expect(ALL_TOOLS.length).toBeGreaterThan(0);
   });
 
-  it.each(ALL_TOOLS.map((tool) => [tool.name, tool] as const))("%s uses snake_case", (_name, tool) => {
+  it.each(ALL_TOOLS)("$name uses snake_case", (tool) => {
     expect(tool.name).toMatch(/^[a-z][a-z0-9_]*$/);
   });
 
-  it.each(ALL_TOOLS.map((tool) => [tool.name, tool] as const))("%s sets all four annotations", (_name, tool) => {
+  it.each(ALL_TOOLS)("$name sets all four annotations", (tool) => {
     expect(typeof tool.annotations.readOnlyHint).toBe("boolean");
     expect(typeof tool.annotations.destructiveHint).toBe("boolean");
     expect(typeof tool.annotations.idempotentHint).toBe("boolean");
     expect(typeof tool.annotations.openWorldHint).toBe("boolean");
   });
 
-  it.each(ALL_TOOLS.map((tool) => [tool.name, tool] as const))(
-    "%s has annotations consistent with its kind",
-    (_name, tool) => {
+  it.each(ALL_TOOLS)(
+    "$name has annotations consistent with its kind",
+    (tool) => {
       if (tool.kind === "read") {
         expect(tool.annotations.readOnlyHint).toBe(true);
         expect(tool.annotations.destructiveHint).toBe(false);
@@ -1182,9 +1192,9 @@ describe("tool contract", () => {
     },
   );
 
-  it.each(ALL_TOOLS.map((tool) => [tool.name, tool] as const))(
-    "%s states its safety status in the description prose",
-    (_name, tool) => {
+  it.each(ALL_TOOLS)(
+    "$name states its safety status in the description prose",
+    (tool) => {
       // An automated survey of 856 published MCP tools found 97 percent had at
       // least one description defect, most commonly not stating read-only or
       // destructive status. A name implying safety is not a description saying it.
@@ -1192,13 +1202,13 @@ describe("tool contract", () => {
     },
   );
 
-  it.each(ALL_TOOLS.map((tool) => [tool.name, tool] as const))("%s declares an output schema", (_name, tool) => {
+  it.each(ALL_TOOLS)("$name declares an output schema", (tool) => {
     expect(Object.keys(tool.outputSchema).length).toBeGreaterThan(0);
   });
 
-  it.each(ALL_TOOLS.map((tool) => [tool.name, tool] as const))(
-    "%s describes every input field with an example",
-    (_name, tool) => {
+  it.each(ALL_TOOLS)(
+    "$name describes every input field with an example",
+    (tool) => {
       for (const [field, schema] of Object.entries(tool.inputSchema)) {
         const description = schema.description;
         expect(description, `${tool.name}.${field} has no description`).toBeDefined();
@@ -1290,7 +1300,7 @@ export const STUB_OUTPUT_SCHEMA = {
   message: z
     .string()
     .describe("Note explaining that the tool is registered but not implemented, for example \"inventory_tree is not implemented yet\"."),
-} as const;
+} satisfies z.ZodRawShape;
 ```
 
 `src/tools/registry.ts`:
