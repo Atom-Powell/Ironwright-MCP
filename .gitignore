@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+*.log
+
+# Scratch space for plan-execution artifacts (briefs, reports, review packages).
+.superpowers/
+
+# Profiles carry real site IDs, client names, and workbook paths. They are
+# deployment configuration and never belong in this repository. The synthetic
+# example under examples/profiles/ is the only committed profile.
+/profiles/
+
+.env
+.env.*
