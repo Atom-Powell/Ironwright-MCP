@@ -5,6 +5,7 @@ import {
   describeSetupFailure,
   describeSignInFailure,
   extractAccessToken,
+  once,
   parseArgs,
 } from "./cli.js";
 import { runCreateBootstrap, runSetup } from "./run.js";
@@ -54,7 +55,11 @@ async function main(): Promise<void> {
   const parsed = parseArgs(process.argv);
   const { tenantId, siteUrl, displayName, write, clientId } = parsed;
 
-  const acquireBootstrapToken = async (): Promise<string> => {
+  // Minted at most once per run. The preflight below needs this token only to
+  // read its roles claim, and the per-site grant and that grant's rollback
+  // delete both need one too, so without this a normal run would issue three
+  // separate tenant-wide-privileged tokens where one does the whole job.
+  const acquireBootstrapToken = once(async (): Promise<string> => {
     if (parsed.bootstrap === undefined) {
       throw new Error(
         "No bootstrap credentials. Set IW_BOOTSTRAP_CLIENT_ID and IW_BOOTSTRAP_CLIENT_SECRET, or run this command once with --create-bootstrap to create the grant-issuing application. See docs/SETUP.md.",
@@ -66,7 +71,7 @@ async function main(): Promise<void> {
       parsed.bootstrap.clientSecret,
       "The bootstrap application's credentials were rejected",
     );
-  };
+  });
 
   // Checked before the interactive device-code sign-in below, not merely before
   // runSetup, so a forgotten or mistyped bootstrap credential fails in about a

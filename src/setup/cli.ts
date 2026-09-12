@@ -169,6 +169,25 @@ export async function acquireTokenWithRetry(
 }
 
 /**
+ * Wraps an async factory so it runs at most one time per process. Used for the
+ * bootstrap application's token, which the preflight, the per-site grant, and
+ * that grant's rollback delete all need: minting it once takes a normal run
+ * from three tenant-wide-privileged tokens down to one, and the fewer of those
+ * that exist, the less there is to leak or to have to reason about. There is no
+ * lifetime here on purpose. A run lasts seconds and a token lasts an hour, so a
+ * cache with an expiry would be machinery for a case that cannot arise.
+ */
+export function once<T>(factory: () => Promise<T>): () => Promise<T> {
+  let pending: Promise<T> | undefined;
+  return () => {
+    // The promise is stored, not the resolved value, so callers that overlap
+    // share one acquisition rather than starting a second.
+    pending ??= factory();
+    return pending;
+  };
+}
+
+/**
  * A failed or cancelled device-code sign-in is the one failure mode this
  * project's own documentation calls out by name: a tenant's Conditional
  * Access policy blocking the default client id. Naming the --client-id

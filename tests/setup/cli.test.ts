@@ -4,6 +4,7 @@ import {
   acquireTokenWithRetry,
   describeSignInFailure,
   extractAccessToken,
+  once,
   parseArgs,
 } from "../../src/setup/cli.js";
 
@@ -141,5 +142,33 @@ describe("acquireTokenWithRetry", () => {
 
     expect(slept).toHaveLength(2);
     expect(slept.reduce((total, ms) => total + ms, 0)).toBeLessThanOrEqual(10_000);
+  });
+});
+
+describe("once", () => {
+  it("acquires a value one time and reuses it for every later caller", async () => {
+    let acquisitions = 0;
+    const acquire = once(async () => {
+      acquisitions += 1;
+      return `token-${acquisitions}`;
+    });
+
+    expect(await acquire()).toBe("token-1");
+    expect(await acquire()).toBe("token-1");
+    expect(acquisitions).toBe(1);
+  });
+
+  it("shares one acquisition between callers that overlap", async () => {
+    let acquisitions = 0;
+    const acquire = once(async () => {
+      acquisitions += 1;
+      return "token-1";
+    });
+
+    const [first, second] = await Promise.all([acquire(), acquire()]);
+
+    expect(first).toBe("token-1");
+    expect(second).toBe("token-1");
+    expect(acquisitions).toBe(1);
   });
 });
