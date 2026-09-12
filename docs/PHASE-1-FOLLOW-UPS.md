@@ -5,6 +5,25 @@ because the later phases that need them will not read a scratch ledger.
 
 ## Decisions required before the first live setup run
 
+**ANSWERED 2026-09-12 by the first live run: the per-site grant was refused.**
+`POST /sites/{site-id}/permissions` returned 403 `accessDenied` against a developer tenant,
+using a delegated device-code token, after every preceding step succeeded. The site resolved,
+the application and its service principal were created, and the Microsoft Graph app role
+assignment (the admin-consent step) completed. Rollback then deleted the registration and left
+no secret behind, which is the first live confirmation that the rollback works.
+
+One cause remains to be excluded before this is final: whether the signed-in account held
+SharePoint Administrator or site owner rights on the target site. If it did, the documented
+application-permission-only restriction is confirmed and the bootstrap redesign below is
+required.
+
+A defect in our own diagnostic surfaced here. The 403 message lists directory-role causes and
+never mentions that the endpoint may not accept a delegated token at all, which was already
+written in this document before the run. It sends the operator to check role assignments when
+the cause may be architectural. Fix the message when the bootstrap path is implemented.
+
+Original writeup follows.
+
 **The per-site grant may not accept a delegated token.** Microsoft's reference for
 `POST /sites/{site-id}/permissions` lists application permission `Sites.FullControl.All` and
 marks delegated as not supported. Field reports are inconsistent: some administrators succeed
