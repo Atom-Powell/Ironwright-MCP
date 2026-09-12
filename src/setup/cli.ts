@@ -20,13 +20,16 @@ const DEFAULT_DISPLAY_NAME = "Ironwright Repository Reconciliation";
 
 // Microsoft's own Graph Command Line Tools application, the public client that
 // Microsoft Graph PowerShell and the Graph CLI sign in as. It exists in every
-// tenant, so nobody has to register a bootstrap application before running this
-// command, but it is consented per scope rather than pre-consented: an
-// administrator may see a one-time consent prompt on first use, and this
-// application's name is what shows up in the tenant's sign-in logs afterward.
-// Anyone who would rather not consent a Microsoft first-party application can
-// pass --client-id pointing at their own public-client app registration.
-// Documented in docs/SETUP.md, including the Conditional Access case.
+// tenant, so nobody has to register a public-client sign-in application of
+// their own before running this command, but it is consented per scope rather
+// than pre-consented: an administrator may see a one-time consent prompt on
+// first use, and this application's name is what shows up in the tenant's
+// sign-in logs afterward. Anyone who would rather not consent a Microsoft
+// first-party application can pass --client-id pointing at their own
+// public-client app registration. That is a different thing from the bootstrap
+// application, which is the confidential client that issues site permission
+// grants and can carry no interactive sign-in at all. Documented in
+// docs/SETUP.md, including the Conditional Access case.
 export const DEFAULT_DEVICE_CODE_CLIENT_ID = "14d82eec-204b-4c2f-b7e8-296a70dab67e";
 
 // A present-but-empty value (--tenant=, or a variable that expanded to
@@ -172,8 +175,10 @@ export function describeSignInFailure(error: unknown): string {
   return (
     `Sign-in failed: ${detail} ` +
     "If your tenant blocks Microsoft's Graph Command Line Tools client id with Conditional Access, " +
-    "register a bootstrap app registration with public client flows enabled and pass its " +
-    "application id with --client-id=<your-app-id>. See docs/SETUP.md for details."
+    "register a public-client sign-in application of your own, with public client flows enabled, and pass its " +
+    "application id with --client-id=<your-app-id>. That is not the bootstrap application: the bootstrap " +
+    "application is a confidential client that issues site permission grants and cannot carry a device-code " +
+    "sign-in. See docs/SETUP.md for details."
   );
 }
 

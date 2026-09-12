@@ -61,6 +61,18 @@ describe("describeSignInFailure", () => {
     expect(message).toContain("Graph Command Line Tools");
     expect(message).not.toContain("Azure CLI");
   });
+
+  it("does not call the sign-in application a bootstrap application", () => {
+    // "Bootstrap application" names the grant issuer, a confidential client
+    // with no public client flows. An operator who read this message as being
+    // about that application would pass IW_BOOTSTRAP_CLIENT_ID to --client-id
+    // and get a device-code failure with no obvious cause.
+    const message = describeSignInFailure(new Error("Conditional Access blocked this client"));
+
+    expect(message).not.toMatch(/register a bootstrap/i);
+    expect(message).toContain("public-client sign-in application");
+    expect(message).toContain("not the bootstrap application");
+  });
 });
 
 describe("acquireTokenWithRetry", () => {

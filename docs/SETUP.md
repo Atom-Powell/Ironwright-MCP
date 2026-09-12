@@ -151,19 +151,24 @@ Signing in with a device code requires an Entra application to sign into, the sa
 interactive sign-in does, and both commands use it. By default this command signs in as
 `14d82eec-204b-4c2f-b7e8-296a70dab67e`, which is Microsoft's Graph Command Line Tools
 application, the public client that Microsoft Graph PowerShell and the Graph CLI sign in as. It
-exists in every tenant, so nobody has to register a bootstrap application before running this
-command for the first time. There is nothing else it does: it carries the sign-in, and the app
+exists in every tenant, so nobody has to register a public-client sign-in application of their
+own before running this command for the first time. There is nothing else it does: it carries the sign-in, and the app
 registrations this command creates afterward have no relationship to it.
 
 It is not pre-consented, though. Graph Command Line Tools is consented per scope on first use,
 so an administrator signing in for the first time may see a one-time consent prompt, and that
 application's name is what appears in the tenant's sign-in logs afterward. If you would rather
 not consent a Microsoft first-party application in your tenant, or if Conditional Access policy
-blocks it, register a small app registration of your own with public client flows enabled and
-pass its application id with `--client-id=<your-app-id>`. That app only needs to exist and to
-be allowed to request the delegated permissions this command uses. It needs no application
-permissions of its own, because it is used solely to obtain the signed-in administrator's own
-token for the calls this command makes on their behalf.
+blocks it, register a public-client sign-in application of your own, with public client flows
+enabled, and pass its application id with `--client-id=<your-app-id>`. That app only needs to
+exist and to be allowed to request the delegated permissions this command uses. It needs no
+application permissions of its own, because it is used solely to obtain the signed-in
+administrator's own token for the calls this command makes on their behalf.
+
+This is not the bootstrap application, and the two are not interchangeable. The bootstrap
+application is a confidential client holding `Sites.FullControl.All`, with no public client
+flows, so passing `IW_BOOTSTRAP_CLIENT_ID` to `--client-id` fails the device-code sign-in for a
+reason the error will not make obvious.
 
 ## Output
 
