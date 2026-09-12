@@ -60,12 +60,17 @@ describe("request isolation", () => {
       }),
     );
 
-    const results = await Promise.all(clients.map((client) => client.callTool({ name: "count", arguments: {} })));
+    try {
+      const results = await Promise.all(clients.map((client) => client.callTool({ name: "count", arguments: {} })));
 
-    for (const result of results) {
-      expect(result.structuredContent).toEqual({ callCount: 1 });
+      for (const result of results) {
+        expect(result.structuredContent).toEqual({ callCount: 1 });
+      }
+    } finally {
+      // In a `finally` so a failed assertion above still closes both clients'
+      // keep-alive connections; otherwise afterEach's httpServer.close(cb)
+      // hangs waiting on a connection nothing will ever release.
+      await Promise.all(clients.map((client) => client.close()));
     }
-
-    await Promise.all(clients.map((client) => client.close()));
   });
 });

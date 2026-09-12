@@ -44,14 +44,22 @@ describe("POST /mcp", () => {
 
   it("lists tools and calls one over Streamable HTTP", async () => {
     const client = new Client({ name: "test-client", version: "0.0.0" });
-    await client.connect(new StreamableHTTPClientTransport(baseUrl));
+    const transport = new StreamableHTTPClientTransport(baseUrl);
+    try {
+      await client.connect(transport);
 
-    const listed = await client.listTools();
-    expect(listed.tools.map((tool) => tool.name)).toContain("probe");
+      const listed = await client.listTools();
+      expect(listed.tools.map((tool) => tool.name)).toContain("probe");
 
-    const called = await client.callTool({ name: "probe", arguments: { value: "hello" } });
-    expect(called.structuredContent).toEqual({ echoed: "hello" });
+      const called = await client.callTool({ name: "probe", arguments: { value: "hello" } });
+      expect(called.structuredContent).toEqual({ echoed: "hello" });
 
-    await client.close();
+      // Stateless mode never issues a session: the transport only populates
+      // this from a response's mcp-session-id header, so its absence here
+      // pins the server's observable stateless signature directly.
+      expect(transport.sessionId).toBeUndefined();
+    } finally {
+      await client.close();
+    }
   });
 });
