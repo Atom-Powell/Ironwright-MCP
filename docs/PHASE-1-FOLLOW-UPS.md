@@ -154,6 +154,26 @@ The 405 responses and the setup adapter's error paths are covered, but the in-ro
 handler still echoes the SDK's own error message, the one response path carrying text that did
 not originate in that file.
 
+## Deferred after the grant-bootstrap work
+
+These were judged Minor across the plan's reviews and left rather than fixed. None blocks a merge.
+
+Import ordering in one test file, which no linter enforces either way. The credential-label
+wrapping and the missing-credentials guard both live in `src/setup/main.ts`, which has no test
+seam by design, so their correctness rests on inspection; `main.ts` has since grown into the
+branch point between the two modes and deserves an extraction in a later phase. A raw network
+exception, as opposed to a bad-status response, still loses the credential label, which matters
+little because a DNS or socket failure describes itself in a way a 401 does not. The bootstrap
+token is deliberately not cached across runs.
+
+Two are worth a second look when this area is next opened. The exit code stays zero on a run
+that completed but could not confirm access, on the reasoning that a wrapper discarding the
+output would throw away the only copy of the secret; a CI wrapper checking only the status
+therefore cannot distinguish a verified run from an unverified one. And the new application's
+own token exchange still rolls back an otherwise-correct application when it exhausts its
+retries on a propagation error, which is the same destroy-correct-work-over-timing shape that
+was deliberately rejected for the verification path.
+
 ## Outstanding verification
 
 The first live run happened on 2026-09-12 against the `helloironwright` developer tenant and
