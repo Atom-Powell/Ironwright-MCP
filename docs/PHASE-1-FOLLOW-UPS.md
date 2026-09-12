@@ -56,7 +56,8 @@ was corrected in the same task to say site ownership is no longer required at al
 is never about the signed-in operator's own sign-in. Both branches now recognize the
 `/sites/{site-id}/permissions` path family and name the real causes, the bootstrap
 application's `Sites.FullControl.All` consent and its propagation, instead. Fixed and pinned
-with tests.
+with tests in `1acd8ef`, "fix: stop blaming site ownership for a refused per-site grant
+message".
 
 Original writeup follows.
 
