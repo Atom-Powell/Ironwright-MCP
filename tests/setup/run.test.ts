@@ -17,8 +17,8 @@ function fakeGraph(overrides: Partial<SetupGraph> = {}): { graph: SetupGraph; ca
       calls.push(`createApplication:${request.displayName}`);
       return { objectId: "object-1", appId: "app-1" };
     },
-    addPassword: async (objectId) => {
-      calls.push(`addPassword:${objectId}`);
+    addPassword: async (objectId, credential) => {
+      calls.push(`addPassword:${objectId}:${credential.displayName}:${credential.endDateTime ?? "no-expiry"}`);
       return { secretText: "secret-1" };
     },
     createServicePrincipal: async (appId) => {
@@ -67,7 +67,7 @@ describe("runSetup", () => {
       "resolveSite:contoso.sharepoint.com:/sites/Example",
       `resolveServicePrincipal:${MICROSOFT_GRAPH_APP_ID}`,
       "createApplication:Ironwright Reconciliation",
-      "addPassword:object-1",
+      "addPassword:object-1:ironwright-mcp-server:no-expiry",
       "createServicePrincipal:app-1",
       `grantAppRole:sp-1:graph-sp-1:${SITES_SELECTED_ROLE_ID}`,
       "grantSitePermission:site-1:write",
@@ -119,3 +119,17 @@ describe("runSetup", () => {
     expect(calls.some((call) => call.startsWith("delete"))).toBe(false);
   });
 });
+
+describe("the server application's client secret", () => {
+  it("is labeled for the server and keeps Graph's own lifetime", async () => {
+    const { graph, calls } = fakeGraph();
+
+    await runSetup(graph, args);
+
+    // Distinct from the grant issuer's label, so the two credentials are
+    // told apart in the portal, and deliberately not shortened: this is what
+    // the deployed container authenticates with.
+    expect(calls).toContain("addPassword:object-1:ironwright-mcp-server:no-expiry");
+  });
+});
+

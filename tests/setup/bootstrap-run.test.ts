@@ -13,8 +13,8 @@ function fakeGraph(): { graph: SetupGraph; calls: string[] } {
       calls.push(`createApplication:${request.displayName}`);
       return { objectId: "obj-1", appId: "app-1" };
     },
-    addPassword: async () => {
-      calls.push("addPassword");
+    addPassword: async (_objectId: string, credential: { displayName: string; endDateTime?: string }) => {
+      calls.push(`addPassword:${credential.displayName}:${credential.endDateTime === undefined ? "no-expiry" : "expires"}`);
       return { secretText: "secret-1" };
     },
     createServicePrincipal: async () => {
@@ -60,7 +60,7 @@ describe("runCreateBootstrap", () => {
     expect(calls).toEqual([
       "resolveServicePrincipal",
       "createApplication:Ironwright Grant Issuer",
-      "addPassword",
+      "addPassword:ironwright-grant-issuer:expires",
       "createServicePrincipal",
       "grantAppRole:role-full",
     ]);
@@ -70,3 +70,16 @@ describe("runCreateBootstrap", () => {
     expect(result).toEqual({ appId: "app-1", objectId: "obj-1", secret: "secret-1" });
   });
 });
+
+describe("the grant issuer's client secret", () => {
+  it("expires on its own, because the application is only needed while setup runs", async () => {
+    const { graph, calls } = fakeGraph();
+
+    await runCreateBootstrap(graph, { displayName: "Ironwright Grant Issuer" });
+
+    // Graph's default is two years. A tenant-wide SharePoint credential that
+    // outlives the setup window by that much is the cost this expiry removes.
+    expect(calls).toContain("addPassword:ironwright-grant-issuer:expires");
+  });
+});
+

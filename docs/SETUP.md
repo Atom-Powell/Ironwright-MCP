@@ -1,13 +1,13 @@
 # Setup
 
 One server instance serves one customer tenant. Setup is two commands rather than one. The
-first, `--create-bootstrap`, runs once per tenant and creates a small, long-lived application
-whose only job is issuing site permission grants. The second, the normal run, creates the
+first, `--create-bootstrap`, runs once per tenant and creates a small application whose only
+job is issuing site permission grants. The second, the normal run, creates the
 server's own application and grants it access to one SharePoint site, using the bootstrap
 application's credentials for the one call that a signed-in person's token cannot make. Read
 this whole document before running either command: the bootstrap application holds a
 permission broad enough that you should decide you are comfortable with the design before you
-create it, not after.
+create it, not after, and it is meant to be deleted again once setup is done.
 
 ## Why there are two commands
 
@@ -34,13 +34,14 @@ temporarily, so the shortcut was rejected.
 
 The alternative is to put the standing privilege somewhere else: a separate application,
 created once per tenant, whose only purpose is issuing and revoking site permission grants,
-and which holds `Sites.FullControl.All` permanently rather than transiently. Isolating the
-privilege this way costs a second application to track, but it means the server's own
-application never holds more than `Sites.Selected`, including transiently, and the one
-credential that can touch every site in the tenant is small, named for what it does, and easy
-to audit or revoke on its own. `--create-bootstrap` creates that application. Decide whether
-that tradeoff, a permanently privileged application in exchange for the server's own identity
-never being broadly privileged even for an instant, is the one you want before you run it.
+and which holds `Sites.FullControl.All` for as long as it exists rather than transiently on the
+server's own identity. Isolating the privilege this way costs a second application to track,
+but it means the server's own application never holds more than `Sites.Selected`, including
+transiently, and the one credential that can touch every site in the tenant is small, named for
+what it does, and easy to audit or revoke on its own. `--create-bootstrap` creates that
+application. Its secret is issued with a seven-day expiry and the application itself is meant
+to be deleted once setup is done, so the broad privilege exists during onboarding rather than
+forever; see "Retiring the grant issuer after setup" below.
 
 ## What you need
 
@@ -93,6 +94,25 @@ reads them from. A command-line flag, `--bootstrap-client-id` and `--bootstrap-c
 exists too, but only as a fallback for a caller that already manages secrets some other way: a
 flag puts a credential for an application holding tenant-wide site control into shell history,
 which the environment variables do not.
+
+## Retiring the grant issuer after setup
+
+The recommended posture is to delete the grant-issuing application once setup is done, and to
+recreate it with `--create-bootstrap` when the next site is onboarded. Its only job is issuing
+per-site grants, which happens during a normal run and never afterward, so the running server
+does not need it and neither does anything else. Deleting it turns a permanent tenant-wide
+SharePoint credential into one that exists only during a setup window, which is a materially
+smaller thing to defend than a standing application holding `Sites.FullControl.All`.
+
+The secret expires on its own either way. `--create-bootstrap` sets an explicit seven-day
+expiry rather than accepting Graph's two-year default, so a grant issuer that nobody remembers
+to delete stops being a usable credential within the week. Recreating it later costs one
+command and produces a fresh secret, so there is no rotation procedure to maintain and nothing
+to renew.
+
+Keep it only if you are onboarding sites often enough that recreating it each time is real
+friction, and if you do, treat it as a privileged credential with an expiry date rather than
+as permanent infrastructure.
 
 ## Running the normal setup
 

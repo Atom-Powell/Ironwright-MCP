@@ -130,6 +130,41 @@ export function buildAppRoleAssignmentRequest(args: {
   };
 }
 
+export interface PasswordCredentialRequest {
+  displayName: string;
+  /** Omitted for the server's own secret, which keeps Graph's default lifetime. */
+  endDateTime?: string;
+}
+
+/**
+ * The server's own client secret. Named for the server rather than for the
+ * product, because the grant issuer's secret sits beside it in the same tenant
+ * and one shared label is how the wrong one gets rotated. No explicit expiry:
+ * this credential is what the deployed container authenticates with, so
+ * shortening it would take the server down rather than reduce exposure.
+ */
+export function buildServerPasswordCredential(): PasswordCredentialRequest {
+  return { displayName: "ironwright-mcp-server" };
+}
+
+// Seven days. The grant issuer is only needed while setup runs, which is
+// minutes, so the lifetime only has to cover onboarding a site and any retry
+// or second site that follows in the same window, including one that slips
+// over a weekend or into a change window. Graph's unstated default is two
+// years, and a two-year tenant-wide SharePoint credential with no rotation
+// story would undo the argument for isolating this privilege in the first
+// place. The recommended posture is to delete the application after setup and
+// recreate it with --create-bootstrap at the next onboarding; this expiry is
+// what makes forgetting to do that self-correcting rather than permanent.
+export const BOOTSTRAP_SECRET_LIFETIME_DAYS = 7;
+
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+
+export function buildBootstrapPasswordCredential(now: Date = new Date()): PasswordCredentialRequest {
+  const expiry = new Date(now.getTime() + BOOTSTRAP_SECRET_LIFETIME_DAYS * MILLISECONDS_PER_DAY);
+  return { displayName: "ironwright-grant-issuer", endDateTime: expiry.toISOString() };
+}
+
 export function buildSitePermissionRequest(args: {
   appId: string;
   appDisplayName: string;

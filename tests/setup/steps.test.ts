@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  BOOTSTRAP_SECRET_LIFETIME_DAYS,
   MICROSOFT_GRAPH_APP_ID,
   appRoleIdByValue,
   appRolesFromAccessToken,
   buildAppRegistrationRequest,
   buildAppRoleAssignmentRequest,
+  buildBootstrapPasswordCredential,
+  buildServerPasswordCredential,
   buildSitePermissionRequest,
   interpretVerification,
   siteIdPathFromUrl,
@@ -131,5 +134,28 @@ describe("appRoleIdByValue", () => {
 
   it("finds the full control role", () => {
     expect(appRoleIdByValue(roles, SITES_FULL_CONTROL_ROLE_CLAIM)).toBe("role-full");
+  });
+});
+
+describe("password credentials", () => {
+  it("labels the server application's secret for the server, with no expiry of its own", () => {
+    const credential = buildServerPasswordCredential();
+
+    expect(credential.displayName).toBe("ironwright-mcp-server");
+    expect(credential.endDateTime).toBeUndefined();
+  });
+
+  it("labels the grant issuer's secret separately, so the two are distinguishable in the portal", () => {
+    const credential = buildBootstrapPasswordCredential(new Date("2026-09-12T00:00:00.000Z"));
+
+    expect(credential.displayName).toBe("ironwright-grant-issuer");
+    expect(credential.displayName).not.toBe(buildServerPasswordCredential().displayName);
+  });
+
+  it("expires the grant issuer's secret a week out rather than accepting Graph's two-year default", () => {
+    const credential = buildBootstrapPasswordCredential(new Date("2026-09-12T09:30:00.000Z"));
+
+    expect(BOOTSTRAP_SECRET_LIFETIME_DAYS).toBe(7);
+    expect(credential.endDateTime).toBe("2026-09-19T09:30:00.000Z");
   });
 });

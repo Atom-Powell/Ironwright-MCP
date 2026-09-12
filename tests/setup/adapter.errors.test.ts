@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFetchSetupGraph } from "../../src/setup/adapter.js";
 import { GraphRequestError } from "../../src/setup/graph-error.js";
-import { buildAppRegistrationRequest } from "../../src/setup/steps.js";
+import { buildAppRegistrationRequest, buildServerPasswordCredential } from "../../src/setup/steps.js";
 
 function stubFetch(response: { status: number; body: string }): void {
   // A 204 is defined as having no body, and the Response constructor rejects one
@@ -56,7 +56,7 @@ describe("unexpected success shapes", () => {
   it("names the missing field when a 2xx carries no body at all", async () => {
     stubFetch({ status: 200, body: "" });
 
-    await expect(graph().addPassword("object-1")).rejects.toThrow(/"secretText"/);
+    await expect(graph().addPassword("object-1", buildServerPasswordCredential())).rejects.toThrow(/"secretText"/);
   });
 
   it("rejects an empty string as a usable id", async () => {

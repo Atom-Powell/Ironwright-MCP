@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFetchSetupGraph } from "../../src/setup/adapter.js";
-import { buildAppRegistrationRequest, buildAppRoleAssignmentRequest, buildSitePermissionRequest } from "../../src/setup/steps.js";
+import {
+  buildAppRegistrationRequest,
+  buildAppRoleAssignmentRequest,
+  buildServerPasswordCredential,
+  buildSitePermissionRequest,
+} from "../../src/setup/steps.js";
 
 interface RecordedCall {
   url: string;
@@ -72,13 +77,27 @@ describe("createFetchSetupGraph", () => {
     expect(calls[0]?.body).toMatchObject({ displayName: "App", signInAudience: "AzureADMyOrg" });
   });
 
-  it("adds a client secret to the application object", async () => {
+  it("adds a client secret to the application object, with the label and expiry it was given", async () => {
     const calls = stubFetch([{ status: 200, body: JSON.stringify({ secretText: "secret-1" }) }]);
 
-    const result = await graph().addPassword("object-1");
+    const result = await graph().addPassword("object-1", {
+      displayName: "ironwright-grant-issuer",
+      endDateTime: "2026-09-19T09:30:00.000Z",
+    });
 
     expect(result).toEqual({ secretText: "secret-1" });
     expect(calls[0]?.url).toBe("https://graph.microsoft.com/v1.0/applications/object-1/addPassword");
+    expect(calls[0]?.body).toEqual({
+      passwordCredential: { displayName: "ironwright-grant-issuer", endDateTime: "2026-09-19T09:30:00.000Z" },
+    });
+  });
+
+  it("sends no expiry for a credential that was given none", async () => {
+    const calls = stubFetch([{ status: 200, body: JSON.stringify({ secretText: "secret-1" }) }]);
+
+    await graph().addPassword("object-1", { displayName: "ironwright-mcp-server" });
+
+    expect(calls[0]?.body).toEqual({ passwordCredential: { displayName: "ironwright-mcp-server" } });
   });
 
   it("creates the service principal the token endpoint resolves the client id against", async () => {
@@ -259,7 +278,7 @@ describe("token routing", () => {
       token: ADMIN,
       status: 200,
       body: JSON.stringify({ secretText: "secret-1" }),
-      call: (g) => g.addPassword("object-1"),
+      call: (g) => g.addPassword("object-1", buildServerPasswordCredential()),
     },
     {
       name: "createServicePrincipal",

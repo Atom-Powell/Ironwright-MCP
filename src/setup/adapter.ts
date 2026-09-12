@@ -1,11 +1,17 @@
 import { GraphRequestError } from "./graph-error.js";
 import { appRolesFromAccessToken } from "./steps.js";
-import type { AppRegistrationRequest, AppRoleAssignmentRequest, GraphAppRole, SitePermissionRequest } from "./steps.js";
+import type {
+  AppRegistrationRequest,
+  AppRoleAssignmentRequest,
+  GraphAppRole,
+  PasswordCredentialRequest,
+  SitePermissionRequest,
+} from "./steps.js";
 
 export interface SetupGraph {
   resolveSite(sitePath: string): Promise<{ siteId: string }>;
   createApplication(request: AppRegistrationRequest): Promise<{ objectId: string; appId: string }>;
-  addPassword(objectId: string): Promise<{ secretText: string }>;
+  addPassword(objectId: string, credential: PasswordCredentialRequest): Promise<{ secretText: string }>;
   createServicePrincipal(appId: string): Promise<{ objectId: string }>;
   resolveServicePrincipal(appId: string): Promise<{ objectId: string; appRoles: GraphAppRole[] }>;
   grantAppRole(request: AppRoleAssignmentRequest): Promise<void>;
@@ -98,7 +104,7 @@ export interface FetchSetupGraphOptions {
   /** Mints an app-only token for a newly created application, used only to verify its own access. */
   acquireAppToken: (appId: string, secret: string) => Promise<string>;
   /**
-   * Mints an app-only token for the long-lived bootstrap application. Graph
+   * Mints an app-only token for the bootstrap application. Graph
    * refuses a delegated token on /sites/{id}/permissions regardless of the
    * caller's directory roles, confirmed live against a Global Administrator on
    * 2026-09-12, so the grant and its rollback must both use this.
@@ -126,9 +132,12 @@ export function createFetchSetupGraph(options: FetchSetupGraphOptions): SetupGra
       return { objectId: created.id, appId: created.appId };
     },
 
-    async addPassword(objectId) {
+    async addPassword(objectId, credential) {
+      // The caller supplies the label and any expiry, because the two
+      // applications this command creates need different ones: the grant
+      // issuer's secret is deliberately short-lived and the server's is not.
       const response = await graphRequest(adminToken, "POST", `/applications/${objectId}/addPassword`, {
-        passwordCredential: { displayName: "ironwright-mcp" },
+        passwordCredential: credential,
       });
       return { secretText: requireFields(response, ["secretText"]).secretText };
     },
@@ -174,7 +183,7 @@ export function createFetchSetupGraph(options: FetchSetupGraphOptions): SetupGra
 
     async grantSitePermission(siteId, request) {
       // Graph refuses a delegated token here even for a Global Administrator, so
-      // this call needs the long-lived bootstrap application's app-only token,
+      // this call needs the bootstrap application's app-only token,
       // not the operator's.
       const bootstrapToken = await acquireBootstrapToken();
       const response = await graphRequest(bootstrapToken, "POST", `/sites/${siteId}/permissions`, request);

@@ -7,6 +7,8 @@ import {
   appRoleIdByValue,
   buildAppRegistrationRequest,
   buildAppRoleAssignmentRequest,
+  buildBootstrapPasswordCredential,
+  buildServerPasswordCredential,
   buildSitePermissionRequest,
   interpretVerification,
   siteIdPathFromUrl,
@@ -206,7 +208,7 @@ export async function runSetup(graph: SetupGraph, args: SetupArgs, hooks: SetupH
   let sitePermissionId: string | undefined;
   let sitePermissionAttempted = false;
   try {
-    const { secretText } = await graph.addPassword(objectId);
+    const { secretText } = await graph.addPassword(objectId, buildServerPasswordCredential());
 
     const servicePrincipal = await createServicePrincipalWithRetry(graph, appId, sleep);
     await graph.grantAppRole(
@@ -283,7 +285,10 @@ export async function runCreateBootstrap(
   );
 
   try {
-    const { secretText } = await graph.addPassword(objectId);
+    // Short-lived by design. The grant issuer is only needed while setup runs,
+    // and a tenant-wide SharePoint credential that outlives that window is the
+    // main cost of isolating this privilege in its own application.
+    const { secretText } = await graph.addPassword(objectId, buildBootstrapPasswordCredential());
     const servicePrincipal = await createServicePrincipalWithRetry(graph, appId, sleep);
     await graph.grantAppRole(
       buildAppRoleAssignmentRequest({
