@@ -26,7 +26,9 @@ that token's lifetime, roughly an hour, a credential with tenant-wide full contr
 SharePoint site exists. It never leaves the setup process and is never written down, but it
 exists, and this project's whole security posture is built on refusing exactly that grant.
 
-Three options, none obviously correct:
+**DECIDED 2026-09-12: option 3, the separate long-lived grant-issuing app.** The server's
+identity must never hold more than `Sites.Selected`, including transiently, so option 1's
+token window was disqualifying. Options as considered:
 
 1. Accept the bootstrap and its token window, documenting it plainly. Fully scripted.
 2. Keep the command as it is through the app registration, consent, and service principal, and
@@ -73,6 +75,11 @@ admin token's `scp` claim. A tenant that has never used Graph Command Line Tools
 prompt for that application's full configured set or fail outright. The wave that found this
 also added a helper that reads roles from an access token, which a scope pre-flight could
 reuse in a few lines.
+
+**DECIDED 2026-09-12: Entra OAuth enforced by Container Apps built-in authentication.**
+Now a sixth safety layer in the design spec, the one deciding who may call at all. Enforced by
+the platform rather than in process, so no route ships unprotected by accident, and the
+protection must live in the deployment definition. Original framing follows.
 
 **The MCP endpoint has no authentication and the spec's safety model does not mention any.**
 All five safety layers govern what a tool does once called; none governs who may call. Phase 1

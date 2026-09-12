@@ -77,6 +77,24 @@ describes are untouched.
 Copilot Studio's DLP and Advanced Connector Policy granularity is per-server rather than
 per-tool, so platform governance cannot serve as either one.
 
+**Entra OAuth on the endpoint, enforced by the hosting platform.** Decided 2026-09-12,
+correcting an omission: the original safety model governed only what a tool does once
+called, never who may call. Container Apps built-in authentication validates the token
+before a request reaches the server, so there is no in-process validation code to get
+wrong and no route can be shipped unprotected by accident. Copilot Studio's MCP wizard
+speaks OAuth 2.0 directly. The protection lives in the deployment definition rather than
+in application code, so it must be part of that definition and never assumed.
+
+**A separate, long-lived grant-issuing application per tenant.** Decided 2026-09-12,
+after a live run confirmed that `POST /sites/{site-id}/permissions` refuses a delegated
+token even for a Global Administrator. One small bootstrap application holds
+`Sites.FullControl.All` permanently and does nothing but issue per-site grants. The
+server's own identity therefore never holds more than `Sites.Selected` at any moment,
+including transiently. The rejected alternative was granting the server's own application
+full control and stripping it afterward, which reaches the same end state but leaves a
+tenant-wide credential valid for roughly an hour, because removing a role assignment does
+not revoke an issued token.
+
 ## Architecture
 
 Five layers. Each is usable and testable without the layer above it.
@@ -245,7 +263,10 @@ A tool name implying safety is not the same as a description stating it.
 
 ## Safety model
 
-Five independent layers.
+Six independent layers. The first decides who may call at all: Entra OAuth enforced by
+Container Apps built-in authentication, before a request reaches the server. The five below
+decide what a caller may then do. Copilot Studio's own governance cannot be any of them,
+because its granularity is per-server rather than per-tool.
 
 1. **Deployment gate.** An instance deployed without writes enabled does not register the
    write tools at all. Hiding the capability beats registering it and refusing, because a
