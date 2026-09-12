@@ -42,7 +42,11 @@ afterEach(() => {
 });
 
 const graph = (appToken = appTokenWithRoles(["Sites.Selected"])): ReturnType<typeof createFetchSetupGraph> =>
-  createFetchSetupGraph("admin-token", async () => appToken);
+  createFetchSetupGraph({
+    adminToken: "admin-token",
+    acquireAppToken: async () => appToken,
+    acquireBootstrapToken: async () => "bootstrap-token",
+  });
 
 describe("createFetchSetupGraph", () => {
   it("resolves a site by its path form", async () => {
@@ -144,6 +148,7 @@ describe("createFetchSetupGraph", () => {
 
     expect(result).toEqual({ permissionId: "permission-1" });
     expect(calls[0]?.url).toBe("https://graph.microsoft.com/v1.0/sites/site-1/permissions");
+    expect(calls[0]?.authorization).toBe("Bearer bootstrap-token");
   });
 
   it("verifies with a token minted for the new app and reports that token's roles", async () => {
@@ -184,5 +189,29 @@ describe("createFetchSetupGraph", () => {
       "DELETE https://graph.microsoft.com/v1.0/sites/site-1/permissions/permission-1",
       "DELETE https://graph.microsoft.com/v1.0/applications/object-1",
     ]);
+    expect(calls[0]?.authorization).toBe("Bearer bootstrap-token");
+    expect(calls[1]?.authorization).toBe("Bearer admin-token");
+  });
+});
+
+describe("token routing", () => {
+  it("uses the bootstrap token for the per-site grant and the admin token elsewhere", async () => {
+    const calls = stubFetch([
+      { status: 200, body: JSON.stringify({ id: "site-1" }) },
+      { status: 201, body: JSON.stringify({ id: "permission-1" }) },
+    ]);
+
+    const graph = createFetchSetupGraph({
+      adminToken: "ADMIN",
+      acquireAppToken: async () => "APP",
+      acquireBootstrapToken: async () => "BOOTSTRAP",
+    });
+
+    await graph.resolveSite("host:/sites/X");
+    await graph.grantSitePermission("site-1", { roles: ["read"], grantedToIdentities: [] });
+
+    expect(calls[0]?.authorization).toBe("Bearer ADMIN");
+    expect(calls[1]?.url).toContain("/sites/site-1/permissions");
+    expect(calls[1]?.authorization).toBe("Bearer BOOTSTRAP");
   });
 });

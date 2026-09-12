@@ -9,8 +9,35 @@ import {
 } from "./cli.js";
 import { runSetup } from "./run.js";
 
+/**
+ * The one client-credentials exchange this command needs, shared by the new
+ * application's own token and the bootstrap application's token. Two copies of
+ * this would be how one of them silently loses the propagation retry below.
+ */
+function acquireAppOnlyToken(tenantId: string, clientId: string, secret: string): Promise<string> {
+  // Retried, because this exchange runs seconds after the secret and the
+  // service principal were created and Entra replication is not instant.
+  // Without the retry a correct setup intermittently reports an invalid client
+  // secret and sends the operator after a problem that does not exist.
+  return acquireTokenWithRetry(async () => {
+    const body = new URLSearchParams({
+      client_id: clientId,
+      client_secret: secret,
+      scope: "https://graph.microsoft.com/.default",
+      grant_type: "client_credentials",
+    });
+    const response = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    return extractAccessToken(response.status, await response.text());
+  });
+}
+
 async function main(): Promise<void> {
-  const { tenantId, siteUrl, displayName, write, clientId } = parseArgs(process.argv);
+  const parsed = parseArgs(process.argv);
+  const { tenantId, siteUrl, displayName, write, clientId } = parsed;
 
   // Device code, because creating an app registration needs a human with
   // Application Administrator rights. The server's own credentials cannot
@@ -35,25 +62,19 @@ async function main(): Promise<void> {
     return;
   }
 
-  const graph = createFetchSetupGraph(adminToken.token, async (appId, secret) => {
-    // Retried, because this exchange runs seconds after the secret and the
-    // service principal were created and Entra replication is not instant.
-    // Without the retry a correct setup intermittently reports an invalid client
-    // secret and sends the operator after a problem that does not exist.
-    return acquireTokenWithRetry(async () => {
-      const body = new URLSearchParams({
-        client_id: appId,
-        client_secret: secret,
-        scope: "https://graph.microsoft.com/.default",
-        grant_type: "client_credentials",
-      });
-      const response = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body,
-      });
-      return extractAccessToken(response.status, await response.text());
-    });
+  const acquireBootstrapToken = async (): Promise<string> => {
+    if (parsed.bootstrap === undefined) {
+      throw new Error(
+        "No bootstrap credentials. Set IW_BOOTSTRAP_CLIENT_ID and IW_BOOTSTRAP_CLIENT_SECRET, or run this command once with --create-bootstrap to create the grant-issuing application. See docs/SETUP.md.",
+      );
+    }
+    return acquireAppOnlyToken(tenantId, parsed.bootstrap.clientId, parsed.bootstrap.clientSecret);
+  };
+
+  const graph = createFetchSetupGraph({
+    adminToken: adminToken.token,
+    acquireAppToken: (appId, secret) => acquireAppOnlyToken(tenantId, appId, secret),
+    acquireBootstrapToken,
   });
 
   const result = await runSetup(

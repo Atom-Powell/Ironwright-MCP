@@ -92,29 +92,42 @@ function requireFields<K extends string>(response: GraphResponse, names: readonl
   return result;
 }
 
+export interface FetchSetupGraphOptions {
+  /** The signed-in operator's delegated token. Used for everything except the site permission endpoint. */
+  adminToken: string;
+  /** Mints an app-only token for a newly created application, used only to verify its own access. */
+  acquireAppToken: (appId: string, secret: string) => Promise<string>;
+  /**
+   * Mints an app-only token for the long-lived bootstrap application. Graph
+   * refuses a delegated token on /sites/{id}/permissions regardless of the
+   * caller's directory roles, confirmed live against a Global Administrator on
+   * 2026-09-12, so the grant and its rollback must both use this.
+   */
+  acquireBootstrapToken: () => Promise<string>;
+}
+
 /**
  * Uses fetch rather than the Graph SDK. The setup command runs once per
  * deployment with a signed-in administrator's token, and pulling in the SDK's
  * auth providers here would be the only reason this phase needs them at all.
  */
-export function createFetchSetupGraph(
-  accessToken: string,
-  acquireAppToken: (appId: string, secret: string) => Promise<string>,
-): SetupGraph {
+export function createFetchSetupGraph(options: FetchSetupGraphOptions): SetupGraph {
+  const { adminToken, acquireAppToken, acquireBootstrapToken } = options;
+
   return {
     async resolveSite(sitePath) {
-      const response = await graphRequest(accessToken, "GET", `/sites/${sitePath}`);
+      const response = await graphRequest(adminToken, "GET", `/sites/${sitePath}`);
       return { siteId: requireFields(response, ["id"]).id };
     },
 
     async createApplication(request) {
-      const response = await graphRequest(accessToken, "POST", "/applications", request);
+      const response = await graphRequest(adminToken, "POST", "/applications", request);
       const created = requireFields(response, ["id", "appId"]);
       return { objectId: created.id, appId: created.appId };
     },
 
     async addPassword(objectId) {
-      const response = await graphRequest(accessToken, "POST", `/applications/${objectId}/addPassword`, {
+      const response = await graphRequest(adminToken, "POST", `/applications/${objectId}/addPassword`, {
         passwordCredential: { displayName: "ironwright-mcp" },
       });
       return { secretText: requireFields(response, ["secretText"]).secretText };
@@ -125,7 +138,7 @@ export function createFetchSetupGraph(
       // is the tenant-local identity that actually holds role assignments and
       // that the token endpoint resolves a client id against, so without this
       // call a client-credentials request fails with AADSTS700016.
-      const response = await graphRequest(accessToken, "POST", "/servicePrincipals", { appId });
+      const response = await graphRequest(adminToken, "POST", "/servicePrincipals", { appId });
       return { objectId: requireFields(response, ["id"]).id };
     },
 
@@ -136,7 +149,7 @@ export function createFetchSetupGraph(
       // two fields this command actually uses, since the full service principal
       // object is large.
       const response = await graphRequest(
-        accessToken,
+        adminToken,
         "GET",
         `/servicePrincipals(appId='${appId}')?$select=id,appRoles`,
       );
@@ -152,7 +165,7 @@ export function createFetchSetupGraph(
       // The assignment is created on the resource's service principal, which is
       // Microsoft Graph's, not on the client's. This is the admin-consent step.
       await graphRequest(
-        accessToken,
+        adminToken,
         "POST",
         `/servicePrincipals/${request.resourceId}/appRoleAssignedTo`,
         request,
@@ -160,7 +173,11 @@ export function createFetchSetupGraph(
     },
 
     async grantSitePermission(siteId, request) {
-      const response = await graphRequest(accessToken, "POST", `/sites/${siteId}/permissions`, request);
+      // Graph refuses a delegated token here even for a Global Administrator, so
+      // this call needs the long-lived bootstrap application's app-only token,
+      // not the operator's.
+      const bootstrapToken = await acquireBootstrapToken();
+      const response = await graphRequest(bootstrapToken, "POST", `/sites/${siteId}/permissions`, request);
       return { permissionId: requireFields(response, ["id"]).id };
     },
 
@@ -183,14 +200,18 @@ export function createFetchSetupGraph(
     },
 
     async deleteSitePermission(siteId, permissionId) {
-      await graphRequest(accessToken, "DELETE", `/sites/${siteId}/permissions/${permissionId}`);
+      // Same endpoint family as the grant, so the rollback delete needs the same
+      // bootstrap token: a failed run cleaning up with the operator's delegated
+      // token would be refused for the identical reason the grant itself would be.
+      const bootstrapToken = await acquireBootstrapToken();
+      await graphRequest(bootstrapToken, "DELETE", `/sites/${siteId}/permissions/${permissionId}`);
     },
 
     async deleteApplication(objectId) {
       // Deleting the application also removes its service principal and every
       // role assignment held by it, and the client secret lives on the
       // application object, so this one call revokes the whole credential.
-      await graphRequest(accessToken, "DELETE", `/applications/${objectId}`);
+      await graphRequest(adminToken, "DELETE", `/applications/${objectId}`);
     },
   };
 }

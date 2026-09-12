@@ -14,7 +14,11 @@ afterEach(() => {
 });
 
 const graph = (): ReturnType<typeof createFetchSetupGraph> =>
-  createFetchSetupGraph("admin-token", async () => "app-token");
+  createFetchSetupGraph({
+    adminToken: "admin-token",
+    acquireAppToken: async () => "app-token",
+    acquireBootstrapToken: async () => "bootstrap-token",
+  });
 
 describe("Graph failures", () => {
   it("carries the status and the Graph error code, not just the text", async () => {
