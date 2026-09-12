@@ -106,7 +106,11 @@ not originate in that file.
 
 ## Outstanding verification
 
-The live setup run against a Microsoft 365 developer tenant has never been performed. No agent
-attempted it, deliberately. It is the step that would have caught the incomplete
-`Sites.Selected` permission model immediately, so it is not additive verification: no claim
-that the setup command works should be made until it has run.
+The first live run happened on 2026-09-12 against the `helloironwright` developer tenant and
+failed at the per-site grant, as recorded at the top of this document. Everything before that
+call worked, so what is verified is: device-code sign-in, site resolution, application and
+service principal creation, the Microsoft Graph app role assignment, and rollback on failure.
+
+What remains unverified is everything after the grant: the client-credentials exchange, its
+propagation retry, and the access check that mints a token for the new application. None of
+that has ever executed. The setup command must not be described as working.
