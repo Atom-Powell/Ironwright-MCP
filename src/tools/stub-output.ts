@@ -9,5 +9,5 @@ export const STUB_OUTPUT_SCHEMA = {
   stub: z.literal(true).describe("Always true until this tool is implemented, for example true."),
   message: z
     .string()
-    .describe("Note explaining that the tool is registered but not implemented, for example \"inventory_tree is not implemented yet\"."),
+    .describe("Note explaining that the tool is registered but not implemented, for example \"this tool is not implemented yet\"."),
 } satisfies z.ZodRawShape;

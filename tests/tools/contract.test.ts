@@ -63,3 +63,28 @@ describe("tool contract", () => {
     expect(new Set(names).size).toBe(names.length);
   });
 });
+
+const EXPECTED_TOOL_NAMES = [
+  "inventory_tree",
+  "describe_workbook",
+  "reconcile_workbook_vs_repository",
+  "query_repository",
+  "validate_structure",
+  "generate_rename_plan",
+  "execute_rename_plan",
+  "generate_move_plan",
+  "execute_move_plan",
+  "replicate_template",
+];
+
+describe("tool surface completeness", () => {
+  it("registers exactly the ten planned tools", () => {
+    expect(ALL_TOOLS.map((tool) => tool.name).sort()).toEqual([...EXPECTED_TOOL_NAMES].sort());
+  });
+
+  it("stays inside the recommended per-agent tool ceiling", () => {
+    // Microsoft's guidance is at most 25 to 30 tools per agent under a 128 hard
+    // cap, and this server may share an agent with other MCP servers.
+    expect(ALL_TOOLS.length).toBeLessThanOrEqual(25);
+  });
+});
