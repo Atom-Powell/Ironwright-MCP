@@ -3,8 +3,8 @@
 // network calls (device-code sign-in, the client-credentials exchange) stay
 // in main.ts, which is the untestable-without-a-tenant seam.
 
+import { SetupFailedError } from "./errors.js";
 import { GraphRequestError } from "./graph-error.js";
-import { SetupFailedError } from "./run.js";
 
 export interface ParsedArgs {
   tenantId: string;
@@ -12,6 +12,8 @@ export interface ParsedArgs {
   displayName: string;
   write: boolean;
   clientId: string;
+  createBootstrap: boolean;
+  bootstrap: BootstrapCredentials | undefined;
 }
 
 const DEFAULT_DISPLAY_NAME = "Ironwright Repository Reconciliation";
@@ -45,13 +47,42 @@ function requiredValue(argv: string[], name: string): string {
   return value;
 }
 
-export function parseArgs(argv: string[]): ParsedArgs {
+export interface BootstrapCredentials {
+  clientId: string;
+  clientSecret: string;
+}
+
+/**
+ * The environment is the documented path because these are the credentials of an
+ * application holding Sites.FullControl.All over every site in the tenant, and a
+ * command-line flag puts that secret in shell history. Flags exist as a
+ * documented fallback for a caller that already manages secrets another way.
+ */
+export function resolveBootstrapCredentials(
+  argv: string[],
+  env: NodeJS.ProcessEnv,
+): BootstrapCredentials | undefined {
+  const clientId = findValue(argv, "bootstrap-client-id") ?? emptyToUndefined(env.IW_BOOTSTRAP_CLIENT_ID);
+  const clientSecret =
+    findValue(argv, "bootstrap-client-secret") ?? emptyToUndefined(env.IW_BOOTSTRAP_CLIENT_SECRET);
+  if (clientId === undefined || clientSecret === undefined) return undefined;
+  return { clientId, clientSecret };
+}
+
+function emptyToUndefined(value: string | undefined): string | undefined {
+  return value === undefined || value === "" ? undefined : value;
+}
+
+export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): ParsedArgs {
+  const createBootstrap = argv.includes("--create-bootstrap");
   return {
     tenantId: requiredValue(argv, "tenant"),
-    siteUrl: requiredValue(argv, "site"),
+    siteUrl: createBootstrap ? (findValue(argv, "site") ?? "") : requiredValue(argv, "site"),
     displayName: findValue(argv, "name") ?? DEFAULT_DISPLAY_NAME,
     write: argv.includes("--write"),
     clientId: findValue(argv, "client-id") ?? DEFAULT_DEVICE_CODE_CLIENT_ID,
+    createBootstrap,
+    bootstrap: resolveBootstrapCredentials(argv, env),
   };
 }
 

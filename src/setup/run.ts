@@ -1,4 +1,5 @@
 import type { SetupGraph } from "./adapter.js";
+import { SetupFailedError } from "./errors.js";
 import {
   MICROSOFT_GRAPH_APP_ID,
   SITES_SELECTED_ROLE_CLAIM,
@@ -7,8 +8,9 @@ import {
   buildSitePermissionRequest,
   interpretVerification,
   siteIdPathFromUrl,
-  type VerificationOutcome,
 } from "./steps.js";
+
+export { SetupFailedError } from "./errors.js";
 
 export interface SetupArgs {
   displayName: string;
@@ -30,16 +32,6 @@ export interface SetupResult {
   objectId: string;
   secret: string;
   siteId: string;
-}
-
-export class SetupFailedError extends Error {
-  readonly outcome: Extract<VerificationOutcome, { ok: false }>;
-
-  constructor(outcome: Extract<VerificationOutcome, { ok: false }>) {
-    super(outcome.message);
-    this.name = "SetupFailedError";
-    this.outcome = outcome;
-  }
 }
 
 interface PartialSetup {
