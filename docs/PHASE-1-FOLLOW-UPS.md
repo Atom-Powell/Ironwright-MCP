@@ -46,6 +46,18 @@ never mentions that the endpoint may not accept a delegated token at all, which 
 written in this document before the run. It sends the operator to check role assignments when
 the cause may be architectural. Fix the message when the bootstrap path is implemented.
 
+**FIXED, found during Task 6's documentation review.** `nextStepForGraphFailure`'s generic 403
+branch in `src/setup/cli.ts` still told the operator "the per-site grant needs site owner
+rights" after the bootstrap redesign moved that call, and its rollback delete, onto the
+bootstrap application's own token. That branch is the most likely 403 this command produces, so
+the false claim sat on the likeliest path, and it directly contradicted `docs/SETUP.md`, which
+was corrected in the same task to say site ownership is no longer required at all. A sibling
+401 branch had the same problem: it told the operator to sign in again for a token failure that
+is never about the signed-in operator's own sign-in. Both branches now recognize the
+`/sites/{site-id}/permissions` path family and name the real causes, the bootstrap
+application's `Sites.FullControl.All` consent and its propagation, instead. Fixed and pinned
+with tests.
+
 Original writeup follows.
 
 **The per-site grant may not accept a delegated token.** Microsoft's reference for

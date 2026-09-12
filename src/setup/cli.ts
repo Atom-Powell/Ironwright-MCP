@@ -177,6 +177,18 @@ export function describeSignInFailure(error: unknown): string {
   );
 }
 
+/**
+ * True for the two calls that use the bootstrap application's app-only token
+ * rather than the signed-in operator's: grantSitePermission's POST and
+ * deleteSitePermission's rollback DELETE, both against
+ * /sites/{site-id}/permissions[/{permission-id}]. A failure on this path
+ * family is never about the signed-in operator's directory roles or about
+ * site ownership, because the operator's token never reaches this endpoint.
+ */
+function isSitePermissionsPath(path: string): boolean {
+  return /^\/sites\/[^/]+\/permissions(\/[^/]+)?$/.test(path);
+}
+
 function nextStepForGraphFailure(error: GraphRequestError): string {
   if (error.status === 403 && error.path.endsWith("/appRoleAssignedTo")) {
     return (
@@ -186,10 +198,35 @@ function nextStepForGraphFailure(error: GraphRequestError): string {
     );
   }
 
+  // Site owner rights are not a cause here, and have not been since the
+  // per-site grant and its rollback moved to the bootstrap application's
+  // token: the signed-in operator's token never reaches this endpoint, so a
+  // 403 here says something about that application, not about this person.
+  if (error.status === 403 && isSitePermissionsPath(error.path)) {
+    return (
+      "This call runs on the bootstrap application's own token, not the signed-in user's, so it is not about the " +
+      "signed-in user's directory roles or about site ownership. The likely cause is that the bootstrap " +
+      "application's Sites.FullControl.All permission is not admin-consented in this tenant, or that consent " +
+      "granted moments earlier by --create-bootstrap has not yet reached a freshly issued token. Confirm " +
+      "IW_BOOTSTRAP_CLIENT_ID and IW_BOOTSTRAP_CLIENT_SECRET name a bootstrap application created with " +
+      "--create-bootstrap, and if the permission is already consented, wait a short while and try again."
+    );
+  }
+
   if (error.status === 403) {
     return (
       "The signed-in user is not allowed to do this. Creating the app registration and its service principal needs " +
-      "Application Administrator or Cloud Application Administrator, and the per-site grant needs site owner rights."
+      "Application Administrator or Cloud Application Administrator."
+    );
+  }
+
+  // Same reasoning as the 403 branch above: this endpoint never sees the
+  // signed-in operator's token, so "sign in again" would send them to fix the
+  // wrong credential.
+  if (error.status === 401 && isSitePermissionsPath(error.path)) {
+    return (
+      "The bootstrap application's token was rejected. Check that IW_BOOTSTRAP_CLIENT_ID and " +
+      "IW_BOOTSTRAP_CLIENT_SECRET are correct and belong to a bootstrap application created with --create-bootstrap."
     );
   }
 

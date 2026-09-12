@@ -115,6 +115,96 @@ describe("describeSetupFailure", () => {
     expect(message).toContain("admin consent");
   });
 
+  it("does not blame site ownership for a refused app registration or service principal call", () => {
+    // Pins the generic 403 branch's exact wording so a future edit cannot
+    // silently reintroduce the site-owner claim this replaced: that call
+    // never reaches /sites/{id}/permissions, which is the only endpoint site
+    // ownership was ever relevant to, and even there it stopped being
+    // relevant once the grant moved to the bootstrap application's token.
+    const message = describeSetupFailure(
+      new GraphRequestError({
+        method: "POST",
+        path: "/servicePrincipals",
+        status: 403,
+        body: '{"error":{"code":"Authorization_RequestDenied"}}',
+      }),
+    );
+
+    expect(message).toContain(
+      "The signed-in user is not allowed to do this. Creating the app registration and its service principal needs " +
+        "Application Administrator or Cloud Application Administrator.",
+    );
+    expect(message).not.toContain("site owner");
+  });
+
+  it("blames the bootstrap application, not site ownership, for a refused per-site grant", () => {
+    const message = describeSetupFailure(
+      new GraphRequestError({
+        method: "POST",
+        path: "/sites/site-1/permissions",
+        status: 403,
+        body: '{"error":{"code":"accessDenied"}}',
+      }),
+    );
+
+    expect(message).toContain(
+      "This call runs on the bootstrap application's own token, not the signed-in user's, so it is not about the " +
+        "signed-in user's directory roles or about site ownership. The likely cause is that the bootstrap " +
+        "application's Sites.FullControl.All permission is not admin-consented in this tenant, or that consent " +
+        "granted moments earlier by --create-bootstrap has not yet reached a freshly issued token. Confirm " +
+        "IW_BOOTSTRAP_CLIENT_ID and IW_BOOTSTRAP_CLIENT_SECRET name a bootstrap application created with " +
+        "--create-bootstrap, and if the permission is already consented, wait a short while and try again.",
+    );
+    // The exact-string assertion above already pins the whole message. This
+    // one checks the specific false claim this replaced is gone, not merely
+    // that no substring collides with "site ownership", which the message
+    // legitimately says above while explaining that site ownership is not
+    // the cause.
+    expect(message).not.toContain("needs site owner rights");
+  });
+
+  it("blames the bootstrap application for a refused rollback delete of the per-site grant too", () => {
+    // The rollback DELETE shares the same path family with a permission id
+    // appended, and has to be told apart from the generic 403 branch the same
+    // way the grant itself is.
+    const message = describeSetupFailure(
+      new GraphRequestError({
+        method: "DELETE",
+        path: "/sites/site-1/permissions/permission-1",
+        status: 403,
+        body: '{"error":{"code":"accessDenied"}}',
+      }),
+    );
+
+    expect(message).toContain("This call runs on the bootstrap application's own token");
+    expect(message).not.toContain("needs site owner rights");
+  });
+
+  it("blames the bootstrap application's credentials, not sign-in, for a 401 on the per-site grant", () => {
+    const message = describeSetupFailure(
+      new GraphRequestError({
+        method: "POST",
+        path: "/sites/site-1/permissions",
+        status: 401,
+        body: '{"error":{"code":"InvalidAuthenticationToken"}}',
+      }),
+    );
+
+    expect(message).toContain(
+      "The bootstrap application's token was rejected. Check that IW_BOOTSTRAP_CLIENT_ID and " +
+        "IW_BOOTSTRAP_CLIENT_SECRET are correct and belong to a bootstrap application created with --create-bootstrap.",
+    );
+    expect(message).not.toContain("Sign in again");
+  });
+
+  it("still tells the signed-in operator to sign in again for a 401 elsewhere", () => {
+    const message = describeSetupFailure(
+      new GraphRequestError({ method: "POST", path: "/applications", status: 401, body: "unauthorized" }),
+    );
+
+    expect(message).toContain("The signed-in token was rejected. Sign in again.");
+  });
+
   it("names throttling as worth retrying", () => {
     const message = describeSetupFailure(
       new GraphRequestError({ method: "POST", path: "/applications", status: 429, body: "throttled" }),
