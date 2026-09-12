@@ -1,36 +1,10 @@
 import { DeviceCodeCredential } from "@azure/identity";
 import { createFetchSetupGraph } from "./adapter.js";
+import { describeSignInFailure, extractAccessToken, parseArgs } from "./cli.js";
 import { runSetup, SetupFailedError } from "./run.js";
 
-// The Azure CLI's own public client id. It is pre-consented in every tenant,
-// which is what makes the zero-setup path possible: a user can sign in and
-// create an app registration without anyone first creating a bootstrap app to
-// sign in with. Documented as the default in docs/SETUP.md, including that
-// some tenants block it with Conditional Access and that --client-id lets a
-// caller substitute their own bootstrap app registration instead.
-const DEFAULT_DEVICE_CODE_CLIENT_ID = "14d82eec-204b-4c2f-b7e8-296a70dab67e";
-
-function requireArg(name: string): string {
-  const prefix = `--${name}=`;
-  const found = process.argv.find((arg) => arg.startsWith(prefix));
-  if (found === undefined) throw new Error(`missing required argument ${prefix}<value>`);
-  return found.slice(prefix.length);
-}
-
-function optionalArg(name: string): string | undefined {
-  const prefix = `--${name}=`;
-  const found = process.argv.find((arg) => arg.startsWith(prefix));
-  return found === undefined ? undefined : found.slice(prefix.length);
-}
-
 async function main(): Promise<void> {
-  const tenantId = requireArg("tenant");
-  const siteUrl = requireArg("site");
-  const displayName = process.argv.includes("--name")
-    ? requireArg("name")
-    : "Ironwright Repository Reconciliation";
-  const write = process.argv.includes("--write");
-  const clientId = optionalArg("client-id") ?? DEFAULT_DEVICE_CODE_CLIENT_ID;
+  const { tenantId, siteUrl, displayName, write, clientId } = parseArgs(process.argv);
 
   // Device code, because creating an app registration needs a human with
   // Application Administrator rights. The server's own credentials cannot
@@ -43,7 +17,19 @@ async function main(): Promise<void> {
     },
   });
 
-  const adminToken = await credential.getToken("https://graph.microsoft.com/.default");
+  // Kept in its own try/catch, separate from the one around runSetup below,
+  // because a failed or cancelled sign-in is a different kind of failure with
+  // a different, specific next step: the --client-id escape hatch. Letting it
+  // propagate to the default handler would print a raw stack trace for the
+  // one failure mode docs/SETUP.md already anticipates by name.
+  let adminToken;
+  try {
+    adminToken = await credential.getToken("https://graph.microsoft.com/.default");
+  } catch (error) {
+    console.error(describeSignInFailure(error));
+    process.exitCode = 1;
+    return;
+  }
 
   const graph = createFetchSetupGraph(adminToken.token, async (appId, secret) => {
     const body = new URLSearchParams({
@@ -57,9 +43,7 @@ async function main(): Promise<void> {
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body,
     });
-    const json = (await response.json()) as { access_token?: string };
-    if (json.access_token === undefined) throw new Error("client credentials flow returned no access token");
-    return json.access_token;
+    return extractAccessToken(response.status, await response.text());
   });
 
   try {
