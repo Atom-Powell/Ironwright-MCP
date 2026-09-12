@@ -11,26 +11,20 @@ import {
   SITES_FULL_CONTROL_ROLE_CLAIM,
 } from "../../src/setup/steps.js";
 
-// The known-stable value of Microsoft Graph's Sites.Selected application role,
-// asserted here as a literal because the production code that requests it on a
-// registration cannot look it up (no service principal exists to query yet);
-// see the comment on SITES_SELECTED_APP_ROLE_ID_FOR_REGISTRATION in steps.ts.
-const SITES_SELECTED_APP_ROLE_ID = "883ea226-0bf2-4a8f-9f9d-92c9162a727d";
-
 function fakeAccessToken(payload: unknown): string {
   const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
   return `header.${encoded}.signature`;
 }
 
 describe("buildAppRegistrationRequest", () => {
-  it("requests a single-tenant confidential client holding the Sites.Selected application permission", () => {
-    expect(buildAppRegistrationRequest("Ironwright Reconciliation")).toEqual({
+  it("requests a single-tenant confidential client holding the given app role", () => {
+    expect(buildAppRegistrationRequest("Ironwright Reconciliation", "role-selected")).toEqual({
       displayName: "Ironwright Reconciliation",
       signInAudience: "AzureADMyOrg",
       requiredResourceAccess: [
         {
           resourceAppId: MICROSOFT_GRAPH_APP_ID,
-          resourceAccess: [{ id: SITES_SELECTED_APP_ROLE_ID, type: "Role" }],
+          resourceAccess: [{ id: "role-selected", type: "Role" }],
         },
       ],
     });

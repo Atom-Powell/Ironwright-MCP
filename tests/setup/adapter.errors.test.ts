@@ -20,8 +20,8 @@ describe("Graph failures", () => {
   it("carries the status and the Graph error code, not just the text", async () => {
     stubFetch({ status: 403, body: '{"error":{"code":"Authorization_RequestDenied","message":"Insufficient privileges."}}' });
 
-    await expect(graph().createApplication(buildAppRegistrationRequest("App"))).rejects.toThrow(GraphRequestError);
-    await expect(graph().createApplication(buildAppRegistrationRequest("App"))).rejects.toMatchObject({
+    await expect(graph().createApplication(buildAppRegistrationRequest("App", "role-selected"))).rejects.toThrow(GraphRequestError);
+    await expect(graph().createApplication(buildAppRegistrationRequest("App", "role-selected"))).rejects.toMatchObject({
       status: 403,
       code: "Authorization_RequestDenied",
       method: "POST",
@@ -46,7 +46,7 @@ describe("unexpected success shapes", () => {
   it("names the missing field when a created application has no appId", async () => {
     stubFetch({ status: 201, body: JSON.stringify({ id: "object-1" }) });
 
-    await expect(graph().createApplication(buildAppRegistrationRequest("App"))).rejects.toThrow(/"appId"/);
+    await expect(graph().createApplication(buildAppRegistrationRequest("App", "role-selected"))).rejects.toThrow(/"appId"/);
   });
 
   it("names the missing field when a 2xx carries no body at all", async () => {

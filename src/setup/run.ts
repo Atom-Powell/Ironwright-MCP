@@ -90,19 +90,31 @@ export async function runSetup(graph: SetupGraph, args: SetupArgs, hooks: SetupH
   // catching it here costs nothing: no application exists yet to roll back.
   const { siteId } = await graph.resolveSite(siteIdPathFromUrl(args.siteUrl));
 
-  const { objectId, appId } = await graph.createApplication(buildAppRegistrationRequest(args.displayName));
+  // Also resolved before anything is created, for the same reason: this is a
+  // read-only GET against a well-known object (Graph's own service principal)
+  // that depends on nothing this run creates, so a failure here leaves nothing
+  // to roll back either. Doing it here, rather than after the application
+  // exists, is what lets the registration request below name its role by a
+  // looked-up id instead of a hardcoded one, and the same appRoles list is
+  // reused for the role assignment further down so Graph's service principal
+  // is fetched only once.
+  const graphServicePrincipal = await graph.resolveServicePrincipal(MICROSOFT_GRAPH_APP_ID);
+  const sitesSelectedAppRoleId = appRoleIdByValue(graphServicePrincipal.appRoles, SITES_SELECTED_ROLE_CLAIM);
+
+  const { objectId, appId } = await graph.createApplication(
+    buildAppRegistrationRequest(args.displayName, sitesSelectedAppRoleId),
+  );
 
   let sitePermissionId: string | undefined;
   try {
     const { secretText } = await graph.addPassword(objectId);
 
     const servicePrincipal = await graph.createServicePrincipal(appId);
-    const graphServicePrincipal = await graph.resolveServicePrincipal(MICROSOFT_GRAPH_APP_ID);
     await graph.grantAppRole(
       buildAppRoleAssignmentRequest({
         principalId: servicePrincipal.objectId,
         resourceId: graphServicePrincipal.objectId,
-        appRoleId: appRoleIdByValue(graphServicePrincipal.appRoles, SITES_SELECTED_ROLE_CLAIM),
+        appRoleId: sitesSelectedAppRoleId,
       }),
     );
 

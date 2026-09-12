@@ -58,17 +58,17 @@ const args = {
 };
 
 describe("runSetup", () => {
-  it("resolves the site, registers, consents, grants, then verifies, in that order", async () => {
+  it("resolves the site, resolves Graph's service principal, registers, consents, grants, then verifies, in that order", async () => {
     const { graph, calls } = fakeGraph();
 
     const result = await runSetup(graph, args);
 
     expect(calls).toEqual([
       "resolveSite:contoso.sharepoint.com:/sites/Example",
+      `resolveServicePrincipal:${MICROSOFT_GRAPH_APP_ID}`,
       "createApplication:Ironwright Reconciliation",
       "addPassword:object-1",
       "createServicePrincipal:app-1",
-      `resolveServicePrincipal:${MICROSOFT_GRAPH_APP_ID}`,
       `grantAppRole:sp-1:graph-sp-1:${SITES_SELECTED_ROLE_ID}`,
       "grantSitePermission:site-1:write",
       "verifyAppAccess",
@@ -76,7 +76,7 @@ describe("runSetup", () => {
     expect(result).toEqual({ appId: "app-1", objectId: "object-1", secret: "secret-1", siteId: "site-1" });
   });
 
-  it("requests the Sites.Selected application permission on the registration itself", async () => {
+  it("requests the Sites.Selected application permission on the registration itself, using the looked-up id", async () => {
     let request: AppRegistrationRequest | undefined;
     const { graph } = fakeGraph({
       createApplication: async (received) => {
@@ -90,9 +90,9 @@ describe("runSetup", () => {
     expect(request?.requiredResourceAccess).toEqual([
       {
         resourceAppId: MICROSOFT_GRAPH_APP_ID,
-        // Same known-stable role id asserted in steps.test.ts: the registration
-        // request cannot look this up, since no service principal exists yet.
-        resourceAccess: [{ id: "883ea226-0bf2-4a8f-9f9d-92c9162a727d", type: "Role" }],
+        // The fake's resolveServicePrincipal reports this id for Sites.Selected;
+        // no GUID is hardcoded in production code for this call any more.
+        resourceAccess: [{ id: SITES_SELECTED_ROLE_ID, type: "Role" }],
       },
     ]);
   });

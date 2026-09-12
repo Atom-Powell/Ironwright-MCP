@@ -61,7 +61,7 @@ describe("createFetchSetupGraph", () => {
   it("creates the application with the requested app role", async () => {
     const calls = stubFetch([{ status: 201, body: JSON.stringify({ id: "object-1", appId: "app-1" }) }]);
 
-    const result = await graph().createApplication(buildAppRegistrationRequest("App"));
+    const result = await graph().createApplication(buildAppRegistrationRequest("App", "role-selected"));
 
     expect(result).toEqual({ objectId: "object-1", appId: "app-1" });
     expect(calls[0]).toMatchObject({ url: "https://graph.microsoft.com/v1.0/applications", method: "POST" });

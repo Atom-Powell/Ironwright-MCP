@@ -35,15 +35,6 @@ export function appRoleIdByValue(appRoles: GraphAppRole[], value: string): strin
   return match.id;
 }
 
-// The registration request below is built before any application exists, so
-// there is no service principal response to look this id up in yet -- unlike
-// the role assignment, which runs after that lookup and is why it no longer
-// hardcodes anything. This value is still safe to hardcode here because it
-// only *requests* the permission: Entra validates it server-side and rejects
-// the request outright if it is ever wrong, rather than silently assigning the
-// wrong role the way a bad id in an assignment call would.
-const SITES_SELECTED_APP_ROLE_ID_FOR_REGISTRATION = "883ea226-0bf2-4a8f-9f9d-92c9162a727d";
-
 export interface RequiredResourceAccess {
   resourceAppId: string;
   resourceAccess: { id: string; type: "Role" }[];
@@ -98,15 +89,19 @@ export type VerificationOutcome =
  * to be requested on the registration before anyone can consent to it. Step two
  * is the per-site grant. An app that holds only the per-site grant gets a token
  * with no roles claim at all, and every Graph call it makes returns 403.
+ *
+ * `appRoleId` is supplied by the caller rather than hardcoded here, because
+ * this function has no way to look it up itself: Graph's own service
+ * principal has to be resolved first, before anything else this run creates.
  */
-export function buildAppRegistrationRequest(displayName: string): AppRegistrationRequest {
+export function buildAppRegistrationRequest(displayName: string, appRoleId: string): AppRegistrationRequest {
   return {
     displayName,
     signInAudience: "AzureADMyOrg",
     requiredResourceAccess: [
       {
         resourceAppId: MICROSOFT_GRAPH_APP_ID,
-        resourceAccess: [{ id: SITES_SELECTED_APP_ROLE_ID_FOR_REGISTRATION, type: "Role" }],
+        resourceAccess: [{ id: appRoleId, type: "Role" }],
       },
     ],
   };
