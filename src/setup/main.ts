@@ -122,10 +122,15 @@ async function main(): Promise<void> {
     );
     console.log(`  IW_BOOTSTRAP_CLIENT_ID=${result.appId}`);
     console.log(`  IW_BOOTSTRAP_CLIENT_SECRET=${result.secret}`);
+    // Not a "still needs consent" notice: for an application permission, the
+    // appRoleAssignedTo call runCreateBootstrap just made *is* admin consent,
+    // and it only succeeds for a signed-in Privileged Role Administrator or
+    // Global Administrator in the first place. If this line prints at all,
+    // that call already succeeded, so the permission is already usable.
     console.log(
-      "Its Sites.FullControl.All application permission still needs admin consent from a Privileged Role " +
-        "Administrator or Global Administrator before it can issue a per-site grant. Once consented, set the two " +
-        "values above and re-run this command without --create-bootstrap.",
+      "Its Sites.FullControl.All application permission is already admin-consented: the role assignment this " +
+        "command just made is what performs that for an application permission, so there is no separate consent " +
+        "step to do in the portal. Set the two values above and run this command again without --create-bootstrap.",
     );
     return;
   }

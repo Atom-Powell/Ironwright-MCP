@@ -203,25 +203,30 @@ const CONSENT_REMEDY =
 // per-site grant with the bootstrap application's token. A 403 with the role
 // present therefore does not mean the grant was never requested; it means
 // either that request has not propagated yet, or it landed somewhere other
-// than this site. Re-running the command is never suggested, here or in
-// CONSENT_REMEDY, because it registers a second application rather than
-// repairing this one.
+// than this site. Both causes get an action, not just a diagnosis: a message
+// that names a cause and leaves the operator nowhere to go for it is the same
+// defect this remedy exists to remove. Re-running the command is never
+// suggested, here or in CONSENT_REMEDY, because it registers a second
+// application rather than repairing this one.
 const GRANT_REMEDY =
-  "The application permission is consented, and this command already issued the per-site grant moments ago, so a " +
-  "403 here most likely means that grant has not propagated to this site yet. Wait a short while and check access " +
-  "again before assuming anything failed. If it is still refused afterward, the next most likely cause is that the " +
-  "bootstrap application's grant was issued against the wrong site rather than this one. Running this command " +
-  "again will not fix either cause: it creates a second, separate application registration instead of repairing " +
-  "this one.";
+  "This command already issued the per-site grant moments ago, so a 403 here has one of two causes. The likelier " +
+  "one is that the grant has not propagated to this site yet: wait a short while and check access again before " +
+  "assuming anything failed. If it is still refused afterward, confirm with GET /sites/{site-id}/permissions " +
+  "whether an entry for this app actually exists on this site; if it does not, or names a different site, an " +
+  "administrator has to issue it directly with POST /sites/{site-id}/permissions using the bootstrap application's " +
+  "own token, naming the app id reported above. Running this command again will not fix either cause: it creates a " +
+  "second, separate application registration instead of repairing this one.";
 
 /**
  * Sites.Selected produces two different 403s with two different remedies, and
  * telling them apart is the reason this command exists rather than another app
  * registration walkthrough. A token with no Sites.Selected role means the
  * application permission was never admin-consented. A token that carries the
- * role and is still refused means the per-site grant is missing. Neither is
- * fixed by re-running this command, which would create a second registration,
- * so neither message suggests it.
+ * role and is still refused means the per-site grant this command already
+ * issued has not taken effect on this site, either because it has not
+ * propagated yet or because it landed on a different site; it does not mean
+ * the grant is absent. Neither cause is fixed by re-running this command,
+ * which would create a second registration, so neither message suggests it.
  */
 export function interpretVerification(
   status: number,
@@ -243,7 +248,7 @@ export function interpretVerification(
       return {
         ok: false,
         reason: "grant-missing",
-        message: `The app was denied access even though its token carries the Sites.Selected role, so the application permission is consented and the per-site grant is what is missing. ${GRANT_REMEDY}`,
+        message: `The app was denied access even though its token carries the Sites.Selected role, so the application permission is consented and the per-site grant has not taken effect on this site yet. ${GRANT_REMEDY}`,
       };
     }
 
@@ -252,7 +257,7 @@ export function interpretVerification(
     return {
       ok: false,
       reason: "cause-undetermined",
-      message: `The app was denied access and its token could not be read, so both causes are still open. Check the application permission first: ${CONSENT_REMEDY} If the role is present, the per-site grant is the remaining cause. ${GRANT_REMEDY}`,
+      message: `The app was denied access and its token could not be read, so both causes are still open. Check the application permission first: ${CONSENT_REMEDY} If the role is present, an unpropagated or misdirected per-site grant is the remaining cause, not an absent one. ${GRANT_REMEDY}`,
     };
   }
 

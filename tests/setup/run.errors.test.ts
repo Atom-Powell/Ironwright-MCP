@@ -183,6 +183,34 @@ describe("runSetup rollback", () => {
     expect(fake.calls.some((call) => call.startsWith("deleteSitePermission"))).toBe(true);
   });
 
+  it("tolerates a rollback delete failing for a permission whose id was never known, reporting it rather than masking the original error", async () => {
+    const fake = fakeGraph({
+      grantSitePermission: async () => {
+        throw new Error("permission response had no id");
+      },
+      deleteSitePermission: async () => {
+        throw new Error("Graph DELETE /sites/site-1/permissions/ failed with 404: itemNotFound");
+      },
+    });
+
+    let caught: unknown;
+    try {
+      await run(fake);
+    } catch (error) {
+      caught = error;
+    }
+
+    // The original failure survives even though the compensating delete this
+    // command attempted also failed: whatever went wrong with the grant is
+    // still the more useful thing for the operator to see, not the secondary
+    // failure from trying to clean it up.
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toMatch(/no id/);
+    expect((caught as Error).message).not.toMatch(/itemNotFound/);
+    expect(fake.notices.join("\n")).toMatch(/cleanup attempt failed/i);
+    expect(fake.notices.join("\n")).toContain("itemNotFound");
+  });
+
   it("reports the registration for manual deletion when rollback itself fails, without masking the cause", async () => {
     const fake = fakeGraph({
       verifyAppAccess: async () => ({ status: 403, body: "{}", appRoles: [] }),
