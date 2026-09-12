@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_DEVICE_CODE_CLIENT_ID, describeSignInFailure, extractAccessToken, parseArgs } from "../../src/setup/cli.js";
+import {
+  DEFAULT_DEVICE_CODE_CLIENT_ID,
+  acquireTokenWithRetry,
+  describeSignInFailure,
+  extractAccessToken,
+  parseArgs,
+} from "../../src/setup/cli.js";
 
 const baseArgv = ["node", "main.js", "--tenant=tenant-1", "--site=https://contoso.sharepoint.com/sites/Example"];
 
@@ -13,7 +19,10 @@ describe("parseArgs", () => {
     expect(parseArgs(argv).displayName).toBe("Custom Name");
   });
 
-  it("uses the Azure CLI's public client id by default", () => {
+  it("uses Microsoft's Graph Command Line Tools application id by default", () => {
+    // Pinned as a literal: this is the Graph Command Line Tools id, not the
+    // Azure CLI's, and the two were confused here once already.
+    expect(DEFAULT_DEVICE_CODE_CLIENT_ID).toBe("14d82eec-204b-4c2f-b7e8-296a70dab67e");
     expect(parseArgs(baseArgv).clientId).toBe(DEFAULT_DEVICE_CODE_CLIENT_ID);
   });
 
@@ -44,9 +53,81 @@ describe("extractAccessToken", () => {
 });
 
 describe("describeSignInFailure", () => {
-  it("points at the --client-id escape hatch", () => {
+  it("points at the --client-id escape hatch without misnaming the default application", () => {
     const message = describeSignInFailure(new Error("Conditional Access blocked this client"));
+
     expect(message).toContain("--client-id");
     expect(message).toContain("Conditional Access blocked this client");
+    expect(message).toContain("Graph Command Line Tools");
+    expect(message).not.toContain("Azure CLI");
+  });
+});
+
+describe("acquireTokenWithRetry", () => {
+  it("returns the token on the first attempt when nothing is wrong", async () => {
+    let attempts = 0;
+    const slept: number[] = [];
+
+    const token = await acquireTokenWithRetry(
+      async () => {
+        attempts += 1;
+        return "token-1";
+      },
+      { sleep: async (ms) => void slept.push(ms) },
+    );
+
+    expect(token).toBe("token-1");
+    expect(attempts).toBe(1);
+    expect(slept).toEqual([]);
+  });
+
+  it("retries a secret that has not propagated yet and returns the token", async () => {
+    let attempts = 0;
+    const slept: number[] = [];
+
+    const token = await acquireTokenWithRetry(
+      async () => {
+        attempts += 1;
+        if (attempts < 3) throw new Error("client credentials request failed with 401: AADSTS7000215: Invalid client secret.");
+        return "token-1";
+      },
+      { sleep: async (ms) => void slept.push(ms) },
+    );
+
+    expect(token).toBe("token-1");
+    expect(attempts).toBe(3);
+    expect(slept).toEqual([3000, 6000]);
+  });
+
+  it("retries a service principal that has not propagated yet", async () => {
+    let attempts = 0;
+
+    const token = await acquireTokenWithRetry(
+      async () => {
+        attempts += 1;
+        if (attempts < 2) throw new Error("AADSTS700016: Application with identifier was not found.");
+        return "token-1";
+      },
+      { sleep: async () => {} },
+    );
+
+    expect(token).toBe("token-1");
+    expect(attempts).toBe(2);
+  });
+
+  it("spends about ten seconds at most on propagation, across three attempts", async () => {
+    const slept: number[] = [];
+
+    await expect(
+      acquireTokenWithRetry(
+        async () => {
+          throw new Error("AADSTS7000215: Invalid client secret.");
+        },
+        { sleep: async (ms) => void slept.push(ms) },
+      ),
+    ).rejects.toThrow(/AADSTS7000215/);
+
+    expect(slept).toHaveLength(2);
+    expect(slept.reduce((total, ms) => total + ms, 0)).toBeLessThanOrEqual(10_000);
   });
 });
