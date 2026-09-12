@@ -109,20 +109,26 @@ Cheap to settle now, ten files later.
 
 ## Known minor issues
 
-A site permission granted immediately before a malformed response is not rolled back: the
-field check throws before the permission id is captured, so the rollback removes the
-application and leaves the permission. Capturing the site id and treating the permission as
-possibly-granted from the moment the call starts would close it.
+**CLOSED 2026-09-12 by `aaeaa57`, "fix: close the rollback gap, replication race, and stale
+remedy in setup".** A site permission granted immediately before a malformed response was not
+rolled back: the field check threw before the permission id was captured, so the rollback
+removed the application and left the permission behind. Rollback now tracks the attempt itself,
+before the response is read, and tolerates deleting a permission that may never have existed,
+the same way every other rollback failure already is.
 
-Creating the service principal immediately after the application intermittently fails with
-`Request_ResourceNotFound` from directory replication lag. Bounded retry exists for the same
-class of failure on the token exchange but not here, and with rollback in place, losing that
-race now tears down the whole run.
+**CLOSED 2026-09-12 by `aaeaa57`, "fix: close the rollback gap, replication race, and stale
+remedy in setup".** Creating the service principal immediately after the application
+intermittently failed with `Request_ResourceNotFound` from directory replication lag. It now
+gets the same bounded retry the token exchange already used for the equivalent lag on the
+client-credentials call, so losing that race no longer tears down an otherwise-correct run.
 
-The `grant-missing` remedy tells the operator to issue a per-site grant the command issued
-seconds earlier. Given the sequence, a 403 with the role present is more likely propagation
-than an absent grant, and the consent remedy already acknowledges propagation while this one
-does not.
+**CLOSED 2026-09-12 by `aaeaa57`, "fix: close the rollback gap, replication race, and stale
+remedy in setup", refined by `43df5b1`, "fix: remove the self-contradiction in the
+grant-missing message".** The `grant-missing` remedy told the operator to issue a per-site
+grant the command had already issued seconds earlier under the bootstrap flow. It now names
+propagation as the likelier cause and a mismatched site as the fallback, tells the operator how
+to check and correct each, and still never suggests re-running the command, which would only
+register a second application.
 
 `src/setup/cli.ts` declares itself pure parsing and formatting, then imports `run.js` for a
 single `instanceof` check, which pulls the adapter and its `fetch` calls into the CLI unit
@@ -137,9 +143,18 @@ not originate in that file.
 
 The first live run happened on 2026-09-12 against the `helloironwright` developer tenant and
 failed at the per-site grant, as recorded at the top of this document. Everything before that
-call worked, so what is verified is: device-code sign-in, site resolution, application and
-service principal creation, the Microsoft Graph app role assignment, and rollback on failure.
+call worked, so what is verified from that run is: device-code sign-in, site resolution,
+application and service principal creation, the Microsoft Graph app role assignment, and
+rollback on failure. That same run is also what confirmed the delegated-token restriction
+itself, since the account signing in was a Global Administrator and was still refused.
 
-What remains unverified is everything after the grant: the client-credentials exchange, its
-propagation retry, and the access check that mints a token for the new application. None of
-that has ever executed. The setup command must not be described as working.
+The two-phase bootstrap design that followed, `--create-bootstrap`, the preflight check on
+normal runs, and routing the per-site grant and its rollback through the bootstrap
+application's token, is implemented and covered by the unit and integration test suite against
+a fake Graph adapter. None of it has executed against a real tenant. In particular, the
+client-credentials exchange that mints an app-only token for the bootstrap application, and the
+access check in `verifyAppAccess` that confirms the server's own application can reach the
+site, have never run outside a test double. A live end-to-end run, `--create-bootstrap`
+followed by a normal run against a real site, is the only way to exercise either, and it is
+still outstanding. The setup command's bootstrap flow must not be described as verified working
+end to end until that run happens.

@@ -13,7 +13,9 @@ annotations, returning a placeholder response until the Graph layer lands.
 
 ## Documentation
 
-- `docs/SETUP.md`: per-tenant Entra and SharePoint setup
+- `docs/SETUP.md`: per-tenant Entra and SharePoint setup. The first run against a new tenant
+  is `npm run setup -- --tenant=<id> --create-bootstrap`, a one-time step described there in
+  full before the normal setup run.
 - `docs/superpowers/specs/`: design specifications
 - `docs/superpowers/plans/`: implementation plans
 
