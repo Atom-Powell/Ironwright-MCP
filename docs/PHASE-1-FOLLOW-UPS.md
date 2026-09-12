@@ -143,10 +143,12 @@ propagation as the likelier cause and a mismatched site as the fallback, tells t
 to check and correct each, and still never suggests re-running the command, which would only
 register a second application.
 
-`src/setup/cli.ts` declares itself pure parsing and formatting, then imports `run.js` for a
-single `instanceof` check, which pulls the adapter and its `fetch` calls into the CLI unit
-test module graph. Nothing breaks, but the stated boundary is smeared. Moving
-`SetupFailedError` to its own module restores it.
+**CLOSED 2026-09-12 by `8cf5b08`, "feat: resolve bootstrap credentials and extract the setup
+error type", finished by the final fix wave.** `src/setup/cli.ts` declared itself pure parsing
+and formatting, then imported `run.js` for a single `instanceof` check, which pulled the
+adapter and its `fetch` calls into the CLI unit test module graph. `SetupFailedError` now lives
+in `src/setup/errors.ts` and both `cli.ts` and its tests import it from there, so nothing in
+that module graph reaches the network layer.
 
 The 405 responses and the setup adapter's error paths are covered, but the in-route `-32603`
 handler still echoes the SDK's own error message, the one response path carrying text that did

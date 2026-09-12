@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { acquireTokenWithRetry, describeSetupFailure, extractAccessToken, parseArgs } from "../../src/setup/cli.js";
 import { GraphRequestError } from "../../src/setup/graph-error.js";
-import { SetupFailedError } from "../../src/setup/run.js";
+// Imported from errors.js, not run.js: run.js drags the adapter and its fetch
+// calls into this module graph, which is exactly what extracting the error
+// type was meant to prevent.
+import { SetupFailedError } from "../../src/setup/errors.js";
 
 const baseArgv = ["node", "main.js", "--tenant=tenant-1", "--site=https://contoso.sharepoint.com/sites/Example"];
 

@@ -22,10 +22,14 @@ import { assertBootstrapToken } from "./steps.js";
  * this command just created, and would go inspect the wrong one.
  */
 function acquireAppOnlyToken(tenantId: string, clientId: string, secret: string, label: string): Promise<string> {
-  // Retried, because this exchange runs seconds after the secret and the
-  // service principal were created and Entra replication is not instant.
-  // Without the retry a correct setup intermittently reports an invalid client
-  // secret and sends the operator after a problem that does not exist.
+  // Retried for the new application's own credentials, which are seconds old
+  // when this runs and which Entra has not always finished replicating; without
+  // the retry a correct setup intermittently reports an invalid client secret
+  // and sends the operator after a problem that does not exist. The bootstrap
+  // application's secret is not new, so replication is not a plausible cause
+  // there and the retry buys it nothing: a mistyped bootstrap secret returns
+  // AADSTS7000215 too and costs about nine seconds before it is reported. That
+  // is the accepted price of one shared implementation rather than two.
   return acquireTokenWithRetry(async () => {
     const body = new URLSearchParams({
       client_id: clientId,

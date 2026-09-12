@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SetupGraph } from "../../src/setup/adapter.js";
+import { GraphRequestError } from "../../src/setup/graph-error.js";
 import type { SetupResult } from "../../src/setup/run.js";
 import { SetupFailedError, runSetup } from "../../src/setup/run.js";
 import { SITES_SELECTED_ROLE_CLAIM } from "../../src/setup/steps.js";
@@ -99,7 +100,12 @@ describe("runSetup service principal replication lag", () => {
       createServicePrincipal: async () => {
         attempts += 1;
         if (attempts === 1) {
-          throw new Error("Graph POST /servicePrincipals failed with 404 (Request_ResourceNotFound): {}");
+          throw new GraphRequestError({
+            method: "POST",
+            path: "/servicePrincipals",
+            status: 404,
+            body: JSON.stringify({ error: { code: "Request_ResourceNotFound" } }),
+          });
         }
         return { objectId: "sp-1" };
       },
@@ -116,6 +122,29 @@ describe("runSetup service principal replication lag", () => {
       siteId: "site-1",
       verification: { confirmed: true },
     });
+  });
+
+  it("does not retry a response that merely quotes the code somewhere in its body", async () => {
+    // Nine seconds of waiting is the cost of matching on the message text
+    // rather than on Graph's own code field, and the message carries the whole
+    // response body.
+    let attempts = 0;
+    const fake = fakeGraph({
+      createServicePrincipal: async () => {
+        attempts += 1;
+        throw new GraphRequestError({
+          method: "POST",
+          path: "/servicePrincipals",
+          status: 403,
+          body: JSON.stringify({
+            error: { code: "Authorization_RequestDenied", message: "not Request_ResourceNotFound" },
+          }),
+        });
+      },
+    });
+
+    await expect(run(fake, { sleep: async () => {} })).rejects.toThrow(/Authorization_RequestDenied/);
+    expect(attempts).toBe(1);
   });
 
   it("does not retry a failure that is not the replication-lag error code", async () => {

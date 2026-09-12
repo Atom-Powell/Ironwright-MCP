@@ -128,12 +128,11 @@ export function extractAccessToken(status: number, text: string): string {
   throw new Error(`client credentials request failed with ${status}: ${text}`);
 }
 
-// The two Entra codes that a correct setup produces anyway, because this token
-// request runs seconds after the secret and the service principal were created:
-// 7000215 for a secret that has not replicated to the token endpoint yet, and
-// 700016 for a service principal in the same state. Nothing else is retried,
-// because every other cause is a real configuration error that more attempts
-// cannot fix.
+// The two Entra codes that a correct setup produces anyway when the credential
+// being exchanged was just created: 7000215 for a secret that has not
+// replicated to the token endpoint yet, and 700016 for a service principal in
+// the same state. Nothing else is retried, because every other cause is a real
+// configuration error that more attempts cannot fix.
 const PROPAGATION_TOKEN_ERROR_CODES = ["AADSTS7000215", "AADSTS700016"] as const;
 
 // Three attempts across roughly ten seconds. A genuinely wrong secret also

@@ -1,5 +1,6 @@
 import type { SetupGraph } from "./adapter.js";
 import { SetupFailedError } from "./errors.js";
+import { GraphRequestError } from "./graph-error.js";
 import {
   MICROSOFT_GRAPH_APP_ID,
   SITES_FULL_CONTROL_ROLE_CLAIM,
@@ -103,9 +104,12 @@ async function rollbackApplication(
 // more attempts cannot fix.
 const SERVICE_PRINCIPAL_RETRY_DELAYS_MS = [3000, 6000] as const;
 
+// Matched on Graph's own machine-readable code, not on the message text. The
+// message carries the whole response body, so a substring match retries any
+// failure whose body happens to quote this code anywhere, and each false
+// positive costs nine seconds of waiting before reporting the real error.
 function isDirectoryReplicationLagError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes("Request_ResourceNotFound");
+  return error instanceof GraphRequestError && error.code === "Request_ResourceNotFound";
 }
 
 /**
