@@ -47,7 +47,14 @@ async function main(): Promise<void> {
   });
 
   try {
-    const result = await runSetup(graph, { displayName, siteUrl, write });
+    const result = await runSetup(
+      graph,
+      { displayName, siteUrl, write },
+      // Rollback notices go to stderr as they happen, ahead of the failure
+      // itself, so an operator reading a failed run sees whether a credentialed
+      // registration was cleaned up before they see why the run failed.
+      { onNotice: (message) => console.error(message) },
+    );
     console.log("Setup complete. Store these as deployment secrets, not in the repository.");
     console.log(`  AZURE_TENANT_ID=${tenantId}`);
     console.log(`  AZURE_CLIENT_ID=${result.appId}`);

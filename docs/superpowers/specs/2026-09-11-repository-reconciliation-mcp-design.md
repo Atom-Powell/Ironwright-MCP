@@ -306,9 +306,13 @@ copy of production.
 1. **Foundation.** Scaffold, stateless transport with per-request server instances, separate
    `GET /health`, profile schema and validator, all ten tools stubbed with real schemas and
    annotations, both contract tests, CI including the error-path harness gate, and a scripted
-   setup command that registers the app, performs the `POST /sites/{site-id}/permissions`
-   grant, and verifies it with a live call. The scripted setup exists because skipping the
-   grant produces a 403 that looks like a broken app registration, and because "everyone
+   setup command that carries out both halves of `Sites.Selected` and verifies the result. Both
+   halves, because the permission is two grants: the app registration requests Graph's
+   `Sites.Selected` app role and gets a service principal and an admin-consenting
+   `appRoleAssignment` for it, and only then does the per-site
+   `POST /sites/{site-id}/permissions` grant mean anything. Verification calls Graph as the new
+   app. The scripted setup exists because skipping either half produces a 403 that looks like a
+   broken app registration, and because "everyone
    ships the same Azure AD walkthrough and nobody improves it" is a documented ecosystem-wide
    missed opportunity. This runs repeatedly under one-instance-per-tenant.
 2. **Graph layer and store.** Path addressing, ETags, `$batch`, delta, Excel sessions,

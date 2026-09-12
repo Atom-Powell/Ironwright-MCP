@@ -1,23 +1,54 @@
 import { describe, expect, it } from "vitest";
 import {
+  MICROSOFT_GRAPH_APP_ID,
+  SITES_SELECTED_APP_ROLE_ID,
+  appRolesFromAccessToken,
   buildAppRegistrationRequest,
+  buildAppRoleAssignmentRequest,
   buildSitePermissionRequest,
   interpretVerification,
   siteIdPathFromUrl,
 } from "../../src/setup/steps.js";
 
+function fakeAccessToken(payload: unknown): string {
+  const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  return `header.${encoded}.signature`;
+}
+
 describe("buildAppRegistrationRequest", () => {
-  it("requests a single-tenant confidential client", () => {
+  it("requests a single-tenant confidential client holding the Sites.Selected application permission", () => {
     expect(buildAppRegistrationRequest("Ironwright Reconciliation")).toEqual({
       displayName: "Ironwright Reconciliation",
       signInAudience: "AzureADMyOrg",
+      requiredResourceAccess: [
+        {
+          resourceAppId: MICROSOFT_GRAPH_APP_ID,
+          resourceAccess: [{ id: SITES_SELECTED_APP_ROLE_ID, type: "Role" }],
+        },
+      ],
+    });
+  });
+});
+
+describe("buildAppRoleAssignmentRequest", () => {
+  it("assigns the Sites.Selected app role from the new service principal to Microsoft Graph", () => {
+    expect(buildAppRoleAssignmentRequest({ principalId: "sp-1", resourceId: "graph-sp-1" })).toEqual({
+      principalId: "sp-1",
+      resourceId: "graph-sp-1",
+      appRoleId: SITES_SELECTED_APP_ROLE_ID,
     });
   });
 });
 
 describe("buildSitePermissionRequest", () => {
   it("grants write access to one application identity", () => {
-    expect(buildSitePermissionRequest({ appId: "11111111-1111-1111-1111-111111111111", appDisplayName: "App", write: true })).toEqual({
+    expect(
+      buildSitePermissionRequest({
+        appId: "11111111-1111-1111-1111-111111111111",
+        appDisplayName: "App",
+        write: true,
+      }),
+    ).toEqual({
       roles: ["write"],
       grantedToIdentities: [{ application: { id: "11111111-1111-1111-1111-111111111111", displayName: "App" } }],
     });
@@ -69,8 +100,18 @@ describe("siteIdPathFromUrl", () => {
   });
 });
 
+describe("appRolesFromAccessToken", () => {
+  it("reads the roles claim out of an application token", () => {
+    expect(appRolesFromAccessToken(fakeAccessToken({ roles: ["Sites.Selected"] }))).toEqual(["Sites.Selected"]);
+  });
+
+  it("reports no roles for a token whose payload carries no roles claim", () => {
+    expect(appRolesFromAccessToken(fakeAccessToken({ aud: "https://graph.microsoft.com" }))).toEqual([]);
+  });
+});
+
 describe("interpretVerification", () => {
   it("treats 200 as success", () => {
-    expect(interpretVerification(200, "{}")).toEqual({ ok: true });
+    expect(interpretVerification(200, "{}", { sitesSelectedRolePresent: true })).toEqual({ ok: true });
   });
 });

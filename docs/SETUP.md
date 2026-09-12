@@ -4,9 +4,22 @@ One server instance serves one customer tenant. Run this once per tenant.
 
 ## What you need
 
-- A user with Application Administrator (or Cloud Application Administrator) rights in the target tenant, to create the app registration.
-- A user with site owner rights on the target SharePoint site, to grant that app access to it. This can be the same person.
+- A user with Application Administrator or Cloud Application Administrator rights in the target tenant, to create the app registration and its service principal.
+- A user with Privileged Role Administrator or Global Administrator rights, to grant admin consent for the `Sites.Selected` application permission. Application Administrator is not enough for this one step: that role can consent to every API except Microsoft Graph, and `Sites.Selected` is a Microsoft Graph permission. This is the one prerequisite no script can work around.
+- A user with site owner rights on the target SharePoint site, to grant that app access to it. All three can be the same person.
 - Node 22 or later.
+
+## The permission model
+
+`Sites.Selected` is two grants, not one, and the second is worthless without the first.
+
+The first grant is the application permission itself. The app registration has to request Microsoft Graph's `Sites.Selected` app role, and an administrator has to consent to it in the tenant. Until that happens, tokens issued for the app carry no roles claim at all and Graph refuses everything the app asks for.
+
+The second grant is per site. `POST /sites/{site-id}/permissions` names one app and one site, and it is what turns a consented `Sites.Selected` into read or write access to that one library. This is the least-privilege boundary the whole project rests on: the app can reach the sites it was granted and no others.
+
+The command performs both, in that order, and then verifies. It creates the registration with the app role requested, creates the service principal for it, assigns the app role from that service principal to Microsoft Graph's service principal, which is the admin consent step, grants the per-site permission, and finally calls Graph as the new app to confirm the result.
+
+The service principal matters more than it looks. `POST /applications` creates a registration, not an identity. Without an explicit `POST /servicePrincipals` there is nothing in the tenant for a role assignment to attach to and nothing for the token endpoint to resolve, and the first client credentials request fails with AADSTS700016 naming an application that plainly does exist.
 
 ## Run it
 
@@ -17,9 +30,7 @@ npm run setup -- --tenant=<tenant-id> --site=https://<tenant>.sharepoint.com/sit
 
 Omit `--write` to grant read only site access, which is the right choice for a deployment that will never run remediation.
 
-The command signs you in with a device code, creates a single tenant confidential client, adds a client secret, resolves the site, grants that one app access to that one site, and then verifies the grant using a token minted for the new app rather than your own.
-
-That last step matters. `Sites.Selected` does nothing until a per site grant is issued, and an administrator's own token can read the site whether or not the grant exists, so verifying with your own credentials would report success against a server that cannot actually work.
+The command signs you in with a device code, then runs the sequence above under your own token. Verification is the part worth keeping. It uses a token minted for the new app rather than yours, because an administrator's token can read the site whether or not any of this worked, so verifying with your own credentials would report success against a server that cannot actually run.
 
 ## The device code sign in and its client id
 
@@ -40,6 +51,18 @@ Store them as deployment secrets, in Key Vault or the container app's secret sto
 
 Writes stay disabled until `IW_ALLOW_WRITES=true` is set on the deployment, regardless of the site permission granted here.
 
+## What a failed run leaves behind
+
+Nothing, if the rollback succeeds. A run that fails after creating the app registration deletes it again, along with the site permission if one was granted by then. Deleting the registration also removes its service principal and the client secret held on it, so a failed attempt does not leave a working credential in the tenant.
+
+If the rollback itself fails, the command says so and names the application id and object id to delete by hand. That message is the one case where manual cleanup is required, and it is worth acting on immediately, because the abandoned registration holds a client secret that was printed nowhere.
+
 ## If verification fails
 
-The command maps the failure to a cause rather than passing the raw status through, because the causes do not read the way you would expect. A 403 means the per site grant is missing, which is by far the most common outcome and looks nothing like its cause: it looks like a broken app registration, when the registration is almost always fine. A 401 means the credentials are wrong. A 404 means the site URL is wrong. Anything else is printed with the full response body from Graph, since it does not match a cause this command already recognizes.
+The command maps the failure to a cause rather than passing the raw status through, because the causes do not read the way you would expect.
+
+A 403 has two possible causes and they need opposite fixes, so the command tells them apart by reading the roles claim of the token it just used. A token carrying no `Sites.Selected` role means the application permission was never admin-consented, which needs a Privileged Role Administrator or Global Administrator rather than another run of this command. A token that carries the role and is still refused means the per-site grant is what is missing, and `POST /sites/{site-id}/permissions` for the named app and site is the fix. Directory changes can also take a short time to reach a newly issued token, so a consent granted seconds earlier can still read as absent.
+
+A 401 means the credentials are wrong. A 404 means the site URL is wrong. Anything else is printed with the full response body from Graph, since it does not match a cause this command already recognizes.
+
+Re-running the command is not a repair. It creates a second app registration with a second secret rather than fixing the first one.

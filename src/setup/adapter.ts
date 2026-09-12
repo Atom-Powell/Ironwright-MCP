@@ -1,16 +1,39 @@
-import type { AppRegistrationRequest, SitePermissionRequest } from "./steps.js";
+import { GraphRequestError } from "./graph-error.js";
+import { appRolesFromAccessToken } from "./steps.js";
+import type { AppRegistrationRequest, AppRoleAssignmentRequest, SitePermissionRequest } from "./steps.js";
 
 export interface SetupGraph {
+  resolveSite(sitePath: string): Promise<{ siteId: string }>;
   createApplication(request: AppRegistrationRequest): Promise<{ objectId: string; appId: string }>;
   addPassword(objectId: string): Promise<{ secretText: string }>;
-  resolveSite(sitePath: string): Promise<{ siteId: string }>;
-  grantSitePermission(siteId: string, request: SitePermissionRequest): Promise<void>;
-  verifyAppAccess(args: { appId: string; secret: string; siteId: string }): Promise<{ status: number; body: string }>;
+  createServicePrincipal(appId: string): Promise<{ objectId: string }>;
+  resolveServicePrincipal(appId: string): Promise<{ objectId: string }>;
+  grantAppRole(request: AppRoleAssignmentRequest): Promise<void>;
+  grantSitePermission(siteId: string, request: SitePermissionRequest): Promise<{ permissionId: string }>;
+  verifyAppAccess(args: {
+    appId: string;
+    secret: string;
+    siteId: string;
+  }): Promise<{ status: number; body: string; appRoles: string[] | undefined }>;
+  deleteSitePermission(siteId: string, permissionId: string): Promise<void>;
+  deleteApplication(objectId: string): Promise<void>;
 }
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
 
-async function graphJson<T>(token: string, method: string, path: string, body?: unknown): Promise<T> {
+interface GraphResponse {
+  method: string;
+  path: string;
+  status: number;
+  value: unknown;
+}
+
+async function graphRequest(
+  token: string,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<GraphResponse> {
   const response = await fetch(`${GRAPH}${path}`, {
     method,
     headers: {
@@ -22,9 +45,51 @@ async function graphJson<T>(token: string, method: string, path: string, body?: 
 
   const text = await response.text();
   if (!response.ok) {
-    throw new Error(`Graph ${method} ${path} failed with ${response.status}: ${text}`);
+    throw new GraphRequestError({ method, path, status: response.status, body: text });
   }
-  return text.length > 0 ? (JSON.parse(text) as T) : ({} as T);
+
+  let value: unknown = undefined;
+  if (text.length > 0) {
+    try {
+      value = JSON.parse(text);
+    } catch {
+      // A 2xx that is not JSON means something other than Graph answered, most
+      // often a proxy. Treating it as an empty body would hide that behind a
+      // missing-field error naming the wrong cause.
+      throw new Error(
+        `Graph ${method} ${path} returned ${response.status} with a body that is not JSON. ` +
+          "Something other than Graph answered this request, so the setup cannot continue.",
+      );
+    }
+  }
+
+  return { method, path, status: response.status, value };
+}
+
+/**
+ * Pulls named string fields out of a Graph response and fails loudly when one is
+ * absent. Without this a 2xx of an unexpected shape yields undefined, which then
+ * interpolates as the literal text "undefined" into a later Graph path and fails
+ * several calls downstream from the real cause.
+ */
+function requireFields<K extends string>(response: GraphResponse, names: readonly K[]): Record<K, string> {
+  const record =
+    typeof response.value === "object" && response.value !== null
+      ? (response.value as Record<string, unknown>)
+      : {};
+
+  const result = {} as Record<K, string>;
+  for (const name of names) {
+    const found = record[name];
+    if (typeof found !== "string" || found === "") {
+      throw new Error(
+        `Graph ${response.method} ${response.path} returned ${response.status} without a usable "${name}" field. ` +
+          "The response shape is not what this command expects, so the setup cannot continue.",
+      );
+    }
+    result[name] = found;
+  }
+  return result;
 }
 
 /**
@@ -37,28 +102,55 @@ export function createFetchSetupGraph(
   acquireAppToken: (appId: string, secret: string) => Promise<string>,
 ): SetupGraph {
   return {
+    async resolveSite(sitePath) {
+      const response = await graphRequest(accessToken, "GET", `/sites/${sitePath}`);
+      return { siteId: requireFields(response, ["id"]).id };
+    },
+
     async createApplication(request) {
-      const created = await graphJson<{ id: string; appId: string }>(accessToken, "POST", "/applications", request);
+      const response = await graphRequest(accessToken, "POST", "/applications", request);
+      const created = requireFields(response, ["id", "appId"]);
       return { objectId: created.id, appId: created.appId };
     },
 
     async addPassword(objectId) {
-      const created = await graphJson<{ secretText: string }>(
-        accessToken,
-        "POST",
-        `/applications/${objectId}/addPassword`,
-        { passwordCredential: { displayName: "ironwright-mcp" } },
-      );
-      return { secretText: created.secretText };
+      const response = await graphRequest(accessToken, "POST", `/applications/${objectId}/addPassword`, {
+        passwordCredential: { displayName: "ironwright-mcp" },
+      });
+      return { secretText: requireFields(response, ["secretText"]).secretText };
     },
 
-    async resolveSite(sitePath) {
-      const site = await graphJson<{ id: string }>(accessToken, "GET", `/sites/${sitePath}`);
-      return { siteId: site.id };
+    async createServicePrincipal(appId) {
+      // POST /applications creates only the registration. The service principal
+      // is the tenant-local identity that actually holds role assignments and
+      // that the token endpoint resolves a client id against, so without this
+      // call a client-credentials request fails with AADSTS700016.
+      const response = await graphRequest(accessToken, "POST", "/servicePrincipals", { appId });
+      return { objectId: requireFields(response, ["id"]).id };
+    },
+
+    async resolveServicePrincipal(appId) {
+      // Addressed by appId rather than filtered, because the key-lookup form is
+      // exact: a $filter query would need paging and could return nothing for a
+      // resource that certainly exists in the tenant.
+      const response = await graphRequest(accessToken, "GET", `/servicePrincipals(appId='${appId}')`);
+      return { objectId: requireFields(response, ["id"]).id };
+    },
+
+    async grantAppRole(request) {
+      // The assignment is created on the resource's service principal, which is
+      // Microsoft Graph's, not on the client's. This is the admin-consent step.
+      await graphRequest(
+        accessToken,
+        "POST",
+        `/servicePrincipals/${request.resourceId}/appRoleAssignedTo`,
+        request,
+      );
     },
 
     async grantSitePermission(siteId, request) {
-      await graphJson(accessToken, "POST", `/sites/${siteId}/permissions`, request);
+      const response = await graphRequest(accessToken, "POST", `/sites/${siteId}/permissions`, request);
+      return { permissionId: requireFields(response, ["id"]).id };
     },
 
     async verifyAppAccess({ appId, secret, siteId }) {
@@ -69,7 +161,25 @@ export function createFetchSetupGraph(
       const response = await fetch(`${GRAPH}/sites/${siteId}/drive`, {
         headers: { authorization: `Bearer ${appToken}` },
       });
-      return { status: response.status, body: await response.text() };
+      // The roles claim is carried out with the result because it is the only
+      // direct evidence separating an unconsented application permission from a
+      // missing per-site grant, and both look identical in the response body.
+      return {
+        status: response.status,
+        body: await response.text(),
+        appRoles: appRolesFromAccessToken(appToken),
+      };
+    },
+
+    async deleteSitePermission(siteId, permissionId) {
+      await graphRequest(accessToken, "DELETE", `/sites/${siteId}/permissions/${permissionId}`);
+    },
+
+    async deleteApplication(objectId) {
+      // Deleting the application also removes its service principal and every
+      // role assignment held by it, and the client secret lives on the
+      // application object, so this one call revokes the whole credential.
+      await graphRequest(accessToken, "DELETE", `/applications/${objectId}`);
     },
   };
 }

@@ -1,6 +1,34 @@
+// Microsoft Graph's own application id, identical in every tenant. The service
+// principal object that represents Graph inside a tenant has a different,
+// per-tenant object id, so it has to be looked up by this value rather than
+// hardcoded.
+export const MICROSOFT_GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000";
+
+// The fixed id of Microsoft Graph's Sites.Selected application permission. App
+// role ids are stable across tenants because they belong to the resource
+// application's own manifest.
+export const SITES_SELECTED_APP_ROLE_ID = "883ea226-0bf2-4a8f-9f9d-92c9162a727d";
+
+// How Sites.Selected appears in the roles claim of an application token. Its
+// presence is the only direct evidence that admin consent was actually granted,
+// which is what separates the two causes of a 403 from the site.
+export const SITES_SELECTED_ROLE_CLAIM = "Sites.Selected";
+
+export interface RequiredResourceAccess {
+  resourceAppId: string;
+  resourceAccess: { id: string; type: "Role" }[];
+}
+
 export interface AppRegistrationRequest {
   displayName: string;
   signInAudience: "AzureADMyOrg";
+  requiredResourceAccess: RequiredResourceAccess[];
+}
+
+export interface AppRoleAssignmentRequest {
+  principalId: string;
+  resourceId: string;
+  appRoleId: string;
 }
 
 export interface SitePermissionRequest {
@@ -8,17 +36,60 @@ export interface SitePermissionRequest {
   grantedToIdentities: { application: { id: string; displayName: string } }[];
 }
 
+export interface VerificationEvidence {
+  /**
+   * Whether the application token used for verification carried the
+   * Sites.Selected role. `undefined` means the token could not be read, so
+   * neither cause of a 403 can be ruled out.
+   */
+  sitesSelectedRolePresent: boolean | undefined;
+}
+
 export type VerificationOutcome =
   | { ok: true }
-  | { ok: false; reason: "grant-missing" | "token" | "not-found" | "unknown"; message: string };
+  | {
+      ok: false;
+      reason: "permission-not-consented" | "grant-missing" | "token" | "not-found" | "unknown";
+      message: string;
+    };
 
 /**
  * One instance serves one customer tenant, so the app is single-tenant. A
  * multi-tenant audience would imply a cross-tenant consent story this product
  * deliberately does not have.
+ *
+ * Sites.Selected is a two-step permission and this is step one: the app role has
+ * to be requested on the registration before anyone can consent to it. Step two
+ * is the per-site grant. An app that holds only the per-site grant gets a token
+ * with no roles claim at all, and every Graph call it makes returns 403.
  */
 export function buildAppRegistrationRequest(displayName: string): AppRegistrationRequest {
-  return { displayName, signInAudience: "AzureADMyOrg" };
+  return {
+    displayName,
+    signInAudience: "AzureADMyOrg",
+    requiredResourceAccess: [
+      {
+        resourceAppId: MICROSOFT_GRAPH_APP_ID,
+        resourceAccess: [{ id: SITES_SELECTED_APP_ROLE_ID, type: "Role" }],
+      },
+    ],
+  };
+}
+
+/**
+ * Admin consent for an application permission is an appRoleAssignment on the
+ * resource's service principal. Requesting the permission on the registration
+ * does not grant it; without this assignment the app's token carries no roles.
+ */
+export function buildAppRoleAssignmentRequest(args: {
+  principalId: string;
+  resourceId: string;
+}): AppRoleAssignmentRequest {
+  return {
+    principalId: args.principalId,
+    resourceId: args.resourceId,
+    appRoleId: SITES_SELECTED_APP_ROLE_ID,
+  };
 }
 
 export function buildSitePermissionRequest(args: {
@@ -43,20 +114,79 @@ export function siteIdPathFromUrl(siteUrl: string): string {
 }
 
 /**
- * Sites.Selected access needs a per-site grant after the app registration
- * exists. Skipping it produces a 403 that reads like a broken registration, so
- * the 403 message names the grant explicitly. This mapping is the whole reason
- * the setup command exists rather than another app-registration walkthrough.
+ * Reads the roles claim out of an application access token. The signature is
+ * deliberately not validated: this token was just minted for this command by
+ * Entra, and the claim is used only to tell two failure causes apart, never to
+ * make an access decision.
+ *
+ * An empty array and `undefined` mean different things. An empty array is a
+ * readable token that carries no roles, which is direct evidence that admin
+ * consent is missing. `undefined` means the token could not be read at all, so
+ * nothing can be concluded from it.
  */
-export function interpretVerification(status: number, body: string): VerificationOutcome {
+export function appRolesFromAccessToken(token: string): string[] | undefined {
+  const segments = token.split(".");
+  const payload = segments[1];
+  if (segments.length !== 3 || payload === undefined || payload === "") return undefined;
+
+  try {
+    const decoded: unknown = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (typeof decoded !== "object" || decoded === null) return undefined;
+    const roles = (decoded as { roles?: unknown }).roles;
+    if (roles === undefined) return [];
+    if (!Array.isArray(roles)) return undefined;
+    return roles.filter((role): role is string => typeof role === "string");
+  } catch {
+    return undefined;
+  }
+}
+
+const CONSENT_REMEDY =
+  "Grant admin consent for Microsoft Graph's Sites.Selected application permission to this app registration. " +
+  "A Privileged Role Administrator or Global Administrator has to do that, because the Application Administrator " +
+  "role can consent to every API except Microsoft Graph. An assignment made moments ago can also take a short " +
+  "time to appear in a newly issued token.";
+
+const GRANT_REMEDY =
+  "Grant the app access to this one site with POST /sites/{site-id}/permissions, naming the app id reported above.";
+
+/**
+ * Sites.Selected produces two different 403s with two different remedies, and
+ * telling them apart is the reason this command exists rather than another app
+ * registration walkthrough. A token with no Sites.Selected role means the
+ * application permission was never admin-consented. A token that carries the
+ * role and is still refused means the per-site grant is missing. Neither is
+ * fixed by re-running this command, which would create a second registration,
+ * so neither message suggests it.
+ */
+export function interpretVerification(
+  status: number,
+  body: string,
+  evidence: VerificationEvidence,
+): VerificationOutcome {
   if (status >= 200 && status < 300) return { ok: true };
 
   if (status === 403) {
+    if (evidence.sitesSelectedRolePresent === false) {
+      return {
+        ok: false,
+        reason: "permission-not-consented",
+        message: `The app was denied access, and its token carries no Sites.Selected role, so the application permission itself is not consented in this tenant. ${CONSENT_REMEDY}`,
+      };
+    }
+
+    if (evidence.sitesSelectedRolePresent === true) {
+      return {
+        ok: false,
+        reason: "grant-missing",
+        message: `The app was denied access even though its token carries the Sites.Selected role, so the application permission is consented and the per-site grant is what is missing. ${GRANT_REMEDY}`,
+      };
+    }
+
     return {
       ok: false,
       reason: "grant-missing",
-      message:
-        "The app was denied access to the site. With Sites.Selected this almost always means the per-site grant is missing, not that the app registration is wrong. Re-run this command, or grant it manually with POST /sites/{site-id}/permissions.",
+      message: `The app was denied access and its token could not be read, so both causes are still open. Check the application permission first: ${CONSENT_REMEDY} If the role is present, the per-site grant is the remaining cause. ${GRANT_REMEDY}`,
     };
   }
 
