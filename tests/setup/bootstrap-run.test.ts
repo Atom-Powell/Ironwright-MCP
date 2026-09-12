@@ -9,6 +9,10 @@ function fakeGraph(): { graph: SetupGraph; calls: string[] } {
       calls.push("resolveSite");
       return { siteId: "should-not-be-called" };
     },
+    findApplicationByDisplayName: async (displayName: string) => {
+      calls.push(`findApplicationByDisplayName:${displayName}`);
+      return undefined;
+    },
     createApplication: async (request: { displayName: string }) => {
       calls.push(`createApplication:${request.displayName}`);
       return { objectId: "obj-1", appId: "app-1" };
@@ -58,6 +62,7 @@ describe("runCreateBootstrap", () => {
     // runSetup resolves Graph's service principal before registering its own
     // application.
     expect(calls).toEqual([
+      "findApplicationByDisplayName:Ironwright Grant Issuer",
       "resolveServicePrincipal",
       "createApplication:Ironwright Grant Issuer",
       "addPassword:ironwright-grant-issuer:expires",

@@ -9,6 +9,7 @@ const SITES_SELECTED_ROLE_ID = "role-selected";
 function fakeGraph(overrides: Partial<SetupGraph> = {}): { graph: SetupGraph; calls: string[] } {
   const calls: string[] = [];
   const graph: SetupGraph = {
+    findApplicationByDisplayName: async () => undefined,
     resolveSite: async (sitePath) => {
       calls.push(`resolveSite:${sitePath}`);
       return { siteId: "site-1" };

@@ -64,13 +64,18 @@ forever; see "Retiring the grant issuer after setup" below.
 
 ```bash
 npm install
-npm run setup -- --tenant=<tenant-id> --create-bootstrap --name="Ironwright Grant Issuer"
+npm run setup -- --tenant=<tenant-id> --create-bootstrap
 ```
 
 This takes no `--site`: the bootstrap application never touches a site, so there is nothing to
-resolve. `--name` is optional and defaults to the same display name the normal run uses, which
-is confusing side by side in the tenant's app list, so pass something that names what this
-application is for.
+resolve. It registers the application as `Ironwright Grant Issuer`, which is deliberately not
+the name the normal run uses, so the two are told apart in the tenant's app list and nobody
+rotates the secret on the wrong one. Pass `--name` if you would rather call it something else.
+
+The command refuses to run if an application with that name already exists, rather than adding
+a second holder of `Sites.FullControl.All` that looks identical to the first. It names the
+existing application and what to do with it. If its secret was never recorded or has expired,
+delete that application and run this again.
 
 The command signs you in with a device code, resolves Microsoft Graph's own service principal
 to find the real `Sites.FullControl.All` application role id, creates the application and its

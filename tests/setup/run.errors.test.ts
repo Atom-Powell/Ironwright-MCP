@@ -14,6 +14,7 @@ function fakeGraph(overrides: Partial<SetupGraph> = {}): Fake {
   const calls: string[] = [];
   const graph: SetupGraph = {
     resolveSite: async () => ({ siteId: "site-1" }),
+    findApplicationByDisplayName: async () => undefined,
     createApplication: async () => {
       calls.push("createApplication");
       return { objectId: "object-1", appId: "app-1" };

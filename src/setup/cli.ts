@@ -18,6 +18,12 @@ export interface ParsedArgs {
 
 const DEFAULT_DISPLAY_NAME = "Ironwright Repository Reconciliation";
 
+// Bootstrap mode gets its own default rather than reusing the one above. Two
+// applications with the same display name, one holding Sites.FullControl.All
+// and one holding Sites.Selected, is how the wrong secret gets rotated or the
+// wrong application revoked, and the tenant's app list shows little else.
+const DEFAULT_BOOTSTRAP_DISPLAY_NAME = "Ironwright Grant Issuer";
+
 // Microsoft's own Graph Command Line Tools application, the public client that
 // Microsoft Graph PowerShell and the Graph CLI sign in as. It exists in every
 // tenant, so nobody has to register a public-client sign-in application of
@@ -81,7 +87,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   return {
     tenantId: requiredValue(argv, "tenant"),
     siteUrl: createBootstrap ? (findValue(argv, "site") ?? "") : requiredValue(argv, "site"),
-    displayName: findValue(argv, "name") ?? DEFAULT_DISPLAY_NAME,
+    displayName: findValue(argv, "name") ?? (createBootstrap ? DEFAULT_BOOTSTRAP_DISPLAY_NAME : DEFAULT_DISPLAY_NAME),
     write: argv.includes("--write"),
     clientId: findValue(argv, "client-id") ?? DEFAULT_DEVICE_CODE_CLIENT_ID,
     createBootstrap,

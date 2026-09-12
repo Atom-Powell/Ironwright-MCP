@@ -10,6 +10,7 @@ import type {
 
 export interface SetupGraph {
   resolveSite(sitePath: string): Promise<{ siteId: string }>;
+  findApplicationByDisplayName(displayName: string): Promise<{ objectId: string; appId: string } | undefined>;
   createApplication(request: AppRegistrationRequest): Promise<{ objectId: string; appId: string }>;
   addPassword(objectId: string, credential: PasswordCredentialRequest): Promise<{ secretText: string }>;
   createServicePrincipal(appId: string): Promise<{ objectId: string }>;
@@ -124,6 +125,24 @@ export function createFetchSetupGraph(options: FetchSetupGraphOptions): SetupGra
     async resolveSite(sitePath) {
       const response = await graphRequest(adminToken, "GET", `/sites/${sitePath}`);
       return { siteId: requireFields(response, ["id"]).id };
+    },
+
+    async findApplicationByDisplayName(displayName) {
+      // A single quote delimits an OData string, so an unescaped one in a
+      // display name makes this a syntax error rather than a lookup. Doubling
+      // is how OData escapes it.
+      const filter = `displayName eq '${displayName.replace(/'/g, "''")}'`;
+      const response = await graphRequest(
+        adminToken,
+        "GET",
+        `/applications?$filter=${encodeURIComponent(filter)}&$select=id,appId`,
+      );
+      const body = typeof response.value === "object" && response.value !== null ? response.value : {};
+      const matches = (body as { value?: unknown }).value;
+      const first = Array.isArray(matches) ? (matches[0] as unknown) : undefined;
+      if (first === undefined) return undefined;
+      const found = requireFields({ ...response, value: first }, ["id", "appId"]);
+      return { objectId: found.id, appId: found.appId };
     },
 
     async createApplication(request) {

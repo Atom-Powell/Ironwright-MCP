@@ -43,3 +43,26 @@ describe("parseArgs bootstrap mode", () => {
     expect(() => parseArgs(argv)).not.toThrow();
   });
 });
+
+describe("parseArgs display name", () => {
+  it("defaults a normal run to the server application's name", () => {
+    expect(parseArgs(base).displayName).toBe("Ironwright Repository Reconciliation");
+  });
+
+  it("defaults bootstrap mode to a different name, so the two applications are told apart", () => {
+    // Two identically named applications, one holding Sites.FullControl.All
+    // and one holding Sites.Selected, is how the wrong secret gets rotated or
+    // the wrong application revoked.
+    const parsed = parseArgs([...base, "--create-bootstrap"]);
+
+    expect(parsed.displayName).toBe("Ironwright Grant Issuer");
+    expect(parsed.displayName).not.toBe(parseArgs(base).displayName);
+  });
+
+  it("still honors an explicit --name in bootstrap mode", () => {
+    expect(parseArgs([...base, "--create-bootstrap", "--name=Contoso Grant Issuer"]).displayName).toBe(
+      "Contoso Grant Issuer",
+    );
+  });
+});
+

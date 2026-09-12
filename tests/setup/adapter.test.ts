@@ -100,6 +100,36 @@ describe("createFetchSetupGraph", () => {
     expect(calls[0]?.body).toEqual({ passwordCredential: { displayName: "ironwright-mcp-server" } });
   });
 
+  it("finds an existing application by display name", async () => {
+    const calls = stubFetch([
+      { status: 200, body: JSON.stringify({ value: [{ id: "object-1", appId: "app-1" }] }) },
+    ]);
+
+    const result = await graph().findApplicationByDisplayName("Ironwright Grant Issuer");
+
+    expect(result).toEqual({ objectId: "object-1", appId: "app-1" });
+    expect(calls[0]?.url).toBe(
+      "https://graph.microsoft.com/v1.0/applications?$filter=displayName%20eq%20'Ironwright%20Grant%20Issuer'&$select=id,appId",
+    );
+    expect(calls[0]?.authorization).toBe("Bearer admin-token");
+  });
+
+  it("reports no match rather than throwing when the display name is unused", async () => {
+    stubFetch([{ status: 200, body: JSON.stringify({ value: [] }) }]);
+
+    await expect(graph().findApplicationByDisplayName("Nothing Named This")).resolves.toBeUndefined();
+  });
+
+  it("doubles a quote in the display name rather than letting it break the filter", async () => {
+    const calls = stubFetch([{ status: 200, body: JSON.stringify({ value: [] }) }]);
+
+    await graph().findApplicationByDisplayName("O'Brien");
+
+    // A single quote is OData's string delimiter, so it has to be doubled or
+    // the filter is a syntax error rather than a lookup.
+    expect(calls[0]?.url).toContain("displayName%20eq%20'O''Brien'");
+  });
+
   it("creates the service principal the token endpoint resolves the client id against", async () => {
     const calls = stubFetch([{ status: 201, body: JSON.stringify({ id: "sp-1" }) }]);
 

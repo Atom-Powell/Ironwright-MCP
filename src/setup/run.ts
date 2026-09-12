@@ -277,6 +277,22 @@ export async function runCreateBootstrap(
   const notice = hooks.onNotice ?? ((): void => {});
   const sleep = hooks.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
+  // Checked before anything is created, because Graph will happily register a
+  // second application with an identical display name. Two of those, both
+  // holding Sites.FullControl.All, is how the wrong secret gets rotated or the
+  // wrong application revoked, and neither mistake is visible in the tenant's
+  // app list.
+  const existing = await graph.findApplicationByDisplayName(args.displayName);
+  if (existing !== undefined) {
+    throw new Error(
+      `An application named "${args.displayName}" already exists in this tenant (application id ${existing.appId}). ` +
+        "Creating a second grant issuer would leave two tenant-wide SharePoint credentials that are hard to tell " +
+        `apart. Set IW_BOOTSTRAP_CLIENT_ID to ${existing.appId} and IW_BOOTSTRAP_CLIENT_SECRET to its secret and ` +
+        "run the normal setup instead. If that secret was never recorded or has expired, delete the existing " +
+        "application and run this again, or pass --name to give this one a distinct name.",
+    );
+  }
+
   const graphServicePrincipal = await graph.resolveServicePrincipal(MICROSOFT_GRAPH_APP_ID);
   const fullControlAppRoleId = appRoleIdByValue(graphServicePrincipal.appRoles, SITES_FULL_CONTROL_ROLE_CLAIM);
 

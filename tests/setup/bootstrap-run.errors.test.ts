@@ -28,6 +28,7 @@ function fakeGraph(overrides: Partial<SetupGraph> = {}): { graph: SetupGraph; ca
   const calls: string[] = [];
   const graph: SetupGraph = {
     resolveSite: async () => ({ siteId: "should-not-be-called" }),
+    findApplicationByDisplayName: async () => undefined,
     createApplication: async () => {
       calls.push("createApplication");
       return { objectId: "obj-1", appId: "app-1" };
@@ -88,3 +89,35 @@ describe("runCreateBootstrap rollback", () => {
     expect(calls).toEqual([]);
   });
 });
+
+describe("runCreateBootstrap duplicate guard", () => {
+  it("refuses to create a second grant issuer when one already carries that name", async () => {
+    const { graph, calls } = fakeGraph({
+      findApplicationByDisplayName: async () => ({ objectId: "existing-obj", appId: "existing-app" }),
+    });
+
+    await expect(runCreateBootstrap(graph, { displayName: "Ironwright Grant Issuer" })).rejects.toThrow(
+      /already exists/i,
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it("names the existing application and what to do instead of creating another", async () => {
+    const { graph } = fakeGraph({
+      findApplicationByDisplayName: async () => ({ objectId: "existing-obj", appId: "existing-app" }),
+    });
+
+    let caught: unknown;
+    try {
+      await runCreateBootstrap(graph, { displayName: "Ironwright Grant Issuer" });
+    } catch (error) {
+      caught = error;
+    }
+
+    const message = (caught as Error).message;
+    expect(message).toContain("existing-app");
+    expect(message).toContain("IW_BOOTSTRAP_CLIENT_ID");
+    expect(message).toMatch(/--name/);
+  });
+});
+
