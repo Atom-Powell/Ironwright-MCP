@@ -4,7 +4,7 @@ export interface AppRegistrationRequest {
 }
 
 export interface SitePermissionRequest {
-  roles: string[];
+  roles: ("read" | "write")[];
   grantedToIdentities: { application: { id: string; displayName: string } }[];
 }
 
@@ -35,7 +35,11 @@ export function buildSitePermissionRequest(args: {
 export function siteIdPathFromUrl(siteUrl: string): string {
   const url = new URL(siteUrl);
   const path = url.pathname.replace(/\/+$/, "");
-  return `${url.host}:${path}`;
+  // A colon with nothing after it has no meaning in Graph's path-addressing
+  // syntax. A bare host (or a root URL with only a trailing slash) means the
+  // tenant's default site, which Graph addresses by the plain host with no
+  // trailing colon.
+  return path === "" ? url.host : `${url.host}:${path}`;
 }
 
 /**
@@ -72,5 +76,18 @@ export function interpretVerification(status: number, body: string): Verificatio
     };
   }
 
-  return { ok: false, reason: "unknown", message: `Unexpected response ${status}: ${body}` };
+  // 429 and 5xx are the plausible operational statuses that fall through to
+  // here: throttling and transient server-side failures are worth retrying.
+  // Anything else does not match a known cause and is worth reporting with
+  // the full response text.
+  const isTransient = status === 429 || (status >= 500 && status < 600);
+  const nextStep = isTransient
+    ? "This looks like throttling or a transient server-side failure, so retrying is worth trying."
+    : "This does not match a known cause, so report it with the full response text.";
+
+  return {
+    ok: false,
+    reason: "unknown",
+    message: `Graph returned an unrecognized status (${status}). Check the error code in the response body first, since it names the real cause. ${nextStep} Response body: ${body}`,
+  };
 }

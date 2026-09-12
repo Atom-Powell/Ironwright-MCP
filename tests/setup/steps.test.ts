@@ -41,6 +41,32 @@ describe("siteIdPathFromUrl", () => {
       "contoso.sharepoint.com:/sites/Example",
     );
   });
+
+  it("addresses the root site with a bare host and no trailing colon", () => {
+    expect(siteIdPathFromUrl("https://contoso.sharepoint.com")).toBe("contoso.sharepoint.com");
+  });
+
+  it("addresses the root site from a trailing-slash root URL", () => {
+    expect(siteIdPathFromUrl("https://contoso.sharepoint.com/")).toBe("contoso.sharepoint.com");
+  });
+
+  it("ignores a query string", () => {
+    expect(siteIdPathFromUrl("https://contoso.sharepoint.com/sites/Example?foo=bar")).toBe(
+      "contoso.sharepoint.com:/sites/Example",
+    );
+  });
+
+  it("ignores a fragment", () => {
+    expect(siteIdPathFromUrl("https://contoso.sharepoint.com/sites/Example#section")).toBe(
+      "contoso.sharepoint.com:/sites/Example",
+    );
+  });
+
+  it("lowercases a mixed-case host", () => {
+    expect(siteIdPathFromUrl("https://CONTOSO.SharePoint.com/sites/Example")).toBe(
+      "contoso.sharepoint.com:/sites/Example",
+    );
+  });
 });
 
 describe("interpretVerification", () => {

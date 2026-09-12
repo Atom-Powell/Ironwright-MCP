@@ -36,4 +36,34 @@ describe("interpretVerification failures", () => {
     expect(outcome.reason).toBe("unknown");
     expect(outcome.message).toContain("throttled");
   });
+
+  it("names throttling as a transient, retry-worthy cause on 429", () => {
+    const outcome = interpretVerification(429, "throttled");
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.message).toContain("transient");
+    expect(outcome.message).toContain("retry");
+  });
+
+  it("names a server-side status as transient and retry-worthy on 503", () => {
+    const outcome = interpretVerification(503, '{"error":{"code":"serviceUnavailable"}}');
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.reason).toBe("unknown");
+    expect(outcome.message).toContain("transient");
+    expect(outcome.message).toContain("retry");
+  });
+
+  it("points at the error code in the body and asks for a report on an unrecognized non-transient status", () => {
+    const outcome = interpretVerification(400, '{"error":{"code":"badRequest"}}');
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.reason).toBe("unknown");
+    expect(outcome.message).toContain("error code");
+    expect(outcome.message).toContain("report");
+    expect(outcome.message).not.toContain("transient");
+  });
 });
