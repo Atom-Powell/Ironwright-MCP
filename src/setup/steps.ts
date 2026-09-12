@@ -82,7 +82,7 @@ export function interpretVerification(status: number, body: string): Verificatio
   // the full response text.
   const isTransient = status === 429 || (status >= 500 && status < 600);
   const nextStep = isTransient
-    ? "This looks like throttling or a transient server-side failure, so retrying is worth trying."
+    ? "This looks like throttling or a transient server-side failure, so retrying may succeed."
     : "This does not match a known cause, so report it with the full response text.";
 
   return {
