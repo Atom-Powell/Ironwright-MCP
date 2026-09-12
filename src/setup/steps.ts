@@ -199,8 +199,20 @@ const CONSENT_REMEDY =
   "role can consent to every API except Microsoft Graph. An assignment made moments ago can also take a short " +
   "time to appear in a newly issued token.";
 
+// Written for the bootstrap flow, where this command itself just issued the
+// per-site grant with the bootstrap application's token. A 403 with the role
+// present therefore does not mean the grant was never requested; it means
+// either that request has not propagated yet, or it landed somewhere other
+// than this site. Re-running the command is never suggested, here or in
+// CONSENT_REMEDY, because it registers a second application rather than
+// repairing this one.
 const GRANT_REMEDY =
-  "Grant the app access to this one site with POST /sites/{site-id}/permissions, naming the app id reported above.";
+  "The application permission is consented, and this command already issued the per-site grant moments ago, so a " +
+  "403 here most likely means that grant has not propagated to this site yet. Wait a short while and check access " +
+  "again before assuming anything failed. If it is still refused afterward, the next most likely cause is that the " +
+  "bootstrap application's grant was issued against the wrong site rather than this one. Running this command " +
+  "again will not fix either cause: it creates a second, separate application registration instead of repairing " +
+  "this one.";
 
 /**
  * Sites.Selected produces two different 403s with two different remedies, and

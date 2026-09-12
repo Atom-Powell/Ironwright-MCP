@@ -12,7 +12,8 @@ describe("interpretVerification failures", () => {
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.reason).toBe("grant-missing");
-    expect(outcome.message).toContain("/sites/{site-id}/permissions");
+    expect(outcome.message).toContain("propagat");
+    expect(outcome.message).toMatch(/bootstrap/i);
   });
 
   it("names admin consent, not the per-site grant, on a 403 from a token carrying no role", () => {
@@ -23,7 +24,7 @@ describe("interpretVerification failures", () => {
     expect(outcome.reason).toBe("permission-not-consented");
     expect(outcome.message).toContain("admin consent");
     expect(outcome.message).toContain("Privileged Role Administrator");
-    expect(outcome.message).not.toContain("/sites/{site-id}/permissions");
+    expect(outcome.message).not.toContain("propagat");
   });
 
   it("names both causes when the application token could not be read", () => {
@@ -33,7 +34,7 @@ describe("interpretVerification failures", () => {
     if (outcome.ok) return;
     expect(outcome.reason).toBe("cause-undetermined");
     expect(outcome.message).toContain("admin consent");
-    expect(outcome.message).toContain("/sites/{site-id}/permissions");
+    expect(outcome.message).toContain("propagat");
   });
 
   it("never tells the operator to re-run a command that would create a second registration", () => {

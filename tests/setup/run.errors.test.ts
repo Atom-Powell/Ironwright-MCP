@@ -37,11 +37,11 @@ function fakeGraph(overrides: Partial<SetupGraph> = {}): Fake {
   return { graph, calls, notices: [] };
 }
 
-function run(fake: Fake): Promise<unknown> {
+function run(fake: Fake, extraHooks: Record<string, unknown> = {}): Promise<unknown> {
   return runSetup(
     fake.graph,
     { displayName: "App", siteUrl: "https://contoso.sharepoint.com/sites/Example", write: true },
-    { onNotice: (message) => fake.notices.push(message) },
+    { onNotice: (message) => fake.notices.push(message), ...extraHooks },
   );
 }
 
@@ -66,7 +66,7 @@ describe("runSetup verification diagnostics", () => {
       verifyAppAccess: async () => ({ status: 403, body: "{}", appRoles: [SITES_SELECTED_ROLE_CLAIM] }),
     });
 
-    await expect(run(fake)).rejects.toThrow(/\/sites\/\{site-id\}\/permissions/);
+    await expect(run(fake)).rejects.toThrow(/propagat/);
   });
 
   it("surfaces a credential problem separately from a permission problem", async () => {
@@ -83,6 +83,38 @@ describe("runSetup verification diagnostics", () => {
     });
 
     await expect(run(fake)).rejects.toThrow(/permissions failed with 403/);
+  });
+});
+
+describe("runSetup service principal replication lag", () => {
+  it("retries once on Request_ResourceNotFound and completes the run", async () => {
+    let attempts = 0;
+    const slept: number[] = [];
+    const fake = fakeGraph({
+      createServicePrincipal: async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new Error("Graph POST /servicePrincipals failed with 404 (Request_ResourceNotFound): {}");
+        }
+        return { objectId: "sp-1" };
+      },
+    });
+
+    const result = await run(fake, { sleep: async (ms: number) => void slept.push(ms) });
+
+    expect(attempts).toBe(2);
+    expect(slept).toEqual([3000]);
+    expect(result).toEqual({ appId: "app-1", objectId: "object-1", secret: "secret-1", siteId: "site-1" });
+  });
+
+  it("does not retry a failure that is not the replication-lag error code", async () => {
+    const fake = fakeGraph({
+      createServicePrincipal: async () => {
+        throw new Error("Graph POST /servicePrincipals failed with 403: Authorization_RequestDenied");
+      },
+    });
+
+    await expect(run(fake, { sleep: async () => {} })).rejects.toThrow(/Authorization_RequestDenied/);
   });
 });
 
@@ -118,6 +150,37 @@ describe("runSetup rollback", () => {
 
     await expect(run(fake)).rejects.toThrow(/itemNotFound/);
     expect(fake.calls).toEqual([]);
+  });
+
+  it("attempts no rollback when Graph's service principal cannot be resolved", async () => {
+    const fake = fakeGraph({
+      resolveServicePrincipal: async () => {
+        throw new Error("Graph GET /servicePrincipals(appId='...') failed with 404: Request_ResourceNotFound");
+      },
+    });
+
+    await expect(run(fake)).rejects.toThrow(/Request_ResourceNotFound/);
+    expect(fake.calls).toEqual([]);
+  });
+
+  it("attempts no rollback when Graph does not publish the requested app role", async () => {
+    const fake = fakeGraph({
+      resolveServicePrincipal: async () => ({ objectId: "graph-sp-1", appRoles: [] }),
+    });
+
+    await expect(run(fake)).rejects.toThrow(/Sites\.Selected/);
+    expect(fake.calls).toEqual([]);
+  });
+
+  it("attempts to remove a site permission whose response could not be read", async () => {
+    const fake = fakeGraph({
+      grantSitePermission: async () => {
+        throw new Error("permission response had no id");
+      },
+    });
+
+    await expect(run(fake)).rejects.toThrow(/no id/);
+    expect(fake.calls.some((call) => call.startsWith("deleteSitePermission"))).toBe(true);
   });
 
   it("reports the registration for manual deletion when rollback itself fails, without masking the cause", async () => {
