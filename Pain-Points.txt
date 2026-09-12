@@ -1,0 +1,343 @@
+CONTEXT PACKAGE: REPOSITORY STEWARD MCP - PROBLEM STATEMENT
+
+OVERVIEW
+
+The steward agent is an AI repository steward responsible for maintaining a SharePoint repository used for cybersecurity awareness training and phishing reporting operations.
+
+Repository:
+
+Site: <configured SharePoint site>
+Repository: <configured document library>
+
+The objective is not document retrieval or file assistance.
+
+The objective is operational repository management, including:
+
+Repository inventory
+Gap analysis
+Folder creation
+Folder standardization
+File renaming
+File movement
+Compliance validation
+Report reconciliation
+Repository maintenance
+Repository remediation
+
+The current SharePoint MCP tooling can perform these actions, but only through large numbers of individual operations.
+
+The enhancement effort is intended to reduce tool-call volume, improve reliability, and enable repository-wide operations.
+
+CURRENT PAIN POINTS
+RECURSIVE INVENTORY IS EXPENSIVE
+
+Current process:
+
+Enumerate folder
+Enumerate child folder
+Enumerate grandchild folder
+Repeat recursively
+
+Large inventories require hundreds of operations.
+
+Example use case:
+
+"Inventory all Monthly Training reports."
+
+Current behavior:
+
+Multiple folder traversals
+Large response volumes
+Significant execution time
+
+Desired behavior:
+
+Single inventory operation
+Complete repository tree returned
+FOLDER EXISTENCE DOES NOT EQUAL REPORT EXISTENCE
+
+Repository structure commonly contains:
+
+Client ├─ 01-January ├─ 02-February ├─ 03-March └─ ...
+
+Many folders are empty.
+
+Actual reports are often stored elsewhere.
+
+Example:
+
+Client ├─ 01-January (empty) ├─ 02-February (empty) └─ Client Monthly - May 2026.xlsx
+
+Therefore:
+
+Compliance cannot be determined from folder structure alone.
+
+Actual file discovery is required.
+
+FILE NAMING IS INCONSISTENT
+
+Observed examples:
+
+CLIENTA Monthly - Jan 2026.xlsx
+CLIENTA Monthly - Mar 2026.xlsx
+CLIENTA Monthly - May 2026.xlsx
+2026-06_CLIENTA_VendorTraining.xlsx
+
+Approved standard:
+
+YYYY-MM_Client_MonthlyTraining.xlsx
+
+Example:
+
+2026-05_CLIENTA_MonthlyTraining.xlsx
+
+Bulk rename capability will be critical.
+
+REPORTS ARE OFTEN STORED IN INCORRECT LOCATIONS
+
+Files may exist:
+
+At client root
+Inside special folders
+Inside legacy structures
+
+rather than:
+
+Year → Client → Month Folder
+
+Repository remediation is required.
+
+SHAREPOINT MCP REQUIRES ID-BASED NAVIGATION
+
+Current operations depend heavily on:
+
+Drive IDs
+Folder IDs
+Item IDs
+
+This creates overhead during:
+
+Discovery
+Traversal
+Movement
+Verification
+
+A path-aware abstraction layer would simplify operations significantly.
+
+OCCASIONAL OBJECT LOOKUP FAILURES
+
+Observed:
+
+Folder IDs occasionally return NotFound
+Requires rediscovery from parent path
+
+Repository operations should be resilient to stale IDs.
+
+MOST IMPORTANT BUSINESS CONTEXT
+
+The repository is not the only source of truth.
+
+A workbook called:
+
+"Operational Tracking Workbook"
+
+is a major operational authority.
+
+This workbook is expected to contain information such as:
+
+Clients
+Reporting requirements
+Campaign data
+Monthly reporting status
+Quarterly reporting status
+Expected deliverables
+Operational tracking information
+
+This workbook should be treated as a database rather than a document.
+
+The long-term objective is not simply:
+
+"What files exist?"
+
+The objective is:
+
+"What files should exist, and do they exist?"
+
+TRUE BUSINESS WORKFLOW
+
+Desired workflow:
+
+Read workbook.
+Determine expected reports.
+Scan repository.
+Determine actual reports.
+Compare expected vs actual.
+Produce gap analysis.
+Remediate deficiencies.
+Verify compliance.
+
+This is fundamentally a reconciliation problem.
+
+HIGH-VALUE MCP CAPABILITIES
+RECURSIVE REPOSITORY INVENTORY
+
+Purpose:
+
+Return complete repository tree in a single operation.
+
+Desired output:
+
+Full path
+File name
+File type
+Modified date
+Size
+Folder hierarchy
+
+Use cases:
+
+Inventory
+Audits
+Gap analysis
+Compliance validation
+EXCEL / WORKBOOK INTELLIGENCE
+
+Purpose:
+
+Treat workbook as structured data.
+
+Capabilities:
+
+Read worksheets
+Read tables
+Read named ranges
+Query records
+Lookup clients
+Lookup reporting requirements
+
+Use cases:
+
+Report reconciliation
+Compliance determination
+Missing report identification
+REPOSITORY RECONCILIATION ENGINE
+
+Purpose:
+
+Compare expected repository state against actual repository state.
+
+Inputs:
+
+Workbook
+Repository
+
+Outputs:
+
+Missing reports
+Missing folders
+Incorrect filenames
+Incorrect locations
+Compliance status
+
+This is likely the highest-value capability.
+
+BULK RENAME ENGINE
+
+Purpose:
+
+Standardize filenames automatically.
+
+Capabilities:
+
+Detect violations
+Generate rename plan
+Execute renames
+Verify completion
+
+Example:
+
+CLIENTA Monthly - May 2026.xlsx
+
+→
+
+2026-05_CLIENTA_MonthlyTraining.xlsx
+
+BULK MOVE ENGINE
+
+Purpose:
+
+Correct file placement automatically.
+
+Capabilities:
+
+Move by rule
+Move by client
+Move by month
+Move by report type
+Verify placement
+STRUCTURE VALIDATION ENGINE
+
+Purpose:
+
+Validate repository against approved standards.
+
+Checks:
+
+Required folders
+Required reports
+Folder naming
+File naming
+File placement
+
+Outputs:
+
+Compliant
+Non-compliant
+Missing components
+TEMPLATE REPLICATION ENGINE
+
+Purpose:
+
+Apply validated structures across clients.
+
+Example:
+
+Use a validated reference client as the approved template.
+
+Replicate:
+
+Monthly Training structure
+Quarterly phishing-simulation structure
+
+across all clients.
+
+REPOSITORY REPORTING LAYER
+
+Purpose:
+
+Support operational questions without recursive traversal.
+
+Examples:
+
+Show missing reports
+Show empty folders
+Show naming violations
+Show non-compliant clients
+Show reports created this month
+Show orphaned files
+END GOAL
+
+The desired end state is an MCP platform that allows the steward agent to function as a true repository operations manager.
+
+Inventory is only one capability.
+
+The core mission is:
+
+Understand expected repository state
+Understand actual repository state
+Identify gaps
+Correct deficiencies
+Enforce standards
+Maintain repository compliance
+
+The most important enhancement is the ability to reconcile the operational tracking workbook against the SharePoint repository and automatically identify and remediate discrepancies.
