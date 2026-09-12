@@ -43,4 +43,10 @@ describe("examples/profiles/example.json", () => {
     const raw: unknown = JSON.parse(readFileSync("examples/profiles/example.json", "utf8"));
     expect(() => loadProfile(raw)).not.toThrow();
   });
+
+  it("accepts a compliant verdict alongside misnamed", () => {
+    const raw: unknown = JSON.parse(readFileSync("examples/profiles/example.json", "utf8"));
+    const parsed = loadProfile(raw);
+    expect(parsed.naming.recognizers.some((recognizer) => recognizer.verdict === "compliant")).toBe(true);
+  });
 });

@@ -77,6 +77,19 @@ describe("loadProfile rejections", () => {
     );
   });
 
+  it("rejects duplicate recognizer ids", () => {
+    expectIssue(
+      {
+        ...validProfile,
+        naming: {
+          ...validProfile.naming,
+          recognizers: [validProfile.naming.recognizers[0], validProfile.naming.recognizers[0]],
+        },
+      },
+      'duplicate recognizer id "legacy-spaced"',
+    );
+  });
+
   it("reports the failing path alongside the message", () => {
     try {
       loadProfile({ ...validProfile, profileId: "Not Valid" });

@@ -19,7 +19,17 @@ export default tseslint.config(
       "no-restricted-imports": ["error", {
         patterns: [
           { group: ["**/server/**", "**/mcp/**", "**/tools/**", "**/setup/**"], message: "The domain layer must not depend on transport, tool, or setup layers." },
-          { group: ["@azure/*", "@microsoft/*", "express"], message: "The domain layer must stay free of I/O dependencies." },
+          // Node's own I/O built-ins resolve both with and without the "node:"
+          // prefix, so a domain file could otherwise read a profile off disk or
+          // open a socket without ever touching a flagged package name.
+          {
+            group: [
+              "@azure/*", "@microsoft/*", "express",
+              "node:fs", "node:fs/promises", "node:http", "node:https", "node:net", "node:child_process",
+              "fs", "fs/promises", "http", "https", "net", "child_process",
+            ],
+            message: "The domain layer must stay free of I/O dependencies.",
+          },
         ],
       }],
     },

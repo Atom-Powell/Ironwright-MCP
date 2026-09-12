@@ -22,6 +22,12 @@
         "pattern": "^(?<year>\\d{4})-(?<month>\\d{2})_(?<client>[^_]+)_VendorTraining\\.xlsx$",
         "deliverable": "MonthlyTraining",
         "verdict": "misnamed"
+      },
+      {
+        "id": "accepted-quarterly-alias",
+        "pattern": "^(?<client>[A-Z0-9]+)_(?<year>\\d{4})-(?<month>\\d{2})_QuarterlyPhishing-Signed\\.xlsx$",
+        "deliverable": "QuarterlyPhishing",
+        "verdict": "compliant"
       }
     ]
   },
