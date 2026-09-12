@@ -173,6 +173,26 @@ export function appRolesFromAccessToken(token: string): string[] | undefined {
   }
 }
 
+/**
+ * Checked before a normal run creates anything. A bootstrap application whose
+ * role was never consented fails at the grant call, which is the last step, so
+ * without this check a misconfigured bootstrap costs a created-then-rolled-back
+ * application on every attempt and reports a failure two steps from its cause.
+ */
+export function assertBootstrapToken(token: string): void {
+  const roles = appRolesFromAccessToken(token);
+  if (roles === undefined) {
+    throw new Error(
+      "The bootstrap application's token could not be read, so its permissions cannot be checked before proceeding. Confirm IW_BOOTSTRAP_CLIENT_ID and IW_BOOTSTRAP_CLIENT_SECRET belong to the grant-issuing application.",
+    );
+  }
+  if (!roles.includes(SITES_FULL_CONTROL_ROLE_CLAIM)) {
+    throw new Error(
+      `The bootstrap application's token does not carry ${SITES_FULL_CONTROL_ROLE_CLAIM}, so it cannot issue a per-site grant. Its application permission exists on the registration but has not been admin-consented in this tenant. A Privileged Role Administrator or Global Administrator must consent it, or re-run this command with --create-bootstrap to create a correctly configured application.`,
+    );
+  }
+}
+
 const CONSENT_REMEDY =
   "Grant admin consent for Microsoft Graph's Sites.Selected application permission to this app registration. " +
   "A Privileged Role Administrator or Global Administrator has to do that, because the Application Administrator " +

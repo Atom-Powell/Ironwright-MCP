@@ -20,6 +20,13 @@ describe("resolveBootstrapCredentials", () => {
   it("returns undefined when neither source supplies anything", () => {
     expect(resolveBootstrapCredentials(base, {})).toBeUndefined();
   });
+
+  it("prefers an explicit flag even when the environment variable is empty", () => {
+    const argv = [...base, "--bootstrap-client-id=flag-id", "--bootstrap-client-secret=flag-secret"];
+    expect(
+      resolveBootstrapCredentials(argv, { IW_BOOTSTRAP_CLIENT_ID: "", IW_BOOTSTRAP_CLIENT_SECRET: "" }),
+    ).toEqual({ clientId: "flag-id", clientSecret: "flag-secret" });
+  });
 });
 
 describe("parseArgs bootstrap mode", () => {

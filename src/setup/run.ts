@@ -2,6 +2,7 @@ import type { SetupGraph } from "./adapter.js";
 import { SetupFailedError } from "./errors.js";
 import {
   MICROSOFT_GRAPH_APP_ID,
+  SITES_FULL_CONTROL_ROLE_CLAIM,
   SITES_SELECTED_ROLE_CLAIM,
   appRoleIdByValue,
   buildAppRegistrationRequest,
@@ -47,6 +48,28 @@ function detail(error: unknown): string {
 }
 
 /**
+ * The application-deleting half of rollback, split out so runCreateBootstrap can
+ * reuse it: that mode never grants a site permission, so it has nothing that
+ * corresponds to the other half below.
+ */
+async function rollbackApplication(
+  graph: SetupGraph,
+  objectId: string,
+  appId: string,
+  notice: (message: string) => void,
+): Promise<void> {
+  try {
+    await graph.deleteApplication(objectId);
+    notice(`Rolled back the partially configured app registration ${appId}, so no client secret was left behind.`);
+  } catch (error) {
+    notice(
+      `Could not remove the partially configured app registration ${appId} (object id ${objectId}): ${detail(error)}. ` +
+        "It holds a client secret, so delete it manually before trying again.",
+    );
+  }
+}
+
+/**
  * Undoes what a failed run created. Every step after the application exists can
  * fail, and without this each failed attempt would leave behind a confidential
  * client holding a secret nobody recorded, plus an identity entry on a
@@ -65,15 +88,7 @@ async function rollback(graph: SetupGraph, partial: PartialSetup, notice: (messa
     }
   }
 
-  try {
-    await graph.deleteApplication(partial.objectId);
-    notice(`Rolled back the partially configured app registration ${partial.appId}, so no client secret was left behind.`);
-  } catch (error) {
-    notice(
-      `Could not remove the partially configured app registration ${partial.appId} (object id ${partial.objectId}): ${detail(error)}. ` +
-        "It holds a client secret, so delete it manually before trying again.",
-    );
-  }
+  await rollbackApplication(graph, partial.objectId, partial.appId, notice);
 }
 
 /**
@@ -134,6 +149,50 @@ export async function runSetup(graph: SetupGraph, args: SetupArgs, hooks: SetupH
     return { appId, objectId, secret: secretText, siteId };
   } catch (error) {
     await rollback(graph, { objectId, appId, siteId, sitePermissionId }, notice);
+    throw error;
+  }
+}
+
+/**
+ * Creates the grant-issuing application. This is the one place a
+ * Sites.FullControl.All credential is created deliberately, and it is a separate
+ * mode rather than part of a normal run so that creating a tenant-wide
+ * credential is always an explicit act. The server's own application never holds
+ * this role, not even transiently, which is the reason for the split: removing a
+ * role assignment does not revoke a token already issued under it.
+ *
+ * Graph's service principal is resolved before the application is created, not
+ * after, for the same reason runSetup resolves it first for Sites.Selected: the
+ * registration itself has to name the real Sites.FullControl.All app role id,
+ * which only exists on that response.
+ */
+export async function runCreateBootstrap(
+  graph: SetupGraph,
+  args: { displayName: string },
+  hooks: SetupHooks = {},
+): Promise<{ appId: string; objectId: string; secret: string }> {
+  const notice = hooks.onNotice ?? ((): void => {});
+
+  const graphServicePrincipal = await graph.resolveServicePrincipal(MICROSOFT_GRAPH_APP_ID);
+  const fullControlAppRoleId = appRoleIdByValue(graphServicePrincipal.appRoles, SITES_FULL_CONTROL_ROLE_CLAIM);
+
+  const { objectId, appId } = await graph.createApplication(
+    buildAppRegistrationRequest(args.displayName, fullControlAppRoleId),
+  );
+
+  try {
+    const { secretText } = await graph.addPassword(objectId);
+    const servicePrincipal = await graph.createServicePrincipal(appId);
+    await graph.grantAppRole(
+      buildAppRoleAssignmentRequest({
+        principalId: servicePrincipal.objectId,
+        resourceId: graphServicePrincipal.objectId,
+        appRoleId: fullControlAppRoleId,
+      }),
+    );
+    return { appId, objectId, secret: secretText };
+  } catch (error) {
+    await rollbackApplication(graph, objectId, appId, notice);
     throw error;
   }
 }
