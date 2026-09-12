@@ -17,7 +17,7 @@ The first grant is the application permission itself. The app registration has t
 
 The second grant is per site. `POST /sites/{site-id}/permissions` names one app and one site, and it is what turns a consented `Sites.Selected` into read or write access to that one library. This is the least-privilege boundary the whole project rests on: the app can reach the sites it was granted and no others.
 
-The command performs both, in that order, and then verifies. It creates the registration with the app role requested, creates the service principal for it, assigns the app role from that service principal to Microsoft Graph's service principal, which is the admin consent step, grants the per-site permission, and finally calls Graph as the new app to confirm the result.
+The command performs both, in that order, and then verifies. It resolves the site first, so a mistyped URL costs nothing. Then it creates the registration with the app role requested, creates the service principal for it, assigns the app role from that service principal to Microsoft Graph's service principal, which is the admin consent step, grants the per-site permission, and finally calls Graph as the new app to confirm the result.
 
 The service principal matters more than it looks. `POST /applications` creates a registration, not an identity. Without an explicit `POST /servicePrincipals` there is nothing in the tenant for a role assignment to attach to and nothing for the token endpoint to resolve, and the first client credentials request fails with AADSTS700016 naming an application that plainly does exist.
 

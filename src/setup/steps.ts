@@ -49,7 +49,13 @@ export type VerificationOutcome =
   | { ok: true }
   | {
       ok: false;
-      reason: "permission-not-consented" | "grant-missing" | "token" | "not-found" | "unknown";
+      reason:
+        | "permission-not-consented"
+        | "grant-missing"
+        | "cause-undetermined"
+        | "token"
+        | "not-found"
+        | "unknown";
       message: string;
     };
 
@@ -183,9 +189,11 @@ export function interpretVerification(
       };
     }
 
+    // Labeled for what it is. Reporting this as grant-missing would be the same
+    // confident wrong answer the old diagnostic gave, one layer down.
     return {
       ok: false,
-      reason: "grant-missing",
+      reason: "cause-undetermined",
       message: `The app was denied access and its token could not be read, so both causes are still open. Check the application permission first: ${CONSENT_REMEDY} If the role is present, the per-site grant is the remaining cause. ${GRANT_REMEDY}`,
     };
   }

@@ -31,7 +31,7 @@ describe("interpretVerification failures", () => {
 
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
-    expect(outcome.reason).toBe("grant-missing");
+    expect(outcome.reason).toBe("cause-undetermined");
     expect(outcome.message).toContain("admin consent");
     expect(outcome.message).toContain("/sites/{site-id}/permissions");
   });
