@@ -33,8 +33,11 @@ describe("interpretVerification failures", () => {
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.reason).toBe("cause-undetermined");
-    expect(outcome.message).toContain("admin-consented");
     expect(outcome.message).toContain("neither cause can be ruled out");
+    expect(outcome.message).toContain("Privileged Role Administrator");
+    // Nothing this run created still exists, so the remedy must not send the
+    // operator to inspect a registration or a grant it deleted seconds ago.
+    expect(outcome.message).not.toMatch(/GET \/sites/);
   });
 
   it("composes one non-contradictory story for a refused role-carrying token, pinned as a whole", () => {
@@ -69,11 +72,12 @@ describe("interpretVerification failures", () => {
     if (outcome.ok) return;
     expect(outcome.message).toBe(
       "The app was denied access and its token could not be read, so neither cause can be ruled out. This run " +
-        "rolled back everything it created, so nothing it made is left in the tenant to inspect. Confirm that " +
-        "Microsoft Graph's Sites.Selected application permission is admin-consented for this tenant, which needs " +
-        "a Privileged Role Administrator or Global Administrator because the Application Administrator role can " +
-        "consent to every API except Microsoft Graph, then run this command again. An attempt whose token can be " +
-        "read will name which of the two causes applies.",
+        "rolled back everything it created, so nothing it made is left in the tenant to inspect. Wait a minute " +
+        "and run this command again, signed in as a Privileged Role Administrator or Global Administrator, since " +
+        "the Application Administrator role cannot consent a Microsoft Graph application permission and a " +
+        "directory change made moments earlier can also need a little time. An attempt whose token can be read " +
+        "will name which of the two causes applies; if the token cannot be read then either, report that, " +
+        "because an unreadable application token is a defect in this command rather than a tenant setting.",
     );
   });
 

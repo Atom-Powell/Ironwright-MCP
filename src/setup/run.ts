@@ -249,7 +249,13 @@ export async function runSetup(graph: SetupGraph, args: SetupArgs, hooks: SetupH
     // failure still rolls back, because in every other case what was created is
     // either wrong or unprovable.
     if (!outcome.ok && outcome.reason === "role-present-refused") {
-      return { appId, objectId, secret: secretText, siteId, verification: { confirmed: false, message: outcome.message } };
+      return {
+        appId,
+        objectId,
+        secret: secretText,
+        siteId,
+        verification: { confirmed: false, message: outcome.message },
+      };
     }
     if (!outcome.ok) throw new SetupFailedError(outcome);
 

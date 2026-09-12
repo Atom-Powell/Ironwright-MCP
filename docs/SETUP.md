@@ -105,9 +105,9 @@ which the environment variables do not.
 The recommended posture is to delete the grant-issuing application once setup is done, and to
 recreate it with `--create-bootstrap` when the next site is onboarded. Its only job is issuing
 per-site grants, which happens during a normal run and never afterward, so the running server
-does not need it and neither does anything else. Deleting it turns a permanent tenant-wide
-SharePoint credential into one that exists only during a setup window, which is a materially
-smaller thing to defend than a standing application holding `Sites.FullControl.All`.
+does not need it and neither does anything else. Deleting it shrinks the window in which a
+tenant-wide SharePoint credential exists at all, from a week down to the minutes the setup
+takes, and removes the standing application that holds `Sites.FullControl.All` along with it.
 
 The secret expires on its own either way. `--create-bootstrap` sets an explicit seven-day
 expiry rather than accepting Graph's two-year default, so a grant issuer that nobody remembers

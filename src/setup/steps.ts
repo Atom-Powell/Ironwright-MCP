@@ -270,11 +270,12 @@ const GRANT_REMEDY =
 // case rolls back, and its own honest content is short.
 const UNDETERMINED_CAUSE_MESSAGE =
   "The app was denied access and its token could not be read, so neither cause can be ruled out. This run rolled " +
-  "back everything it created, so nothing it made is left in the tenant to inspect. Confirm that Microsoft " +
-  "Graph's Sites.Selected application permission is admin-consented for this tenant, which needs a Privileged " +
-  "Role Administrator or Global Administrator because the Application Administrator role can consent to every " +
-  "API except Microsoft Graph, then run this command again. An attempt whose token can be read will name which " +
-  "of the two causes applies.";
+  "back everything it created, so nothing it made is left in the tenant to inspect. Wait a minute and run this " +
+  "command again, signed in as a Privileged Role Administrator or Global Administrator, since the Application " +
+  "Administrator role cannot consent a Microsoft Graph application permission and a directory change made " +
+  "moments earlier can also need a little time. An attempt whose token can be read will name which of the two " +
+  "causes applies; if the token cannot be read then either, report that, because an unreadable application " +
+  "token is a defect in this command rather than a tenant setting.";
 
 /**
  * Sites.Selected produces two different 403s with two different remedies, and
