@@ -18,6 +18,10 @@ function isOwed(value: string | number | boolean | null | undefined): boolean {
   if (typeof value === "string") {
     const normalized = value.trim().toLowerCase();
     if (normalized === "no" || normalized === "false") return false;
+    // Deliberately unresolved: the brief pins exactly "no" and "false" as the
+    // hand-typed falsey words, so a cell containing "0" reads as owed here.
+    // A person typing "0" into a mostly-boolean column plausibly means not
+    // owed, but that is a guess beyond what was specified, not an oversight.
   }
   return true;
 }
@@ -39,15 +43,28 @@ function owesDeliverable(row: ClientRecord, deliverable: Deliverable): boolean {
  * run. The day is deliberately discarded: cadences resolve to a month, never
  * a day, so a client onboarded on the 15th is treated identically to one
  * onboarded on the 1st of the same month.
+ *
+ * Nothing upstream validates a workbook cell's contents the way the profile
+ * validator validates the profile itself: `ClientRecord.effectiveFrom` is
+ * whatever string the spreadsheet held. A hand-maintained tracker is exactly
+ * where a date typed "15/08/2026" or otherwise malformed shows up, so both
+ * failure modes here name the client and quote the offending value, rather
+ * than aborting a fifty-row report with a message that leaves an operator to
+ * bisect the spreadsheet to find the bad cell.
  */
-function effectiveFromPeriod(iso: string): Period {
+function effectiveFromPeriod(client: string, iso: string): Period {
   const match = /^(\d{4})-(\d{2})/.exec(iso);
   if (!match) {
-    throw new Error(`effectiveFrom "${iso}" is not an ISO date`);
+    throw new Error(`client "${client}" has an effectiveFrom that is not an ISO date: "${iso}"`);
   }
   const year = Number(match[1]);
   const month = Number(match[2]);
-  assertValidMonth(month);
+  try {
+    assertValidMonth(month);
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(`client "${client}" has an invalid effectiveFrom "${iso}": ${reason}`);
+  }
   return { year, month };
 }
 
@@ -73,7 +90,7 @@ export function deriveExpected(profile: Profile, workbook: WorkbookSnapshot, asO
 
       const effectiveFrom =
         profile.window.respectEffectiveFrom && row.effectiveFrom !== undefined
-          ? effectiveFromPeriod(row.effectiveFrom)
+          ? effectiveFromPeriod(row.client, row.effectiveFrom)
           : undefined;
 
       const periods = periodsInWindow({

@@ -77,6 +77,19 @@ describe("loadProfile rejections", () => {
     );
   });
 
+  it("rejects duplicate deliverable tokens", () => {
+    expectIssue(
+      {
+        ...validProfile,
+        deliverables: [
+          validProfile.deliverables[0],
+          { ...validProfile.deliverables[0], id: "OtherDeliverable" },
+        ],
+      },
+      'duplicate deliverable token "MonthlyTraining"',
+    );
+  });
+
   it("rejects duplicate recognizer ids", () => {
     expectIssue(
       {

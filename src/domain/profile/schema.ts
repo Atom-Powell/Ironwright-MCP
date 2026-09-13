@@ -89,11 +89,21 @@ export const ProfileSchema = z
     });
 
     const deliverableIds = new Set<string>();
+    const deliverableTokens = new Set<string>();
     profile.deliverables.forEach((deliverable, index) => {
       if (deliverableIds.has(deliverable.id)) {
         ctx.addIssue({ code: custom, path: ["deliverables", index, "id"], message: `duplicate deliverable id "${deliverable.id}"` });
       }
       deliverableIds.add(deliverable.id);
+
+      // The reconciliation engine maps a token parsed out of a filename back
+      // to a deliverable id (a later stage of the engine, not this schema),
+      // so two deliverables sharing a token would make that lookup ambiguous
+      // with no correct id to return.
+      if (deliverableTokens.has(deliverable.token)) {
+        ctx.addIssue({ code: custom, path: ["deliverables", index, "token"], message: `duplicate deliverable token "${deliverable.token}"` });
+      }
+      deliverableTokens.add(deliverable.token);
     });
 
     const columnKeys = new Set(Object.keys(profile.workbookMapping.columns));
