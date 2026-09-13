@@ -21,6 +21,12 @@ export interface ClientRecord {
 }
 
 export interface WorkbookSnapshot {
+  /**
+   * One row per client. The engine enforces this rather than trusting it: two
+   * rows naming one client can disagree about effectiveFrom and about which
+   * deliverables are owed, so a mapping layer that produced both is refused
+   * by name instead of having one of them silently win.
+   */
   rows: ClientRecord[];
   /** Where the rows came from, for the report's provenance. */
   source: string;

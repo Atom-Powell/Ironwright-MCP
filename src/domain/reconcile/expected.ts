@@ -69,6 +69,36 @@ function effectiveFromPeriod(client: string, iso: string): Period {
 }
 
 /**
+ * The workbook's one structural contract: each client occupies exactly one
+ * row.
+ *
+ * Two rows naming the same client is a data error rather than a redundancy
+ * the engine can absorb, because the rows can carry different effectiveFrom
+ * dates and different owed-deliverable cells and the sheet says nothing about
+ * which of them governs. Merging them or keeping the first would be a guess
+ * presented as an authoritative answer, which is the one thing this report
+ * must not be.
+ *
+ * The check lives here, where the rows are first walked, for two reasons. It
+ * is the only place the client's own name is still in hand -- further down
+ * the pipeline the repeat has collapsed into a slot key and the name is one
+ * field inside it. And a repeat is refused whether or not the client owes
+ * anything, since the ambiguity about which row governs does not depend on
+ * the cells happening to be filled in.
+ */
+function assertOneRowPerClient(workbook: WorkbookSnapshot): void {
+  const seen = new Set<string>();
+  for (const row of workbook.rows) {
+    if (seen.has(row.client)) {
+      throw new Error(
+        `client "${row.client}" appears on more than one workbook row. Two rows can name different effectiveFrom dates and different owed deliverables, and the sheet does not say which governs, so merge them into one row for this client.`,
+      );
+    }
+    seen.add(row.client);
+  }
+}
+
+/**
  * Derives every artifact a client should have on file: the cross product of
  * client, the deliverables that client owes, and the periods that
  * deliverable's cadence produces inside the profile's window. Every finding
@@ -82,6 +112,8 @@ function effectiveFromPeriod(client: string, iso: string): Period {
  * without the finding's own identity shifting under it.
  */
 export function deriveExpected(profile: Profile, workbook: WorkbookSnapshot, asOf: Period): ArtifactFinding[] {
+  assertOneRowPerClient(workbook);
+
   const findings: ArtifactFinding[] = [];
 
   for (const row of workbook.rows) {
