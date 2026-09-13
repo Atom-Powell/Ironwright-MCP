@@ -335,7 +335,7 @@ a second app registration with a second secret rather than fixing the first one.
 
 `npm run scan` runs the server's own reconciliation scan by hand, against a real tenant, ahead
 of any MCP tool being wired up to call it. It reads a profile, resolves the site and library the
-profile names, enumerates the drive with delta and batch, and prints what it found.
+profile names, enumerates the drive with delta, and prints what it found.
 
 ```bash
 npm run scan -- --profile profiles/acme.json

@@ -153,8 +153,15 @@ The spec carries the full phase descriptions. Status as of 2026-09-13:
 1. **Foundation.** Complete and merged. Stateless transport, all ten tools registered as honest
    stubs behind the contract test, the pure profile schema, the two-layer write gate, and a
    scripted per-tenant setup verified end to end against a live tenant.
-2. **Graph performance layer.** Next. Path addressing, batch, delta, Excel sessions, the state
-   store.
+2. **Graph performance layer**, split into 2a and 2b because it is more work than one
+   implementation plan should carry.
+   - **2a: the Graph layer and the repository snapshot.** Complete, pending live verification.
+     The token provider, `Retry-After`-aware retry, path addressing, the delta client, both
+     `StateStore` implementations, the snapshot assembler, and the `scan` command, over plain
+     `fetch`. Verified against fakes; not yet run against a live tenant.
+   - **2b: batch, the Search cross-check, and the Excel session.** Not started. The `$batch`
+     builder, the Microsoft Search cross-check, the Excel session manager, and the
+     `WorkbookSnapshot`.
 3. **Reconciliation engine.** Complete, pending review. Pure and fixture-tested with no Graph
    dependency, which is what let it be built ahead of phase 2. `reconcile` is the single public
    entry; the four stages behind it stay internal so two tools cannot disagree about whether a
@@ -168,8 +175,11 @@ The spec carries the full phase descriptions. Status as of 2026-09-13:
    already written in `docs/EVALUATION-QUESTIONS.md`. They exist early on purpose, so phase 3
    has a concrete target rather than inventing its own test afterward.
 
-Three decisions block phase 2 and are written up in `docs/OPEN-ITEMS.md`. Read them
-before starting it.
+Of the three decisions the parent spec required before phase 2, two are settled and recorded in
+`docs/OPEN-ITEMS.md`: the per-site grant does not accept a delegated token, and the MCP endpoint
+authenticates through Container Apps built-in Entra auth. The third, which delegated scopes the
+setup command's device-code sign-in must request, is still open, but it governs that sign-in
+rather than the server's own Graph access, so it does not block phase 2b either.
 
 ## Still open
 
