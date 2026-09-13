@@ -233,6 +233,60 @@ describe("describeSetupFailure", () => {
     expect(message).toContain("Sites.FullControl.All");
   });
 
+  it("does not call a refused application deletion a refused creation", () => {
+    // DELETE /applications/{id} is issued by --delete-bootstrap and by every
+    // rollback, never by a create step, so the generic 403 branch's "Creating
+    // the app registration and its service principal needs..." named the
+    // wrong verb here even though the role it names is coincidentally right.
+    const message = describeSetupFailure(
+      new GraphRequestError({
+        method: "DELETE",
+        path: "/applications/object-1",
+        status: 403,
+        body: '{"error":{"code":"Authorization_RequestDenied"}}',
+      }),
+      "delete-bootstrap",
+    );
+
+    expect(message).toMatch(/delete this application registration/i);
+    expect(message).not.toMatch(/Creating the app registration/i);
+  });
+
+  it("says deletion needs only Application Administrator, not a more senior consent-granting role", () => {
+    // Deleting an application registration involves no admin consent, unlike
+    // creating one and consenting its permissions, so it needs only
+    // Application Administrator, not Privileged Role Administrator or Global
+    // Administrator; docs/SETUP.md's prerequisites section makes the same
+    // distinction.
+    const message = describeSetupFailure(
+      new GraphRequestError({
+        method: "DELETE",
+        path: "/applications/object-1",
+        status: 403,
+        body: '{"error":{"code":"Authorization_RequestDenied"}}',
+      }),
+      "delete-bootstrap",
+    );
+
+    expect(message).toContain("Application Administrator");
+    expect(message).toMatch(/Privileged Role Administrator or Global Administrator is not required/);
+  });
+
+  it("does not blame the site URL for a 404 on an application delete, which names no site at all", () => {
+    const message = describeSetupFailure(
+      new GraphRequestError({
+        method: "DELETE",
+        path: "/applications/object-1",
+        status: 404,
+        body: '{"error":{"code":"Request_ResourceNotFound"}}',
+      }),
+      "delete-bootstrap",
+    );
+
+    expect(message).not.toMatch(/site URL/i);
+    expect(message).toMatch(/already have been deleted|object id/i);
+  });
+
   it("still blames the site URL for a 404 that is not on the per-site grant path", () => {
     const message = describeSetupFailure(
       new GraphRequestError({ method: "GET", path: "/sites/contoso.sharepoint.com:/sites/Example", status: 404, body: "itemNotFound" }),

@@ -411,6 +411,15 @@ function isSitePermissionsPath(path: string): boolean {
   return /^\/sites\/[^/]+\/permissions(\/[^/]+)?$/.test(path);
 }
 
+// Matches DELETE /applications/{id} (deleteApplication) but not POST
+// /applications (createApplication, no id segment) or
+// /applications/{id}/addPassword (an extra segment). Method is checked by the
+// caller, not here, because the same path shape never arises for any other
+// verb this command issues.
+function isApplicationObjectPath(path: string): boolean {
+  return /^\/applications\/[^/]+$/.test(path);
+}
+
 function nextStepForGraphFailure(error: GraphRequestError): string {
   if (error.status === 403 && error.path.endsWith("/appRoleAssignedTo")) {
     return (
@@ -432,6 +441,24 @@ function nextStepForGraphFailure(error: GraphRequestError): string {
       "granted moments earlier by --create-bootstrap has not yet reached a freshly issued token. Confirm " +
       "IW_BOOTSTRAP_CLIENT_ID and IW_BOOTSTRAP_CLIENT_SECRET name a bootstrap application created with " +
       "--create-bootstrap, and if the permission is already consented, wait a short while and try again."
+    );
+  }
+
+  // DELETE /applications/{id} is issued by --delete-bootstrap and by every
+  // rollback that removes an application, never by a create step, so a 403
+  // here is a refused deletion, not a refused creation. The generic 403
+  // branch below said "Creating the app registration and its service
+  // principal needs Application Administrator", which named the wrong verb
+  // on this path family even though the role it names happens to be right;
+  // docs/SETUP.md draws the same distinction for the same reason: deleting is
+  // a directory-object operation with no consent step, so it needs only
+  // Application Administrator, never Privileged Role Administrator or Global
+  // Administrator the way the create-and-consent steps do.
+  if (error.status === 403 && error.method === "DELETE" && isApplicationObjectPath(error.path)) {
+    return (
+      "The signed-in user is not allowed to delete this application registration. Deleting one needs Application " +
+      "Administrator or Cloud Application Administrator rights over it; no admin consent is involved in deleting, " +
+      "so Privileged Role Administrator or Global Administrator is not required for this step."
     );
   }
 
@@ -471,6 +498,17 @@ function nextStepForGraphFailure(error: GraphRequestError): string {
       "tenant, or consent granted moments earlier by --create-bootstrap has not yet reached a freshly issued " +
       "token. Confirm IW_BOOTSTRAP_CLIENT_ID and IW_BOOTSTRAP_CLIENT_SECRET name a bootstrap application created " +
       "with --create-bootstrap, and if the permission is already consented, wait a short while and try again."
+    );
+  }
+
+  // The generic branch below blames the site URL, which does not exist on
+  // this call at all: DELETE /applications/{id} names an object id, not a
+  // site. A 404 here most likely means the application was already removed,
+  // for instance by a concurrent teardown, or that the object id is stale.
+  if (error.status === 404 && error.method === "DELETE" && isApplicationObjectPath(error.path)) {
+    return (
+      "The application registration was not found. It may already have been deleted, including by a concurrent " +
+      "run, or the object id no longer names an application in this tenant."
     );
   }
 
