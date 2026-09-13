@@ -30,7 +30,9 @@ export function loadGraphCredentials(env: NodeJS.ProcessEnv): GraphCredentialsCo
   if (missing.length > 0) {
     throw new Error(
       `Missing required environment ${missing.length === 1 ? "variable" : "variables"}: ${missing.join(", ")}. ` +
-        "These are the server application's own credentials, produced by npm run setup.",
+        "These are the server application's own credentials. npm run setup prints the same three " +
+        "values under different names: AZURE_TENANT_ID is IW_TENANT_ID, AZURE_CLIENT_ID is " +
+        "IW_CLIENT_ID, and AZURE_CLIENT_SECRET is IW_CLIENT_SECRET.",
     );
   }
 

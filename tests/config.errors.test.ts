@@ -15,4 +15,11 @@ describe("loadGraphCredentials failures", () => {
   it("never echoes a value it rejected", () => {
     expect(() => loadGraphCredentials({ IW_CLIENT_SECRET: "secret-1" })).not.toThrow(/secret-1/);
   });
+
+  it("translates the names npm run setup actually prints, which differ from the ones read here", () => {
+    const call = () => loadGraphCredentials({});
+
+    expect(call).toThrow(/AZURE_TENANT_ID is IW_TENANT_ID/);
+    expect(call).toThrow(/AZURE_CLIENT_SECRET is IW_CLIENT_SECRET/);
+  });
 });
