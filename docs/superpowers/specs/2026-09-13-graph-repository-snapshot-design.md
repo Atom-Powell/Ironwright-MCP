@@ -57,8 +57,10 @@ calls the token endpoint with `fetch` like everything else.
 
 ## Architecture
 
-Three new module groups and one entry point. The domain layer imports none of them, which the
-existing purity lint rule already enforces.
+Three new module groups and one entry point. The domain layer must import none of them. That was
+not yet true of the purity lint rule when this was written; it was extended on 2026-09-13 to
+deny `**/graph/**`, `**/store/**`, `**/scan/**` and `**/config.js` to the domain layer alongside
+the transport, tool and setup layers it already covered.
 
 **`src/graph/`** carries no domain knowledge.
 

@@ -157,6 +157,28 @@ describe("the reconciliation engine's single entry point", () => {
 
     expect(messages.join("\n")).toContain("The domain layer is pure");
   });
+
+  it("refuses a Graph access layer import", async () => {
+    // Phase 2a added src/graph/, src/store/ and src/scan/ alongside the
+    // transport, tool and setup layers the group already denied. The group's
+    // own glob admits every relative path unless the layer it names is listed,
+    // so this and the next case are what would have caught that gap.
+    const ruleIds = await ruleIdsFor(
+      "src/domain/probe.ts",
+      'import { createGraphClient } from "../../graph/client.js";\nexport const use = createGraphClient;\n',
+    );
+
+    expect(ruleIds).toContain("no-restricted-imports");
+  });
+
+  it("refuses a state store import", async () => {
+    const ruleIds = await ruleIdsFor(
+      "src/domain/probe.ts",
+      'import type { StateStore } from "../../store/types.js";\nexport type Use = StateStore;\n',
+    );
+
+    expect(ruleIds).toContain("no-restricted-imports");
+  });
 });
 
 describe("the domain layer's freedom from the clock", () => {

@@ -18,8 +18,18 @@ const PURITY_PATTERNS = [
   // still climb out of the domain layer, so the sibling half of the rule needs
   // its own pattern.
   {
-    group: ["**/server/**", "**/mcp/**", "**/tools/**", "**/setup/**"],
-    message: "The domain layer must not depend on transport, tool, or setup layers.",
+    group: [
+      "**/server/**",
+      "**/mcp/**",
+      "**/tools/**",
+      "**/setup/**",
+      "**/graph/**",
+      "**/store/**",
+      "**/scan/**",
+      "**/config.js",
+    ],
+    message:
+      "The domain layer must not depend on the transport, tool, setup, Graph, store, scan, or config layers.",
   },
 ];
 
