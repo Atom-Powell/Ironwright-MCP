@@ -5,20 +5,59 @@ import { runDeleteBootstrap } from "../../src/setup/run.js";
 
 const base = ["node", "main.js", "--tenant=contoso.onmicrosoft.com"];
 
+// Implements every SetupGraph method, not just the two runDeleteBootstrap is
+// expected to call. A fake missing a method throws a TypeError the instant an
+// unexpected call reaches it, before the calling test's own assertions run,
+// which would make a negative assertion like "creates nothing" pass vacuously
+// on a thrown error rather than on the fake actually recording no such call.
 function fakeGraph(found: { objectId: string; appId: string } | undefined): {
   graph: SetupGraph;
   calls: string[];
 } {
   const calls: string[] = [];
-  const graph = {
-    findApplicationByDisplayName: async (displayName: string) => {
+  const graph: SetupGraph = {
+    resolveSite: async (sitePath) => {
+      calls.push(`resolveSite:${sitePath}`);
+      return { siteId: "should-not-be-called" };
+    },
+    findApplicationByDisplayName: async (displayName) => {
       calls.push(`findApplicationByDisplayName:${displayName}`);
       return found;
     },
-    deleteApplication: async (objectId: string) => {
+    createApplication: async () => {
+      calls.push("createApplication");
+      return { objectId: "should-not-be-called", appId: "should-not-be-called" };
+    },
+    addPassword: async (objectId) => {
+      calls.push(`addPassword:${objectId}`);
+      return { secretText: "should-not-be-called" };
+    },
+    createServicePrincipal: async (appId) => {
+      calls.push(`createServicePrincipal:${appId}`);
+      return { objectId: "should-not-be-called" };
+    },
+    resolveServicePrincipal: async (appId) => {
+      calls.push(`resolveServicePrincipal:${appId}`);
+      return { objectId: "should-not-be-called", appRoles: [] };
+    },
+    grantAppRole: async () => {
+      calls.push("grantAppRole");
+    },
+    grantSitePermission: async (siteId) => {
+      calls.push(`grantSitePermission:${siteId}`);
+      return { permissionId: "should-not-be-called" };
+    },
+    verifyAppAccess: async () => {
+      calls.push("verifyAppAccess");
+      return { status: 200, body: "{}", appRoles: [] };
+    },
+    deleteSitePermission: async (siteId, permissionId) => {
+      calls.push(`deleteSitePermission:${siteId}:${permissionId}`);
+    },
+    deleteApplication: async (objectId) => {
       calls.push(`deleteApplication:${objectId}`);
     },
-  } as unknown as SetupGraph;
+  };
   return { graph, calls };
 }
 

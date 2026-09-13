@@ -3,6 +3,7 @@ import {
   DEFAULT_DEVICE_CODE_CLIENT_ID,
   acquireTokenWithRetry,
   describeBootstrapSuccess,
+  describeDeleteBootstrapSuccess,
   describeSignInFailure,
   extractAccessToken,
   once,
@@ -100,6 +101,32 @@ describe("describeBootstrapSuccess", () => {
 
     expect(message).toContain("already admin-consented");
     expect(message).not.toMatch(/needs? (to be )?consent/i);
+  });
+});
+
+describe("describeDeleteBootstrapSuccess", () => {
+  it("names the application that was deleted", () => {
+    const message = describeDeleteBootstrapSuccess({ appId: "app-1" });
+
+    expect(message).toContain("app-1");
+  });
+
+  it("states the standing permission is what deletion removed", () => {
+    const message = describeDeleteBootstrapSuccess({ appId: "app-1" });
+
+    expect(message).toMatch(/standing/i);
+    expect(message).toMatch(/Sites\.FullControl\.All/);
+  });
+
+  it("does not let deletion read as equivalent to the secret's own expiry", () => {
+    // The secret's seven-day expiry only disables one credential; the
+    // application keeps its admin-consented role assignment until it is
+    // actually deleted. A message that did not draw this line would let an
+    // operator believe waiting out the week did the same job.
+    const message = describeDeleteBootstrapSuccess({ appId: "app-1" });
+
+    expect(message).toMatch(/not just its secret/i);
+    expect(message).toMatch(/expired secret/i);
   });
 });
 

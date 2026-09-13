@@ -308,7 +308,10 @@ export async function runCreateBootstrap(
   // second application with an identical display name. Two of those, both
   // holding Sites.FullControl.All, is how the wrong secret gets rotated or the
   // wrong application revoked, and neither mistake is visible in the tenant's
-  // app list.
+  // app list. This call itself throws, before either branch below runs, if the
+  // name already matches more than one application: findApplicationByDisplayName
+  // refuses that case rather than returning one of them, so "found one" and
+  // "found none" are not the only two outcomes here.
   const existing = await graph.findApplicationByDisplayName(args.displayName);
   if (existing !== undefined) {
     throw new Error(
