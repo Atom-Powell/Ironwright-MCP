@@ -52,6 +52,14 @@ describe("parseScanArguments", () => {
     });
   });
 
+  it("treats a sub-path that strips to nothing as no sub-path at all", () => {
+    // "/" names the whole library, which is what omitting the flag means. Left
+    // unset rather than stored empty so the output cannot announce a filter that
+    // never applied.
+    expect(parseScanArguments(["--profile", "p.json", "--sub-path", "/"])).toEqual({ profilePath: "p.json" });
+    expect(parseScanArguments(["--profile", "p.json", "--sub-path", "///"])).toEqual({ profilePath: "p.json" });
+  });
+
   it("strips both a leading and a trailing slash from the sub-path", () => {
     expect(parseScanArguments(["--profile", "p.json", "--sub-path", "/2026/CLIENTA/"])).toEqual({
       profilePath: "p.json",
@@ -113,8 +121,27 @@ describe("formatScanResult", () => {
       "azure-table",
     ).join("\n");
 
-    expect(lines).toMatch(/1 carry no ETag/);
+    expect(lines).toMatch(/1 carries no ETag/);
     expect(lines).toMatch(/Graph did not report one/);
+  });
+
+  it("agrees the verb with a plural count as well, so the singular fix is not a constant", () => {
+    const lines = formatScanResult(
+      result({
+        snapshot: {
+          files: [
+            { path: "2026/a.xlsx", name: "a.xlsx", size: 1, modified: "2026-09-01T00:00:00Z", etag: "" },
+            { path: "2026/b.xlsx", name: "b.xlsx", size: 1, modified: "2026-09-01T00:00:00Z", etag: "" },
+          ],
+          folderPaths: ["2026"],
+          scannedAt: "2026-09-13T12:00:00.000Z",
+          searchCrossCheckIncluded: false,
+        },
+      }),
+      "azure-table",
+    ).join("\n");
+
+    expect(lines).toMatch(/2 carry no ETag/);
   });
 
   it("names the count of files with no modified date when some files lack one", () => {
@@ -135,7 +162,7 @@ describe("formatScanResult", () => {
       "azure-table",
     ).join("\n");
 
-    expect(lines).toMatch(/1 carry no modified date/);
+    expect(lines).toMatch(/1 carries no modified date/);
   });
 
   it("names both counts when files lack an ETag, a modified date, or both", () => {
@@ -154,8 +181,8 @@ describe("formatScanResult", () => {
       "azure-table",
     ).join("\n");
 
-    expect(lines).toMatch(/1 carry no ETag/);
-    expect(lines).toMatch(/1 carry no modified date/);
+    expect(lines).toMatch(/1 carries no ETag/);
+    expect(lines).toMatch(/1 carries no modified date/);
     expect(lines).toMatch(/Graph did not report those values/);
   });
 

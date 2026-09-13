@@ -30,7 +30,14 @@ export function parseScanArguments(argv: readonly string[]): ScanArguments {
       // "2026/CLIENTA". Inventory paths are library-relative with no leading
       // slash and no trailing one, so an unstripped filter would silently
       // match nothing rather than the client the operator named.
-      subPath = value.replace(/^\/+/, "").replace(/\/+$/, "");
+      //
+      // A value that strips to nothing, "/" being the one an operator would
+      // actually type, names the whole library, which is what omitting the flag
+      // already means. It is left unset rather than stored as an empty string so
+      // the two spellings are the same thing everywhere downstream, including in
+      // the output, which would otherwise announce a filter that never applied.
+      const stripped = value.replace(/^\/+/, "").replace(/\/+$/, "");
+      subPath = stripped.length === 0 ? undefined : stripped;
       index += 1;
     } else {
       throw new Error(`Unrecognized argument "${flag}". ${USAGE}`);
@@ -92,9 +99,12 @@ export function formatScanResult(result: ScanResult, storeKind: "azure-table" | 
   const withoutEtag = result.snapshot.files.filter((file) => file.etag === "").length;
   const withoutModified = result.snapshot.files.filter((file) => file.modified === "").length;
   if (withoutEtag > 0 || withoutModified > 0) {
+    // A count of one is the common case for both gaps, so the verb agrees with
+    // the count rather than assuming the plural.
+    const carry = (count: number): string => (count === 1 ? "carries" : "carry");
     const gaps = [
-      withoutEtag > 0 ? `${withoutEtag} carry no ETag` : undefined,
-      withoutModified > 0 ? `${withoutModified} carry no modified date` : undefined,
+      withoutEtag > 0 ? `${withoutEtag} ${carry(withoutEtag)} no ETag` : undefined,
+      withoutModified > 0 ? `${withoutModified} ${carry(withoutModified)} no modified date` : undefined,
     ].filter((gap): gap is string => gap !== undefined);
 
     lines.push(
