@@ -59,18 +59,37 @@ export function anchorPeriod(period: Period, cadence: Cadence, anchor: PeriodAnc
  * compute is exactly the message-versus-outcome defect this project keeps
  * relearning.
  *
- * Both ends are checked and derived, not just the start. `asOf` is the one
- * month the entire report is computed from and it arrives from a caller, so
- * it is validated here rather than trusted, and `to` is round-tripped through
- * the index the same way `from` is rather than handed back as the caller's own
- * object. Skipping either let the header and the body disagree about the end:
- * `asOf` of month 0 produced a header reading "2026-0" over a report whose
- * last period was 2025-12. The realistic source of a month 0 is not an exotic
- * caller but `Date.prototype.getMonth()`, which is zero-based, so a tool
+ * Both ends are checked and derived, not just the start, and both fields of
+ * `asOf` are checked rather than only its month. `asOf` is the one period the
+ * entire report is computed from and it arrives from a caller, so it is
+ * validated here rather than trusted, and `to` is round-tripped through the
+ * index the same way `from` is rather than handed back as the caller's own
+ * object.
+ *
+ * Skipping any of that let the window this returns disagree with the periods
+ * derived from it. An `asOf` of month 0 returned a `to` of `{2026, 0}` while
+ * the last period was 2025-12, and the realistic source of a month 0 is not an
+ * exotic caller but `Date.prototype.getMonth()`, which is zero-based, so a tool
  * built on it would drop a month of every client's obligations every January
- * and say nothing.
+ * and say nothing. A fractional year reached the same disagreement through the
+ * other field, because `toIndex` multiplies the year by 12 and carries the
+ * fraction into both bounds while every derived period is a whole month.
+ *
+ * The year's range is four digits because that is what the engine can
+ * round-trip: `renderTemplate` writes `{year}` into the expected path and
+ * filename as `String(year)`, and the filename parser reads a year back as
+ * `\d{4}`.
  */
+const MIN_YEAR = 1000;
+const MAX_YEAR = 9999;
+
 export function windowBounds(asOf: Period, months: number): { from: Period; to: Period } {
+  if (!Number.isInteger(asOf.year) || asOf.year < MIN_YEAR || asOf.year > MAX_YEAR) {
+    throw new Error(
+      `asOf does not name a real calendar year: year must be a whole number between ${MIN_YEAR} and ${MAX_YEAR}, got ${asOf.year}. Pass a whole year; the value renders straight into the expected path and filename as digits.`,
+    );
+  }
+
   try {
     assertValidMonth(asOf.month);
   } catch (cause) {

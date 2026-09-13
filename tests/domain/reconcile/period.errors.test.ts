@@ -97,3 +97,55 @@ describe("windowBounds rejections for an asOf that is not a real month", () => {
     expect(windowBounds({ year: 2026, month: 12 }, 1)).toEqual({ from: { year: 2026, month: 12 }, to: { year: 2026, month: 12 } });
   });
 });
+
+/**
+ * The same gap reached through the other field of the same object. Guarding
+ * the month left the year trusted, and `toIndex` multiplies the year by 12, so
+ * a fraction there propagates into both bounds while `periodsInWindow` floors
+ * its span indices and derives whole months: the header names two months that
+ * do not exist over a body that contains twelve that do.
+ *
+ * Lower reach than month 0 had -- `Date.prototype.getFullYear()` always returns
+ * an integer and there is no zero-versus-one-based trap on a year -- but it is
+ * the same defect, and "both ends are checked" has to be true of the whole
+ * Period rather than half of it.
+ */
+describe("windowBounds rejections for an asOf that is not a real year", () => {
+  it("rejects a fractional year and quotes the value", () => {
+    expect(() => windowBounds({ year: 2026.7, month: 6 }, 6)).toThrow(
+      /asOf does not name a real calendar year: year must be a whole number between 1000 and 9999, got 2026.7/,
+    );
+  });
+
+  it("says what to do about it", () => {
+    expect(() => windowBounds({ year: 2026.7, month: 6 }, 6)).toThrow(/Pass a whole year/);
+  });
+
+  it("rejects a year too short to render as four digits", () => {
+    // The year renders into the expected path and filename through
+    // String(year), and the canonical matcher reads it back as \d{4}, so a
+    // three-digit year is outside what the engine can round-trip.
+    expect(() => windowBounds({ year: 999, month: 6 }, 6)).toThrow(/got 999/);
+  });
+
+  it("rejects a year too long to render as four digits", () => {
+    expect(() => windowBounds({ year: 12345, month: 6 }, 6)).toThrow(/got 12345/);
+  });
+
+  it("rejects a zero year", () => {
+    expect(() => windowBounds({ year: 0, month: 6 }, 6)).toThrow(/got 0/);
+  });
+
+  it("refuses through reconcile, so no report can carry an impossible window", () => {
+    expect(() => reconcile(buildProfile(), workbook, repository, { year: 2026.7, month: 6 })).toThrow(
+      /asOf does not name a real calendar year/,
+    );
+  });
+
+  it("accepts the four-digit years either side of the range", () => {
+    // Guards the guard, and pins that ordinary years are untouched.
+    expect(windowBounds({ year: 1000, month: 6 }, 1)).toEqual({ from: { year: 1000, month: 6 }, to: { year: 1000, month: 6 } });
+    expect(windowBounds({ year: 9999, month: 6 }, 1)).toEqual({ from: { year: 9999, month: 6 }, to: { year: 9999, month: 6 } });
+    expect(windowBounds({ year: 2026, month: 6 }, 6)).toEqual({ from: { year: 2026, month: 1 }, to: { year: 2026, month: 6 } });
+  });
+});
