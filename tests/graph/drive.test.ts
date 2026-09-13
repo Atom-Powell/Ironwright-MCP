@@ -53,4 +53,21 @@ describe("resolveDrive", () => {
       driveId: "drive-b",
     });
   });
+
+  it("prefers an exact match over a case-insensitive one when both are present", async () => {
+    const client = fakeClient({
+      "/sites/contoso.sharepoint.com:/sites/Example": { id: "site-1" },
+      "/sites/site-1/drives?$select=id,name": {
+        value: [
+          { id: "drive-lower", name: "compliance reports" },
+          { id: "drive-exact", name: "Compliance Reports" },
+        ],
+      },
+    });
+
+    await expect(resolveDrive(client, "https://contoso.sharepoint.com/sites/Example", "Compliance Reports")).resolves.toEqual({
+      siteId: "site-1",
+      driveId: "drive-exact",
+    });
+  });
 });

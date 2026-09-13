@@ -45,4 +45,16 @@ describe("resolveDrive failures", () => {
       resolveDrive(client, "https://contoso.sharepoint.com/sites/Example", "Compliance Reports"),
     ).rejects.toThrow(/no id/i);
   });
+
+  it("says the response shape was unexpected, not that the site has no libraries, when every entry is malformed", async () => {
+    const client = fakeClient({
+      "/sites/contoso.sharepoint.com:/sites/Example": { id: "site-1" },
+      "/sites/site-1/drives?$select=id,name": { value: [{ id: "drive-a" }, { name: "Archive" }] },
+    });
+
+    const failure = resolveDrive(client, "https://contoso.sharepoint.com/sites/Example", "Compliance Reports");
+
+    await expect(failure).rejects.toThrow(/unexpected response shape/i);
+    await expect(failure).rejects.not.toThrow(/no document libraries at all/i);
+  });
 });

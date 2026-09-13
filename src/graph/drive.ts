@@ -9,11 +9,20 @@ export class LibraryNotFoundError extends Error {
   readonly library: string;
   readonly available: string[];
 
-  constructor(library: string, available: string[]) {
+  /**
+   * `rawCount` is how many entries the listing carried before the shape filter,
+   * and it is what separates two situations that both leave `available` empty:
+   * a site with no libraries, and a site whose libraries arrived in a shape this
+   * code could not read. Reporting the second as the first sends an operator to
+   * correct a site URL that was right.
+   */
+  constructor(library: string, available: string[], rawCount: number) {
     const tail =
-      available.length === 0
+      rawCount === 0
         ? "That site has no document libraries at all, which usually means the site URL in the profile names the wrong site."
-        : `The libraries on that site are: ${available.map((name) => `"${name}"`).join(", ")}.`;
+        : available.length === 0
+          ? `That site returned ${rawCount} ${rawCount === 1 ? "entry" : "entries"} for its libraries, but none carried both an id and a name, so none could be matched. That is an unexpected response shape rather than a wrong site URL.`
+          : `The libraries on that site are: ${available.map((name) => `"${name}"`).join(", ")}.`;
     super(`No document library named "${library}" was found. ${tail}`);
     this.name = "LibraryNotFoundError";
     this.library = library;
@@ -50,7 +59,8 @@ export async function resolveDrive(
   }
 
   const listing = await client.get<DriveListing>(`/sites/${site.id}/drives?$select=id,name`);
-  const drives = (listing.value ?? []).flatMap((drive) =>
+  const rawValue = listing.value ?? [];
+  const drives = rawValue.flatMap((drive) =>
     typeof drive.id === "string" && typeof drive.name === "string" ? [{ id: drive.id, name: drive.name }] : [],
   );
 
@@ -64,6 +74,7 @@ export async function resolveDrive(
     throw new LibraryNotFoundError(
       library,
       drives.map((drive) => drive.name).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
+      rawValue.length,
     );
   }
 
