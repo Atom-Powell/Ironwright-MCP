@@ -63,7 +63,14 @@ describe("the golden report", () => {
     expect(JSON.stringify(run())).toBe(JSON.stringify(expectedReport));
   });
 
-  it("produces the same bytes on a second run over the same inputs", () => {
+  it("does not mutate its inputs, so a second run in the same process still produces those bytes", () => {
+    // Deliberately narrower than its old name ("the same bytes on a second
+    // run"), which read as a claim about cross-run determinism this test
+    // cannot make: locale, ICU data and engine key ordering are all fixed
+    // inside one process, so running twice here cannot see any of them. What
+    // it does see is the engine mutating something it was handed -- a real
+    // risk given how much of the report is produced by sorting -- which would
+    // make the second run differ from the first.
     expect(JSON.stringify(run())).toBe(JSON.stringify(run()));
   });
 });

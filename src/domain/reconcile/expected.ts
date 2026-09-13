@@ -37,6 +37,24 @@ function owesDeliverable(row: ClientRecord, deliverable: Deliverable): boolean {
 }
 
 /**
+ * The shapes a tracker's effective-date cell is allowed to hold: a bare month,
+ * a date, or a date followed by a time after a "T" or a space.
+ *
+ * Anchored at both ends and spelling out every part it allows, so the
+ * rejection message that quotes it ("is not an ISO date") is true of what the
+ * check performs. Discarding the day is deliberate; accepting arbitrary text
+ * where a day should be is not the same thing, and the earlier unanchored
+ * pattern read "2026-06zzz", "2026-0615", "2026-06-99" and "2026-06T99:99"
+ * all as June 2026 without complaint. Only the year and the month are
+ * captured. The day is range-checked but not checked against its own month's
+ * length, since it is discarded either way, and the month is left to
+ * `assertValidMonth` so an out-of-range month gets its own message rather
+ * than being lumped in with a malformed string.
+ */
+const ISO_EFFECTIVE_FROM =
+  /^(\d{4})-(\d{2})(?:-(?:0[1-9]|[12]\d|3[01]))?(?:[T ](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-](?:[01]\d|2[0-3]):?[0-5]\d)?)?$/;
+
+/**
  * Reads the leading year and month out of an ISO date string by pattern
  * rather than through `Date`, so a workbook's effective date is never read
  * against the server's local timezone or the moment the parse happens to
@@ -48,12 +66,17 @@ function owesDeliverable(row: ClientRecord, deliverable: Deliverable): boolean {
  * validator validates the profile itself: `ClientRecord.effectiveFrom` is
  * whatever string the spreadsheet held. A hand-maintained tracker is exactly
  * where a date typed "15/08/2026" or otherwise malformed shows up, so both
- * failure modes here name the client and quote the offending value, rather
- * than aborting a fifty-row report with a message that leaves an operator to
- * bisect the spreadsheet to find the bad cell.
+ * failure modes here name the client and quote the offending value.
+ *
+ * One malformed cell still aborts the whole report rather than excluding the
+ * one client it belongs to. That is what this code does, and whether it is
+ * the right behavior is an open question recorded in docs/OPEN-ITEMS.md under
+ * "Should one bad workbook row abort the whole reconciliation?". Naming the
+ * client and the value spares an operator bisecting a fifty-row spreadsheet
+ * to find the cell; it does not spare them re-running the report.
  */
 function effectiveFromPeriod(client: string, iso: string): Period {
-  const match = /^(\d{4})-(\d{2})/.exec(iso);
+  const match = ISO_EFFECTIVE_FROM.exec(iso);
   if (!match) {
     throw new Error(`client "${client}" has an effectiveFrom that is not an ISO date: "${iso}"`);
   }

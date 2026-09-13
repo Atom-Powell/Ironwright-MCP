@@ -92,9 +92,15 @@ export interface DuplicateFinding {
 }
 
 /**
- * `unrecognized` means the filename did not parse at all. `unexpected` means it
- * parsed cleanly but names a client, period or deliverable nobody owes, which
- * usually means the workbook is stale rather than the repository being wrong.
+ * `unrecognized` means the filename did not parse at all.
+ *
+ * `unexpected` means it parsed cleanly but the client, deliverable and period
+ * it names have no slot in this report. Two different situations produce that,
+ * and the engine cannot tell them apart because both are the same absent slot
+ * key: nobody owes the artifact at all, and the artifact is owed but its
+ * period lies outside the reporting window or before the client's effective
+ * date. Naming a cause here -- a stale workbook, say -- would assert something
+ * the engine did not observe, so the kind states only what it saw.
  */
 export type OrphanKind = "unrecognized" | "unexpected";
 

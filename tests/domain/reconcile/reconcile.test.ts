@@ -421,4 +421,58 @@ describe("reconcile: the per-client rollup", () => {
       { client: "CLIENTA", counts: { ...EMPTY_COUNTS, compliant: 3 }, compliant: true },
     ]);
   });
+
+  /**
+   * One artifact, one state, one flag. The predicate used to enumerate the
+   * four non-compliant states as explicit zero checks, which meant a state
+   * added to `ArtifactState` later would default to counting as compliant --
+   * a client silently declared clean on the strength of a finding nobody had
+   * taught the rollup to read. It is now derived from the tally as a whole,
+   * and these pin each state against it individually rather than relying on
+   * the shared fixture, which happens not to produce a misplaced artifact
+   * for any single-state client.
+   */
+  describe("the compliant flag against one artifact in each state", () => {
+    // One month of window, one client, one deliverable, so the report holds
+    // exactly one artifact and the flag can only be reading that artifact.
+    function reportForSingleFile(files: RepositoryFile[]): ReturnType<typeof reconcile> {
+      const oneMonth: Profile = { ...buildProfile(), window: { mode: "rolling", months: 1, respectEffectiveFrom: false } };
+      const oneClient: WorkbookSnapshot = { rows: [row("CLIENTA", "Yes", "No")], source: workbook.source };
+
+      return reconcile(oneMonth, oneClient, buildRepository({ files, folderPaths: [] }), asOf);
+    }
+
+    const cases: Array<{ state: ArtifactState; file?: RepositoryFile; compliant: boolean }> = [
+      {
+        state: "compliant",
+        file: repoFile("2026/CLIENTA/06-June/2026-06_CLIENTA_Training.xlsx", "2026-07-02T00:00:00Z", "etag-ok"),
+        compliant: true,
+      },
+      {
+        state: "misnamed",
+        file: repoFile("2026/CLIENTA/06-June/CLIENTA Monthly - June 2026.xlsx", "2026-07-02T00:00:00Z", "etag-misnamed"),
+        compliant: false,
+      },
+      {
+        state: "misplaced",
+        file: repoFile("2026/Archive/2026-06_CLIENTA_Training.xlsx", "2026-07-02T00:00:00Z", "etag-misplaced"),
+        compliant: false,
+      },
+      {
+        state: "misnamed_and_misplaced",
+        file: repoFile("2026/Archive/CLIENTA Monthly - June 2026.xlsx", "2026-07-02T00:00:00Z", "etag-both"),
+        compliant: false,
+      },
+      { state: "missing", compliant: false },
+    ];
+
+    it.each(cases)("reads $state as compliant: $compliant", ({ state, file, compliant }) => {
+      const report = reportForSingleFile(file ? [file] : []);
+
+      expect(report.artifacts.map((artifact) => artifact.state)).toEqual([state]);
+      expect(report.clients).toEqual([
+        { client: "CLIENTA", counts: { ...EMPTY_COUNTS, [state]: 1 }, compliant },
+      ]);
+    });
+  });
 });

@@ -65,4 +65,38 @@ describe("deriveExpected rejections for a malformed effectiveFrom", () => {
       'client "CLIENTX" has an invalid effectiveFrom "2026-13-01": month must be between 1 and 12, got 13',
     );
   });
+
+  // The message says "is not an ISO date", and the check has to be worth that
+  // sentence. An unanchored pattern read all four of these as June 2026 and
+  // said nothing, so a cell holding a mangled date produced a real-looking
+  // effective month rather than a complaint.
+  it.each(["2026-06zzz", "2026-0615", "2026-06T99:99", "2026-06-99"])(
+    "rejects %s, which the pattern used to read as June 2026",
+    (value) => {
+      expect(() => deriveExpected(buildProfile(), buildWorkbook(value), asOf)).toThrow(
+        `client "CLIENTX" has an effectiveFrom that is not an ISO date: "${value}"`,
+      );
+    },
+  );
+});
+
+// Guards the guard above. Anchoring the pattern must not start rejecting the
+// shapes a real tracker cell holds: a bare month, a full date, and a date with
+// a time after it (Excel hands back the last of these).
+describe("deriveExpected acceptance of the effectiveFrom shapes a tracker holds", () => {
+  it.each(["2026-08", "2026-08-15", "2026-08-15T00:00:00Z", "2026-08-15 09:30:00"])(
+    "reads %s as August 2026",
+    (value) => {
+      const findings = deriveExpected(buildProfile(), buildWorkbook(value), asOf);
+
+      // asOf is 2026-11 over a six-month window, so an effective date of
+      // August leaves exactly August through November.
+      expect(findings.map((finding) => finding.period)).toEqual([
+        { year: 2026, month: 8 },
+        { year: 2026, month: 9 },
+        { year: 2026, month: 10 },
+        { year: 2026, month: 11 },
+      ]);
+    },
+  );
 });

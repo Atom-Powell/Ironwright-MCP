@@ -170,9 +170,10 @@ export function matchArtifacts(profile: Profile, expected: ArtifactFinding[], pa
     const key = slotKey(slot);
 
     if (!findingBySlot.has(key)) {
-      // Parses cleanly but names a client, period or deliverable nobody
-      // owes. Usually the workbook is stale rather than the repository
-      // being wrong; see the module-level design note in types.ts.
+      // Parses cleanly, but the client, deliverable and period it names have
+      // no slot. An artifact nobody owes and an artifact owed for a period
+      // outside the window are the same absent key here, so the finding says
+      // what was seen and not why; see the OrphanKind note in types.ts.
       orphans.push({ path: file.file.path, name: file.file.name, kind: "unexpected", parsed: slot });
       continue;
     }

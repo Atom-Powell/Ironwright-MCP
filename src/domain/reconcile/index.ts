@@ -72,6 +72,13 @@ function emptyCounts(): Record<ArtifactState, number> {
  * `compliant` is true only when every one of the client's artifacts is
  * compliant. It is therefore vacuously true for a client with no artifacts,
  * which the zero counts alongside it make legible.
+ *
+ * The predicate is written as "the compliant tally accounts for every
+ * artifact" rather than as one `=== 0` check per non-compliant state, so the
+ * state list has exactly one definition here as it does everywhere else. Four
+ * explicit checks would silently count a sixth state as compliant the day one
+ * is added; `emptyCounts` is typed over `ArtifactState`, so this form picks
+ * the new state up with no edit at all.
  */
 function rollUpByClient(workbook: WorkbookSnapshot, artifacts: ArtifactFinding[]): ClientSummary[] {
   const counts = new Map<string, Record<ArtifactState, number>>();
@@ -93,7 +100,7 @@ function rollUpByClient(workbook: WorkbookSnapshot, artifacts: ArtifactFinding[]
     .map(([client, tally]) => ({
       client,
       counts: tally,
-      compliant: tally.misnamed === 0 && tally.misplaced === 0 && tally.misnamed_and_misplaced === 0 && tally.missing === 0,
+      compliant: tally.compliant === Object.values(tally).reduce((total, count) => total + count, 0),
     }))
     .sort((a, b) => compareStrings(a.client, b.client));
 }

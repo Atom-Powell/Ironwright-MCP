@@ -1,5 +1,5 @@
 import { ESLint } from "eslint";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 /**
  * Two of this project's global constraints were, until this file existed,
@@ -21,11 +21,18 @@ import { beforeAll, describe, expect, it } from "vitest";
  * fires and which does not. It lints text rather than files on disk so the
  * violations it describes never have to exist in the tree.
  */
+// Loading and resolving the flat config costs a second or two the first time,
+// and this file runs alongside forty other workers, so the default per-test
+// timeout is not a safe budget for whichever assertion happens to go first.
+// The cost is paid once, in the hook, and every case after it is fast.
+vi.setConfig({ testTimeout: 60_000 });
+
 let eslint: ESLint;
 
-beforeAll(() => {
+beforeAll(async () => {
   eslint = new ESLint();
-});
+  await eslint.lintText("export const warm = 1;\n", { filePath: "src/server/probe.ts", warnIgnored: false });
+}, 120_000);
 
 async function ruleIdsFor(filePath: string, code: string): Promise<string[]> {
   const [result] = await eslint.lintText(code, { filePath, warnIgnored: false });
