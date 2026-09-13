@@ -63,6 +63,11 @@ describe("runScan", () => {
     expect(result.snapshot.folderPaths).toEqual(["2026"]);
     expect(result.snapshot.scannedAt).toBe("2026-09-13T12:00:00.000Z");
     await expect(store.getDeltaLink("example", "drive-1")).resolves.toBe("https://graph.microsoft.com/v1.0/next-link");
+    // One page. The root item is skipped, leaving two upserts (the folder and
+    // the file), applied as a single store batch since both fit in one chunk.
+    expect(result.pages).toBe(1);
+    expect(result.changesApplied).toBe(2);
+    expect(result.storeBatches).toBe(1);
   });
 
   it("runs incrementally from a stored link and keeps items it did not see again", async () => {
@@ -97,5 +102,9 @@ describe("runScan", () => {
     expect(result.mode).toBe("incremental");
     expect(result.snapshot.files.map((file) => file.path)).toEqual(["2026/old.xlsx"]);
     expect(result.graphRequests).toBe(3);
+    // One page with no items, so nothing is applied and no store batch is issued.
+    expect(result.pages).toBe(1);
+    expect(result.changesApplied).toBe(0);
+    expect(result.storeBatches).toBe(0);
   });
 });

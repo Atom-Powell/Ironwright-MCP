@@ -26,23 +26,22 @@ export interface ScanResult {
   storeBatches: number;
 }
 
-interface EnumerationResult {
-  pages: number;
-  changesApplied: number;
-  storeBatches: number;
-  deltaLink: string;
-}
-
 export async function runScan(dependencies: ScanDependencies): Promise<ScanResult> {
   const { client, store, profile, now } = dependencies;
   const { driveId } = await resolveDrive(client, profile.identity.siteUrl, profile.identity.library);
 
   const storedLink = await store.getDeltaLink(profile.profileId, driveId);
 
-  async function enumerate(fromLink: string | undefined): Promise<EnumerationResult> {
-    let pages = 0;
-    let changesApplied = 0;
-    let storeBatches = 0;
+  // Counted across the whole run rather than per attempt. A resync discards the
+  // work of its first attempt but the run still paid for it, and an operator
+  // reading what a scan cost wants what it actually cost. graphRequests already
+  // behaves this way because the client's counter is cumulative, and two numbers
+  // on one result describing different spans cannot be read correctly.
+  let pages = 0;
+  let changesApplied = 0;
+  let storeBatches = 0;
+
+  async function enumerate(fromLink: string | undefined): Promise<string> {
     let deltaLink: string | undefined;
 
     for await (const page of deltaPages(client, driveId, fromLink)) {
@@ -61,15 +60,15 @@ export async function runScan(dependencies: ScanDependencies): Promise<ScanResul
       throw new Error(`The delta enumeration of drive ${driveId} finished without a deltaLink.`);
     }
 
-    return { pages, changesApplied, storeBatches, deltaLink };
+    return deltaLink;
   }
 
   let mode: "full" | "incremental" = storedLink === undefined ? "full" : "incremental";
   let resynced = false;
-  let enumeration: EnumerationResult;
+  let deltaLink: string;
 
   try {
-    enumeration = await enumerate(storedLink);
+    deltaLink = await enumerate(storedLink);
   } catch (error) {
     if (!(error instanceof DeltaResyncRequiredError)) throw error;
     // The stored inventory is now unreliable in a way no incremental pass can
@@ -78,14 +77,14 @@ export async function runScan(dependencies: ScanDependencies): Promise<ScanResul
     await store.clearInventory(profile.profileId, driveId);
     resynced = true;
     mode = "full";
-    enumeration = await enumerate(undefined);
+    deltaLink = await enumerate(undefined);
   }
 
   // Persisted last. An interrupted scan then resumes by re-reading pages it has
   // already applied, which is wasteful and correct, rather than by skipping
   // changes it never applied, which is cheap and silently wrong.
   const scannedAt = now().toISOString();
-  await store.setDeltaLink(profile.profileId, driveId, enumeration.deltaLink, scannedAt);
+  await store.setDeltaLink(profile.profileId, driveId, deltaLink, scannedAt);
 
   const records = await store.listInventory(profile.profileId, driveId);
 
@@ -94,9 +93,9 @@ export async function runScan(dependencies: ScanDependencies): Promise<ScanResul
     driveId,
     mode,
     resynced,
-    pages: enumeration.pages,
-    changesApplied: enumeration.changesApplied,
+    pages,
+    changesApplied,
     graphRequests: client.requests(),
-    storeBatches: enumeration.storeBatches,
+    storeBatches,
   };
 }

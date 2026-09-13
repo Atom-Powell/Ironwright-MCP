@@ -93,3 +93,79 @@ describe("runScan when a page fails partway", () => {
     await expect(store.getDeltaLink("example", "drive-1")).resolves.toBe("https://graph.microsoft.com/v1.0/stored");
   });
 });
+
+describe("runScan when a resync discards a partially applied first attempt", () => {
+  it("counts the work of a discarded first attempt, because the run still paid for it", async () => {
+    const store = createMemoryStateStore();
+    await store.setDeltaLink("example", "drive-1", "https://graph.microsoft.com/v1.0/stored-multi", "2026-09-12T00:00:00Z");
+
+    let requests = 0;
+    const client: GraphClient = {
+      requests: () => requests,
+      get: async <T,>(path: string): Promise<T> => {
+        requests += 1;
+        if (path === SITE) return { id: "site-1" } as T;
+        if (path === DRIVES) return { value: [{ id: "drive-1", name: "Compliance Reports" }] } as T;
+        if (path === "https://graph.microsoft.com/v1.0/stored-multi") {
+          // First page of the stored-link attempt: one real item, plus a
+          // nextLink so the generator goes back for a second page.
+          return {
+            value: [
+              {
+                id: "i1",
+                name: "first.xlsx",
+                parentReference: { path: "/drives/drive-1/root:/2026" },
+                file: {},
+                size: 1,
+                lastModifiedDateTime: "2026-08-01T00:00:00Z",
+                eTag: "e1",
+              },
+            ],
+            "@odata.nextLink": "https://graph.microsoft.com/v1.0/page-2",
+          } as T;
+        }
+        if (path === "https://graph.microsoft.com/v1.0/page-2") {
+          // The second page of the same enumeration is where the 410 lands,
+          // after the first page has already been applied to the store.
+          throw new GraphRequestError({
+            method: "GET",
+            path,
+            status: 410,
+            body: JSON.stringify({ error: { code: "resyncRequired" } }),
+          });
+        }
+        if (path === "/drives/drive-1/root/delta") {
+          // The fresh enumeration after the resync, one complete page.
+          return {
+            value: [
+              {
+                id: "i2",
+                name: "fresh.xlsx",
+                parentReference: { path: "/drives/drive-1/root:/2026" },
+                file: {},
+                size: 1,
+                lastModifiedDateTime: "2026-09-01T00:00:00Z",
+                eTag: "e2",
+              },
+            ],
+            "@odata.deltaLink": "https://graph.microsoft.com/v1.0/after-resync-multi",
+          } as T;
+        }
+        throw new Error(`unexpected path ${path}`);
+      },
+    };
+
+    const result = await runScan({ client, store, profile: PROFILE, now: NOW });
+
+    expect(result.resynced).toBe(true);
+    expect(result.mode).toBe("full");
+    expect(result.snapshot.files.map((file) => file.path)).toEqual(["2026/fresh.xlsx"]);
+    // One page from the discarded first attempt (the second page never yields,
+    // it throws before yielding), one page from the fresh enumeration.
+    expect(result.pages).toBe(2);
+    // One upsert applied and discarded by the first attempt, one applied by the
+    // fresh enumeration. Both are counted, because the run paid for both.
+    expect(result.changesApplied).toBe(2);
+    expect(result.storeBatches).toBe(2);
+  });
+});
