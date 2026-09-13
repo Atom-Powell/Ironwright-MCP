@@ -279,8 +279,7 @@ function finishMatch(profile: Profile, groups: Captures, fallbackDeliverableId?:
  * it wants surfaced as unrecognized. Canonical matching should not silently
  * grant its own leniency that bypasses that declaration.
  */
-function matchCanonical(profile: Profile, name: string): RawMatch | undefined {
-  const pattern = buildCanonicalPattern(profile);
+function matchCanonicalAgainst(profile: Profile, pattern: RegExp, name: string): RawMatch | undefined {
   const match = pattern.exec(name);
   if (!match?.groups) return undefined;
 
@@ -301,11 +300,52 @@ function matchCanonical(profile: Profile, name: string): RawMatch | undefined {
  * expected to equal anything `renderTemplate` would produce; it exists
  * precisely to accept a shape the renderer does not.
  */
-function matchRecognizer(profile: Profile, recognizer: Recognizer, name: string): RawMatch | undefined {
-  const pattern = new RegExp(recognizer.pattern);
+function matchRecognizerAgainst(profile: Profile, recognizer: Recognizer, pattern: RegExp, name: string): RawMatch | undefined {
   const match = pattern.exec(name);
   if (!match?.groups) return undefined;
   return finishMatch(profile, match.groups, recognizer.deliverable)?.match;
+}
+
+/**
+ * A prepared parser for one profile: a function from `RepositoryFile` to
+ * `ParsedFile`, exactly like `parseFile` below, but with the canonical
+ * pattern and every recognizer's regex compiled once up front rather than
+ * rebuilt on every call.
+ *
+ * `parseFile` itself rebuilds both on every call, which is invisible in a
+ * unit test that parses one file and real the first time a caller runs
+ * parsing across an entire repository: a repository scan calls this once per
+ * file it found, potentially thousands of times, and `RegExp` compilation
+ * (plus, for the canonical pattern, walking the naming template into capture
+ * groups) is genuine repeated work with the same result every time for a
+ * fixed profile. `createFileParser` exists so that caller compiles once and
+ * calls the returned function per file, while `parseFile` keeps its existing
+ * one-shot signature for call sites that only ever look at a single file
+ * (tests, a single-file lookup tool) and would gain nothing from holding a
+ * prepared parser around.
+ */
+export function createFileParser(profile: Profile): (file: RepositoryFile) => ParsedFile {
+  const canonicalPattern = buildCanonicalPattern(profile);
+  const recognizers = profile.naming.recognizers.map((recognizer) => ({
+    recognizer,
+    pattern: new RegExp(recognizer.pattern),
+  }));
+
+  return (file: RepositoryFile): ParsedFile => {
+    const canonical = matchCanonicalAgainst(profile, canonicalPattern, file.name);
+    if (canonical) {
+      return { recognized: true, file, ...canonical, nameVerdict: "canonical" };
+    }
+
+    for (const { recognizer, pattern } of recognizers) {
+      const match = matchRecognizerAgainst(profile, recognizer, pattern, file.name);
+      if (match) {
+        return { recognized: true, file, ...match, nameVerdict: recognizer.verdict, recognizerId: recognizer.id };
+      }
+    }
+
+    return { recognized: false, file };
+  };
 }
 
 /**
@@ -316,19 +356,13 @@ function matchRecognizer(profile: Profile, recognizer: Recognizer, name: string)
  * canonical name and how a profile author orders recognizers deliberately
  * (a broad legacy pattern before a narrower one, for example), so declaring
  * order is meaningful rather than incidental.
+ *
+ * A thin, one-shot wrapper around `createFileParser`: correct for a single
+ * file, but a caller parsing many files against the same profile should call
+ * `createFileParser` once and reuse the function it returns instead of
+ * calling this repeatedly, so the pattern compilation above only happens
+ * once.
  */
 export function parseFile(profile: Profile, file: RepositoryFile): ParsedFile {
-  const canonical = matchCanonical(profile, file.name);
-  if (canonical) {
-    return { recognized: true, file, ...canonical, nameVerdict: "canonical" };
-  }
-
-  for (const recognizer of profile.naming.recognizers) {
-    const match = matchRecognizer(profile, recognizer, file.name);
-    if (match) {
-      return { recognized: true, file, ...match, nameVerdict: recognizer.verdict, recognizerId: recognizer.id };
-    }
-  }
-
-  return { recognized: false, file };
+  return createFileParser(profile)(file);
 }

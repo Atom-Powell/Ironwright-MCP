@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseFile } from "../../../src/domain/reconcile/parse.js";
+import { createFileParser, parseFile } from "../../../src/domain/reconcile/parse.js";
 import type { Profile } from "../../../src/domain/profile/schema.js";
 import type { RepositoryFile } from "../../../src/domain/reconcile/types.js";
 
@@ -290,5 +290,40 @@ describe("parseFile: unrecognized", () => {
     const file = buildFile("readme.txt", "2026/CLIENTA/readme.txt");
 
     expect(parseFile(profile, file)).toEqual({ recognized: false, file });
+  });
+});
+
+// parseFile rebuilds the canonical pattern and recompiles every recognizer's
+// regex on every call, which is invisible at one file per test but real once
+// a caller runs it across a whole repository. createFileParser compiles both
+// exactly once and hands back a function for repeated use; this suite pins
+// that it is not a second, independently-drifting implementation of parsing,
+// just the same logic with the compilation hoisted out of the per-file path.
+describe("createFileParser", () => {
+  it("parses the same result as parseFile for a canonical match, a recognizer match, and an unrecognized name", () => {
+    const profile = buildProfile();
+    const canonicalFile = buildFile("2026-05_CLIENTA_Training.xlsx", "2026/CLIENTA/05-May/2026-05_CLIENTA_Training.xlsx");
+    const recognizerFile = buildFile("CLIENTA-202605-Training.xlsx", "2026/CLIENTA/05-May/CLIENTA-202605-Training.xlsx");
+    const unrecognizedFile = buildFile("readme.txt", "2026/CLIENTA/readme.txt");
+
+    const parse = createFileParser(profile);
+
+    expect(parse(canonicalFile)).toEqual(parseFile(profile, canonicalFile));
+    expect(parse(recognizerFile)).toEqual(parseFile(profile, recognizerFile));
+    expect(parse(unrecognizedFile)).toEqual(parseFile(profile, unrecognizedFile));
+  });
+
+  it("returns a function that can be reused across many files without rebuilding per call", () => {
+    const profile = buildProfile();
+    const parse = createFileParser(profile);
+
+    const files = [
+      buildFile("2026-05_CLIENTA_Training.xlsx", "2026/CLIENTA/05-May/2026-05_CLIENTA_Training.xlsx"),
+      buildFile("2026-06_CLIENTB_Training.xlsx", "2026/CLIENTB/06-June/2026-06_CLIENTB_Training.xlsx"),
+    ];
+
+    const results = files.map(parse);
+
+    expect(results.every((result) => result.recognized)).toBe(true);
   });
 });
