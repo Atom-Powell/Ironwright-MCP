@@ -14,6 +14,7 @@ export interface ParsedArgs {
   write: boolean;
   clientId: string;
   createBootstrap: boolean;
+  deleteBootstrap: boolean;
   bootstrap: BootstrapCredentials | undefined;
 }
 
@@ -85,13 +86,33 @@ function emptyToUndefined(value: string | undefined): string | undefined {
 
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): ParsedArgs {
   const createBootstrap = argv.includes("--create-bootstrap");
+  const deleteBootstrap = argv.includes("--delete-bootstrap");
+
+  // Creating and deleting the grant issuer are opposite acts on the same
+  // application. Letting one silently win when both flags are given is how an
+  // operator deletes the grant issuer they meant to create, or recreates the
+  // one they meant to tear down, with no indication either happened.
+  if (createBootstrap && deleteBootstrap) {
+    throw new Error(
+      "--create-bootstrap and --delete-bootstrap cannot be used together. Run one, confirm its result, then run " +
+        "the other if you still need to.",
+    );
+  }
+
+  // Neither bootstrap mode names a site: creation has none yet to onboard, and
+  // deletion acts on the grant issuer application itself, not on any site it
+  // was ever used against.
+  const bootstrapMode = createBootstrap || deleteBootstrap;
+
   return {
     tenantId: requiredValue(argv, "tenant"),
-    siteUrl: createBootstrap ? (findValue(argv, "site") ?? "") : requiredValue(argv, "site"),
-    displayName: findValue(argv, "name") ?? (createBootstrap ? DEFAULT_BOOTSTRAP_DISPLAY_NAME : DEFAULT_DISPLAY_NAME),
+    siteUrl: bootstrapMode ? (findValue(argv, "site") ?? "") : requiredValue(argv, "site"),
+    displayName:
+      findValue(argv, "name") ?? (bootstrapMode ? DEFAULT_BOOTSTRAP_DISPLAY_NAME : DEFAULT_DISPLAY_NAME),
     write: argv.includes("--write"),
     clientId: findValue(argv, "client-id") ?? DEFAULT_DEVICE_CODE_CLIENT_ID,
     createBootstrap,
+    deleteBootstrap,
     bootstrap: resolveBootstrapCredentials(argv, env),
   };
 }
@@ -234,6 +255,26 @@ export function describeBootstrapSuccess(result: { appId: string; secret: string
     "does. Its Sites.FullControl.All application permission is already admin-consented: the role assignment this " +
     "command just made is what performs that for an application permission, so there is no separate consent step " +
     "to do in the portal. Set the two values above and run this command again without --create-bootstrap."
+  );
+}
+
+/**
+ * The full `--delete-bootstrap` success block, printed on stdout. A pure
+ * function for the same reason describeBootstrapSuccess above is one: so its
+ * wording can be pinned by a test.
+ *
+ * Deletion, not the secret's own seven-day expiry, is what this command can
+ * actually claim removed the standing privilege: deleteApplication succeeding
+ * means Graph has removed the application object, and with it every role
+ * assignment it held, including Sites.FullControl.All. An expired secret only
+ * disables one credential and leaves that assignment, and the application
+ * that carries it, in place for anyone able to add a new secret.
+ */
+export function describeDeleteBootstrapSuccess(result: { appId: string }): string {
+  return (
+    `Deleted application ${result.appId}. That removes the standing Sites.FullControl.All permission it held, not ` +
+    "just its secret: a deleted application keeps no access, where an expired secret alone would not have. " +
+    "Onboarding another site later needs a grant issuer again, so run this command with --create-bootstrap first."
   );
 }
 

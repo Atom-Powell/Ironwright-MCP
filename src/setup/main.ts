@@ -3,13 +3,14 @@ import { createFetchSetupGraph } from "./adapter.js";
 import {
   acquireTokenWithRetry,
   describeBootstrapSuccess,
+  describeDeleteBootstrapSuccess,
   describeSetupFailure,
   describeSignInFailure,
   extractAccessToken,
   once,
   parseArgs,
 } from "./cli.js";
-import { runCreateBootstrap, runSetup } from "./run.js";
+import { runCreateBootstrap, runDeleteBootstrap, runSetup } from "./run.js";
 import { assertBootstrapToken } from "./steps.js";
 
 /**
@@ -81,8 +82,11 @@ async function main(): Promise<void> {
   // admin-consented role assignment before discovering the bootstrap credentials
   // do not work, followed by a rollback that deletes everything it just made.
   // Creating the bootstrap application is what --create-bootstrap is for, so
-  // that mode is exempt.
-  if (!parsed.createBootstrap) {
+  // that mode is exempt. Deleting it is exempt for the opposite reason: this
+  // mode exists for a grant issuer whose secret was lost or has already
+  // expired, and requiring exactly that secret here would make it unusable in
+  // the one situation it was built for.
+  if (!parsed.createBootstrap && !parsed.deleteBootstrap) {
     assertBootstrapToken(await acquireBootstrapToken());
   }
 
@@ -115,6 +119,21 @@ async function main(): Promise<void> {
       acquireAppOnlyToken(tenantId, appId, secret, "The new application's credentials were rejected"),
     acquireBootstrapToken,
   });
+
+  // Checked before --create-bootstrap below: parseArgs already refuses the two
+  // together, so at most one of these branches is ever reachable in a given
+  // run, and this one needs only the delegated sign-in above, not the
+  // bootstrap-credential preflight this command otherwise requires.
+  if (parsed.deleteBootstrap) {
+    const result = await runDeleteBootstrap(
+      graph,
+      { displayName },
+      { onNotice: (message) => console.error(message) },
+    );
+
+    console.log(describeDeleteBootstrapSuccess(result));
+    return;
+  }
 
   // A separate mode rather than a branch inside runSetup: it touches no site
   // (no resolveSite, no grantSitePermission, no verifyAppAccess), and printing

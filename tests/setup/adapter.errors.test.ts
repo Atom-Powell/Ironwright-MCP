@@ -85,3 +85,39 @@ describe("unexpected success shapes", () => {
     await expect(graph().deleteApplication("object-1")).resolves.toBeUndefined();
   });
 });
+
+describe("findApplicationByDisplayName ambiguous match", () => {
+  // displayName is not unique in Entra. Silently returning the first match
+  // would tell a caller on the delete path that one application was removed
+  // while an identically named one remains, and a second run would then
+  // delete that one too.
+  it("refuses rather than silently picking the first of several matches", async () => {
+    stubFetch({
+      status: 200,
+      body: JSON.stringify({
+        value: [
+          { id: "object-1", appId: "app-1" },
+          { id: "object-2", appId: "app-2" },
+        ],
+      }),
+    });
+
+    await expect(graph().findApplicationByDisplayName("Ironwright Grant Issuer")).rejects.toThrow(
+      /Found 2 applications named "Ironwright Grant Issuer"/,
+    );
+  });
+
+  it("tells the operator how to disambiguate", async () => {
+    stubFetch({
+      status: 200,
+      body: JSON.stringify({
+        value: [
+          { id: "object-1", appId: "app-1" },
+          { id: "object-2", appId: "app-2" },
+        ],
+      }),
+    });
+
+    await expect(graph().findApplicationByDisplayName("Ironwright Grant Issuer")).rejects.toThrow(/--name/);
+  });
+});
