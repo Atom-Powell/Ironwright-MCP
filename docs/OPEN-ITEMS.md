@@ -1,7 +1,12 @@
-# Phase 1 follow-ups
+# Open items
 
-Open items carried out of phase 1's reviews. Recorded here rather than in a scratch ledger
-because the later phases that need them will not read a scratch ledger.
+The project's register of decisions awaiting a human, work deliberately deferred, and an honest
+account of what is verified against a live tenant versus only against fakes.
+
+It began as a list of phase 1's review leftovers and outgrew that name, which is why it no
+longer carries it. Things land here when they need to survive past the session that found them,
+because a scratch ledger will not be read by the phase that needs it. Sections are roughly
+ordered by when they will matter, not by when they were written.
 
 ## Decisions required before the first live setup run
 

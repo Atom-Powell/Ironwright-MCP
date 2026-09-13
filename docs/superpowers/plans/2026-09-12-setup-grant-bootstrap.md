@@ -658,7 +658,7 @@ git commit -m "feat: add --create-bootstrap mode and a bootstrap permission pref
 **Files:**
 - Modify: `src/setup/run.ts`, `src/setup/steps.ts`, `tests/setup/run.errors.test.ts`
 
-Each of these is recorded in `docs/PHASE-1-FOLLOW-UPS.md` under "Known minor issues" and each lives in code this plan is already touching.
+Each of these is recorded in `docs/OPEN-ITEMS.md` under "Known minor issues" and each lives in code this plan is already touching.
 
 - [ ] **Step 1: Write the failing test for the rollback gap**
 
@@ -717,7 +717,7 @@ git commit -m "fix: close the rollback gap, replication race, and stale remedy i
 ### Task 6: Documentation
 
 **Files:**
-- Modify: `docs/SETUP.md`, `README.md`, `docs/PHASE-1-FOLLOW-UPS.md`
+- Modify: `docs/SETUP.md`, `README.md`, `docs/OPEN-ITEMS.md`
 
 - [ ] **Step 1: Rewrite `docs/SETUP.md` for the two-phase flow**
 
@@ -729,7 +729,7 @@ Keep the existing sections on the device-code client id and on where the printed
 
 One sentence in the setup area noting that the first run per tenant is `--create-bootstrap`, pointing at `docs/SETUP.md`.
 
-- [ ] **Step 3: Update `docs/PHASE-1-FOLLOW-UPS.md`**
+- [ ] **Step 3: Update `docs/OPEN-ITEMS.md`**
 
 Mark the three known issues Task 5 closed as closed with their commit subjects, and update the outstanding-verification section: the bootstrap flow is implemented but the end-to-end run, including the client-credentials exchange and the verification call, has still never executed against a tenant.
 

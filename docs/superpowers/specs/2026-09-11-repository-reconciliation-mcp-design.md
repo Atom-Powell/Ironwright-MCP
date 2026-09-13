@@ -414,7 +414,7 @@ message printed four lines above it.
 ## Watch items
 
 Phase 1's reviews left open questions and carried-forward risks that later phases must read.
-They are recorded in `docs/PHASE-1-FOLLOW-UPS.md`. Three of them require a decision before
+They are recorded in `docs/OPEN-ITEMS.md`. Three of them require a decision before
 phase 2 begins: whether the per-site grant accepts a delegated token, which delegated scopes
 the setup sign-in must request, and how the MCP endpoint authenticates callers.
 

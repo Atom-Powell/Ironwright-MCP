@@ -2,7 +2,7 @@
 
 Persistent session anchor. This is a stable reference, not a changelog. Live status lives in
 the PAI vault note for this repo; open items and decisions awaiting a human live in
-`docs/PHASE-1-FOLLOW-UPS.md`. Keep both of those current and keep this file about what does
+`docs/OPEN-ITEMS.md`. Keep both of those current and keep this file about what does
 not change.
 
 ## Mission
@@ -31,7 +31,7 @@ used for development.
   spec: decisions and their reasoning, architecture, the profile schema, the safety model, the
   phase sequence, and the message-audit practice this project learned the hard way. It is the
   binding document when anything disagrees.
-- `docs/PHASE-1-FOLLOW-UPS.md` holds open items, decisions needing a human, and an honest
+- `docs/OPEN-ITEMS.md` holds open items, decisions needing a human, and an honest
   record of what is verified against a live tenant versus only against fakes.
 - `docs/SETUP.md` is the per-tenant operational procedure.
 - `docs/superpowers/plans/` holds executed implementation plans, kept as history.
@@ -156,7 +156,7 @@ The spec carries the full phase descriptions. Status as of 2026-09-12:
    integration and governance**, then the **evaluation suite** of roughly ten realistic
    multi-tool questions, which is the actual test of whether the break-the-mold goal was met.
 
-Three decisions block phase 2 and are written up in `docs/PHASE-1-FOLLOW-UPS.md`. Read them
+Three decisions block phase 2 and are written up in `docs/OPEN-ITEMS.md`. Read them
 before starting it.
 
 ## Still open
