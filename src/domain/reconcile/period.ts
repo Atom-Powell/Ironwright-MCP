@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CadenceSchema, PeriodAnchorSchema } from "../profile/schema.js";
+import { assertValidMonth } from "./months.js";
 import type { Period } from "./types.js";
 
 // Derived from the profile schema rather than restated here: the schema is the
@@ -57,9 +58,30 @@ export function anchorPeriod(period: Period, cadence: Cadence, anchor: PeriodAnc
  * about where the window starts. A report that claims a window it did not
  * compute is exactly the message-versus-outcome defect this project keeps
  * relearning.
+ *
+ * Both ends are checked and derived, not just the start. `asOf` is the one
+ * month the entire report is computed from and it arrives from a caller, so
+ * it is validated here rather than trusted, and `to` is round-tripped through
+ * the index the same way `from` is rather than handed back as the caller's own
+ * object. Skipping either let the header and the body disagree about the end:
+ * `asOf` of month 0 produced a header reading "2026-0" over a report whose
+ * last period was 2025-12. The realistic source of a month 0 is not an exotic
+ * caller but `Date.prototype.getMonth()`, which is zero-based, so a tool
+ * built on it would drop a month of every client's obligations every January
+ * and say nothing.
  */
 export function windowBounds(asOf: Period, months: number): { from: Period; to: Period } {
-  return { from: fromIndex(toIndex(asOf) - months + 1), to: asOf };
+  try {
+    assertValidMonth(asOf.month);
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(
+      `asOf does not name a real calendar month: ${reason}. Months here are one-based, so January is 1; Date.prototype.getMonth() returns 0 for January and needs 1 added to it.`,
+    );
+  }
+
+  const asOfIndex = toIndex(asOf);
+  return { from: fromIndex(asOfIndex - months + 1), to: fromIndex(asOfIndex) };
 }
 
 export interface PeriodsInWindowArgs {

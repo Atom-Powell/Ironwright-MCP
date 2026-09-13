@@ -1,7 +1,40 @@
 import { describe, expect, it } from "vitest";
-import { anchorPeriod, periodsInWindow } from "../../../src/domain/reconcile/period.js";
+import { anchorPeriod, periodsInWindow, windowBounds } from "../../../src/domain/reconcile/period.js";
 
 const asOf = { year: 2026, month: 6 };
+
+describe("windowBounds", () => {
+  it("returns the inclusive first and last month of the trailing window", () => {
+    expect(windowBounds(asOf, 6)).toEqual({ from: { year: 2026, month: 1 }, to: { year: 2026, month: 6 } });
+  });
+
+  it("crosses a year boundary at the start", () => {
+    expect(windowBounds({ year: 2026, month: 2 }, 6)).toEqual({
+      from: { year: 2025, month: 9 },
+      to: { year: 2026, month: 2 },
+    });
+  });
+
+  it("ends where the periods it feeds end", () => {
+    // The property the report header depends on. `to` used to be handed back
+    // as the caller's own asOf object without passing through the index that
+    // every period the report contains is built from, which is exactly where
+    // a header and a body can disagree about the end of the window.
+    const bounds = windowBounds(asOf, 6);
+    const periods = periodsInWindow({ asOf, months: 6, cadence: "monthly", anchor: "last" });
+
+    expect(periods.at(0)).toEqual(bounds.from);
+    expect(periods.at(-1)).toEqual(bounds.to);
+  });
+
+  it("returns its own objects rather than aliasing the caller's asOf", () => {
+    // A report that held the caller's object would let a later mutation of it
+    // change what an already-produced report claims to cover.
+    const reference = { year: 2026, month: 6 };
+
+    expect(windowBounds(reference, 6).to).not.toBe(reference);
+  });
+});
 
 describe("periodsInWindow", () => {
   it("returns one period per month for a monthly cadence, oldest first", () => {
