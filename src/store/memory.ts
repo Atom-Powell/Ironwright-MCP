@@ -1,5 +1,5 @@
-import { chunk, inventoryPartitionKey, MAX_TRANSACTION_SIZE } from "./keys.js";
-import type { ApplyResult, InventoryChange, InventoryRecord, StateStore } from "./types.js";
+import { inventoryPartitionKey, MAX_TRANSACTION_SIZE, planInventoryChanges } from "./keys.js";
+import type { ApplyResult, InventoryRecord, StateStore } from "./types.js";
 
 /**
  * For tests and for a local run with no storage account. It counts batches the
@@ -40,20 +40,23 @@ export function createMemoryStateStore(): StateStore {
 
     async applyInventoryChanges(profileId, driveId, changes): Promise<ApplyResult> {
       const inventory = inventoryFor(profileId, driveId);
-      const upserts = changes.filter((change): change is Extract<InventoryChange, { kind: "upsert" }> =>
-        change.kind === "upsert",
-      );
-      const deletes = changes.filter((change): change is Extract<InventoryChange, { kind: "delete" }> =>
-        change.kind === "delete",
-      );
+      // Applied in arrival order via the shared planner (see its comment), not by
+      // partitioning into upserts-then-deletes: a delete followed by a
+      // re-creation of the same item id is what a restore from the recycle bin
+      // looks like, and applying all upserts first would leave it absent.
+      const steps = planInventoryChanges(changes, MAX_TRANSACTION_SIZE);
+      let batches = 0;
 
-      for (const change of upserts) inventory.set(change.record.itemId, change.record);
-      for (const change of deletes) inventory.delete(change.itemId);
+      for (const step of steps) {
+        if (step.kind === "upsert") {
+          for (const record of step.records) inventory.set(record.itemId, record);
+        } else {
+          inventory.delete(step.itemId);
+        }
+        batches += 1;
+      }
 
-      return {
-        changesApplied: changes.length,
-        batches: chunk(upserts, MAX_TRANSACTION_SIZE).length + deletes.length,
-      };
+      return { changesApplied: changes.length, batches };
     },
 
     async listInventory(profileId, driveId) {

@@ -17,13 +17,18 @@ export type InventoryChange =
 export interface ApplyResult {
   changesApplied: number;
   /**
-   * Write operations issued to the backing store: one per chunk of upserts, and
-   * one per delete. Deletes are not chunked because the Table implementation
-   * cannot batch them. A transaction containing a delete of a row that is not
-   * there fails as a whole, and this store must tolerate that case, since the
-   * first incremental scan after a resync sees deletes for items it never
-   * recorded. The in-memory implementation counts the same way so the number the
-   * scan prints means one thing regardless of which store produced it.
+   * Write operations issued to the backing store: one per run of consecutive
+   * upserts (chunked at the transaction size limit), and one per delete. Changes
+   * are applied in arrival order, so a delete interrupts and closes out
+   * whatever run of upserts is open, even short of the chunk limit; that is why
+   * "chunk of upserts" means a run between deletes, not a chunking pass over
+   * every upsert in the change list. Deletes are not batched with upserts
+   * because the Table implementation cannot batch them: a transaction
+   * containing a delete of a row that is not there fails as a whole, and this
+   * store must tolerate that case, since the first incremental scan after a
+   * resync sees deletes for items it never recorded. The in-memory
+   * implementation counts the same way so the number the scan prints means one
+   * thing regardless of which store produced it.
    */
   batches: number;
 }

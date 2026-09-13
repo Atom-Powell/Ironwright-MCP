@@ -1,3 +1,5 @@
+import type { InventoryChange, InventoryRecord } from "./types.js";
+
 /** Azure Table caps a transaction at 100 entities sharing one partition. */
 export const MAX_TRANSACTION_SIZE = 100;
 
@@ -49,4 +51,43 @@ export function chunk<T>(items: readonly T[], size: number): T[][] {
     groups.push(items.slice(index, index + size));
   }
   return groups;
+}
+
+export type InventoryChangeStep =
+  | { kind: "upsert"; records: InventoryRecord[] }
+  | { kind: "delete"; itemId: string };
+
+/**
+ * Turns a change list into the write steps a store issues, preserving arrival
+ * order. Delta orders its pages so a later entry supersedes an earlier one for
+ * the same item, and a delete followed by a re-creation of the same item id is
+ * what a restore from the recycle bin looks like, since the item keeps its id.
+ * Applying every upsert before any delete, as this used to, would leave a
+ * restored item absent. Consecutive upserts are still batched together, up to
+ * `maxSize`, so an ordinary run of changes with no interleaved delete costs the
+ * same number of write operations as before; a delete simply closes out
+ * whatever batch is open, including one still short of `maxSize`.
+ */
+export function planInventoryChanges(changes: readonly InventoryChange[], maxSize: number): InventoryChangeStep[] {
+  const steps: InventoryChangeStep[] = [];
+  let buffer: InventoryRecord[] = [];
+
+  function flush(): void {
+    if (buffer.length === 0) return;
+    steps.push({ kind: "upsert", records: buffer });
+    buffer = [];
+  }
+
+  for (const change of changes) {
+    if (change.kind === "upsert") {
+      buffer.push(change.record);
+      if (buffer.length >= maxSize) flush();
+    } else {
+      flush();
+      steps.push({ kind: "delete", itemId: change.itemId });
+    }
+  }
+  flush();
+
+  return steps;
 }

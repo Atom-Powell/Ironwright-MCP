@@ -125,6 +125,30 @@ export function stateStoreConformance(create: () => StateStore): void {
     await expect(store.listInventory("example", "d1")).resolves.toHaveLength(118);
   });
 
+  it("applies a delete then a re-creation of the same id in that order, as a restore would arrive", async () => {
+    const store = create();
+
+    await store.applyInventoryChanges("example", "d1", [
+      { kind: "delete", itemId: "item-1" },
+      { kind: "upsert", record: record({ itemId: "item-1", path: "2026/restored.xlsx" }) },
+    ]);
+
+    const listed = await store.listInventory("example", "d1");
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.path).toBe("2026/restored.xlsx");
+  });
+
+  it("applies an upsert then a delete of the same id in that order", async () => {
+    const store = create();
+
+    await store.applyInventoryChanges("example", "d1", [
+      { kind: "upsert", record: record({ itemId: "item-1" }) },
+      { kind: "delete", itemId: "item-1" },
+    ]);
+
+    await expect(store.listInventory("example", "d1")).resolves.toEqual([]);
+  });
+
   it("writes nothing for an empty change list", async () => {
     await expect(create().applyInventoryChanges("example", "d1", [])).resolves.toEqual({
       changesApplied: 0,

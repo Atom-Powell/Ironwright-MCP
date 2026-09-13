@@ -1,6 +1,13 @@
 import { TableClient } from "@azure/data-tables";
-import { chunk, decodeRowKey, encodeRowKey, inventoryPartitionKey, MAX_TRANSACTION_SIZE } from "./keys.js";
-import type { ApplyResult, InventoryChange, InventoryRecord, StateStore } from "./types.js";
+import {
+  chunk,
+  decodeRowKey,
+  encodeRowKey,
+  inventoryPartitionKey,
+  MAX_TRANSACTION_SIZE,
+  planInventoryChanges,
+} from "./keys.js";
+import type { ApplyResult, InventoryRecord, StateStore } from "./types.js";
 
 export interface TableEntityLike {
   partitionKey: string;
@@ -136,34 +143,33 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
 
     async applyInventoryChanges(profileId, driveId, changes): Promise<ApplyResult> {
       const partitionKey = inventoryPartitionKey(profileId, driveId);
-      const upserts: InventoryChange[] = changes.filter((change) => change.kind === "upsert");
-      const deletes = changes.filter((change) => change.kind === "delete");
+      // Steps are applied in the shared planner's arrival order (see its
+      // comment), not as all upserts followed by all deletes: a delete followed
+      // by a re-creation of the same item id is what a restore from the recycle
+      // bin looks like, and applying every upsert first would leave it absent.
+      const steps = planInventoryChanges(changes, MAX_TRANSACTION_SIZE);
       let batches = 0;
 
-      for (const group of chunk(upserts, MAX_TRANSACTION_SIZE)) {
-        await clients.inventory.submitTransaction(
-          group.map((change): ["upsert", TableEntityLike, "Replace"] => [
-            "upsert",
-            inventoryEntity(partitionKey, (change as Extract<InventoryChange, { kind: "upsert" }>).record),
-            "Replace",
-          ]),
-        );
-        batches += 1;
-      }
-
-      // Deletes are issued one at a time rather than batched with the upserts.
-      // A transaction containing a delete of a row that is not there fails as a
-      // whole, and the scan must tolerate exactly that case: the first
-      // incremental pass after a resync legitimately sees deletes for items the
-      // store never recorded.
-      for (const change of deletes) {
-        try {
-          await clients.inventory.deleteEntity(
-            partitionKey,
-            encodeRowKey((change as Extract<InventoryChange, { kind: "delete" }>).itemId),
+      for (const step of steps) {
+        if (step.kind === "upsert") {
+          await clients.inventory.submitTransaction(
+            step.records.map((record): ["upsert", TableEntityLike, "Replace"] => [
+              "upsert",
+              inventoryEntity(partitionKey, record),
+              "Replace",
+            ]),
           );
-        } catch (error) {
-          if (statusCodeOf(error) !== 404) throw error;
+        } else {
+          // A transaction containing a delete of a row that is not there fails as
+          // a whole, and the scan must tolerate exactly that case: the first
+          // incremental pass after a resync legitimately sees deletes for items
+          // the store never recorded. Issuing each delete on its own, rather than
+          // batched, is what makes that tolerable.
+          try {
+            await clients.inventory.deleteEntity(partitionKey, encodeRowKey(step.itemId));
+          } catch (error) {
+            if (statusCodeOf(error) !== 404) throw error;
+          }
         }
         batches += 1;
       }
