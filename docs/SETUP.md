@@ -330,3 +330,48 @@ already recognizes.
 Running the command again after a rollback is how you retry, since the rollback left nothing
 behind. Running it again after a run that kept its application is not a repair: it would create
 a second app registration with a second secret rather than fixing the first one.
+
+## Running a scan
+
+`npm run scan` runs the server's own reconciliation scan by hand, against a real tenant, ahead
+of any MCP tool being wired up to call it. It reads a profile, resolves the site and library the
+profile names, enumerates the drive with delta and batch, and prints what it found.
+
+```bash
+npm run scan -- --profile profiles/acme.json
+```
+
+Pass `--sub-path <library-relative path>` to scope the run to one folder, such as a single
+client's own subtree, rather than the whole library.
+
+The command reads three environment variables, all required:
+
+- `IW_TENANT_ID`
+- `IW_CLIENT_ID`
+- `IW_CLIENT_SECRET`
+
+These are the server application's own client-credentials identity: the same tenant, application,
+and secret that the normal setup run above produced as `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and
+`AZURE_CLIENT_SECRET`. Setup prints them under the `AZURE_` names because that is the convention
+Azure deployment tooling expects for a container app's secrets; the scan command reads the same
+values under its own `IW_` names, so set both pairs, or export one pair under both sets of
+names, in whatever secret store or shell holds them. If any of the three is missing or empty, the
+command refuses to make any Graph call at all and names every missing variable in one message.
+
+`IW_TABLE_CONNECTION_STRING` is optional. When it is not set, the scan uses an in-memory state
+store: nothing is persisted, so a local run needs no storage account, but every run is a full
+enumeration, since there is no deltaLink from a previous run to resume from. Set it to point at
+an Azure Table Storage account to keep the inventory and the deltaLink between runs, which is
+what lets a later run be incremental instead of a full re-enumeration.
+
+To run against a local emulator rather than a real storage account:
+
+```bash
+npx azurite
+IW_TABLE_CONNECTION_STRING=UseDevelopmentStorage=true npm run scan -- --profile profiles/acme.json
+```
+
+The scan's own output says which store it used, states the Graph request count and the delta
+page count, and always states that the Microsoft Search cross-check did not run, since phase 2a
+never runs it and a file stored outside the expected taxonomy is invisible to this snapshot as a
+result.

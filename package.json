@@ -13,7 +13,8 @@
     "test:errors": "vitest run .errors.test",
     "dev": "tsx watch src/server/main.ts",
     "start": "node dist/server/main.js",
-    "setup": "tsx src/setup/main.ts"
+    "setup": "tsx src/setup/main.ts",
+    "scan": "tsx src/scan/main.ts"
   },
   "repository": {
     "type": "git",
