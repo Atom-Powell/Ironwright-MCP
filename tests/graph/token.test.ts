@@ -5,7 +5,7 @@ const CREDENTIALS = { tenantId: "tenant-1", clientId: "client-1", clientSecret: 
 
 function fakeFetch(tokens: string[], seen: Request[] = []): typeof fetch {
   let index = 0;
-  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+  return (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
     seen.push(new Request(input as string, init));
     const token = tokens[index] ?? tokens[tokens.length - 1] ?? "t";
     index += 1;
