@@ -57,11 +57,11 @@ forever; see "Retiring the grant issuer after setup" below.
   This is the one prerequisite no script can work around for those two modes. The two roles
   above can be the same person, and in practice usually are, since a Global Administrator
   satisfies both.
-- `--delete-bootstrap` needs only Application Administrator, and needs it for a narrower reason
+- `--delete-bootstrap` needs only Application Administrator or Cloud Application Administrator, and needs it for a narrower reason
   than the other two modes: deleting an application registration is a directory-object
   operation, not a consent operation, so no admin consent is involved and Privileged Role
   Administrator or Global Administrator is not required. This matters when deciding who can run
-  teardown in a customer tenant: it can be delegated to whoever holds Application Administrator
+  teardown in a customer tenant: it can be delegated to whoever holds either of those roles
   there, without also asking for one of the two more senior roles.
 - Site owner rights are not required for any of the three modes. The per-site grant is issued by
   the bootstrap application's own token, not by the signed-in operator's, so nobody running these
