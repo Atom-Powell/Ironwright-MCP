@@ -184,6 +184,24 @@ own token exchange still rolls back an otherwise-correct application when it exh
 retries on a propagation error, which is the same destroy-correct-work-over-timing shape that
 was deliberately rejected for the verification path.
 
+## Found by using the tool, 2026-09-12
+
+`--delete-bootstrap` was run against a tenant whose grant issuer had already been removed by
+hand. The lookup correctly found nothing and the message correctly said no action was needed.
+It also printed "Bootstrap deletion failed" and exited 1.
+
+Those disagree. If the grant issuer is already gone, the outcome the operator wanted is true,
+and reporting a failure is wrong. A script wrapping this to enforce teardown across tenants
+would read a correctly torn-down tenant as a broken one, and would retry or alert on it.
+
+Already-absent should be a success with its own message, distinct from both a completed
+deletion and a real failure, and should exit zero.
+
+This is worth recording for what it says about the testing, not just the bug. Nine reviewers,
+an enumeration requirement over every operator-facing message, and 352 tests did not surface
+it, because all of them reasoned about failure paths in the abstract. None asked what "already
+done" should mean. The first live use found it in one run.
+
 ## Verified end to end on 2026-09-12
 
 The two-phase setup completed successfully against a real Microsoft 365 developer tenant.
