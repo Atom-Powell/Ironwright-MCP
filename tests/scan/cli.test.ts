@@ -20,6 +20,8 @@ function result(overrides: Partial<ScanResult> = {}): ScanResult {
     changesApplied: 3,
     graphRequests: 4,
     storeBatches: 1,
+    unfilteredFileCount: 2,
+    unfilteredFolderCount: 1,
     ...overrides,
   };
 }
@@ -31,6 +33,27 @@ describe("parseScanArguments", () => {
 
   it("reads an optional sub-path", () => {
     expect(parseScanArguments(["--profile", "p.json", "--sub-path", "2026/CLIENTA"])).toEqual({
+      profilePath: "p.json",
+      subPath: "2026/CLIENTA",
+    });
+  });
+
+  it("strips a leading slash from the sub-path", () => {
+    expect(parseScanArguments(["--profile", "p.json", "--sub-path", "/2026/CLIENTA"])).toEqual({
+      profilePath: "p.json",
+      subPath: "2026/CLIENTA",
+    });
+  });
+
+  it("strips a trailing slash from the sub-path", () => {
+    expect(parseScanArguments(["--profile", "p.json", "--sub-path", "2026/CLIENTA/"])).toEqual({
+      profilePath: "p.json",
+      subPath: "2026/CLIENTA",
+    });
+  });
+
+  it("strips both a leading and a trailing slash from the sub-path", () => {
+    expect(parseScanArguments(["--profile", "p.json", "--sub-path", "/2026/CLIENTA/"])).toEqual({
       profilePath: "p.json",
       subPath: "2026/CLIENTA",
     });
@@ -83,6 +106,21 @@ describe("formatScanResult", () => {
 
     expect(lines).toMatch(/1 of those files carry no ETag/);
     expect(lines).toMatch(/Graph did not report one/);
+  });
+
+  it("names the sub-path filter and gives the unfiltered totals alongside the filtered ones", () => {
+    const lines = formatScanResult(
+      result({ subPath: "2026/CLIENTA", unfilteredFileCount: 12, unfilteredFolderCount: 3 }),
+      "azure-table",
+    );
+
+    expect(lines).toContain("Files: 2. Folders: 1.");
+    expect(lines.join("\n")).toMatch(/Sub-path filter applied: 2026\/CLIENTA/);
+    expect(lines.join("\n")).toMatch(/drive as a whole holds 12 files and 3 folders/);
+  });
+
+  it("says nothing about a sub-path filter when none was applied", () => {
+    expect(formatScanResult(result(), "azure-table").join("\n")).not.toMatch(/[Ss]ub-path/);
   });
 
   it("says nothing about missing ETags when every file has one", () => {

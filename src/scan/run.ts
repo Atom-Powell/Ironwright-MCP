@@ -24,10 +24,30 @@ export interface ScanResult {
   changesApplied: number;
   graphRequests: number;
   storeBatches: number;
+  /**
+   * The sub-path filter that was applied, if one was. Carried through so the
+   * formatter can name it: the enumeration itself is always full, so a line
+   * reporting only the filtered file and folder counts reads as the size of
+   * the whole drive rather than of the slice a filter narrowed it to.
+   */
+  subPath?: string;
+  /**
+   * The drive's file and folder counts before any sub-path filter, so the
+   * formatter can report both numbers together without recomputing anything
+   * from the already-filtered snapshot.
+   */
+  unfilteredFileCount: number;
+  unfilteredFolderCount: number;
 }
 
 export async function runScan(dependencies: ScanDependencies): Promise<ScanResult> {
   const { client, store, profile, now } = dependencies;
+  // The client's own counter is cumulative since it was constructed, not since
+  // this call started. main.ts builds a fresh client per run, so that happens
+  // to read right today, but runScan is the library entry a later phase wires
+  // a tool to, and a tool that reuses a client must not have this call's
+  // report include requests a previous call already paid for.
+  const requestsAtStart = client.requests();
   const { driveId } = await resolveDrive(client, profile.identity.siteUrl, profile.identity.library);
 
   const storedLink = await store.getDeltaLink(profile.profileId, driveId);
@@ -95,7 +115,10 @@ export async function runScan(dependencies: ScanDependencies): Promise<ScanResul
     resynced,
     pages,
     changesApplied,
-    graphRequests: client.requests(),
+    graphRequests: client.requests() - requestsAtStart,
     storeBatches,
+    subPath: dependencies.subPath,
+    unfilteredFileCount: records.filter((record) => !record.isFolder).length,
+    unfilteredFolderCount: records.filter((record) => record.isFolder).length,
   };
 }

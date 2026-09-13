@@ -107,4 +107,32 @@ describe("runScan", () => {
     expect(result.changesApplied).toBe(0);
     expect(result.storeBatches).toBe(0);
   });
+
+  it("reports only this call's own requests when the client is reused across scans", async () => {
+    // client.requests() is cumulative since the client was constructed. Reusing
+    // one client across two runScan calls -- as a tool wiring a Graph client
+    // once and calling runScan per invocation would -- must not let the second
+    // call's report include requests the first call already paid for.
+    const store = createMemoryStateStore();
+    const client = scriptedClient({
+      [SITE]: { id: "site-1" },
+      [DRIVES]: { value: [{ id: "drive-1", name: "Compliance Reports" }] },
+      "/drives/drive-1/root/delta": {
+        value: [],
+        "@odata.deltaLink": "https://graph.microsoft.com/v1.0/second",
+      },
+      "https://graph.microsoft.com/v1.0/second": {
+        value: [],
+        "@odata.deltaLink": "https://graph.microsoft.com/v1.0/third",
+      },
+    });
+
+    const first = await runScan({ client, store, profile: PROFILE, now: NOW });
+    const second = await runScan({ client, store, profile: PROFILE, now: NOW });
+
+    // Each call costs 2 requests to resolve the drive plus 1 delta page.
+    expect(first.graphRequests).toBe(3);
+    expect(second.graphRequests).toBe(3);
+    expect(client.requests()).toBe(6);
+  });
 });

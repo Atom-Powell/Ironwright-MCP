@@ -26,7 +26,11 @@ export function parseScanArguments(argv: readonly string[]): ScanArguments {
       index += 1;
     } else if (flag === "--sub-path") {
       if (!hasValue) throw new Error(`--sub-path needs a value. ${USAGE}`);
-      subPath = value;
+      // Stripped so "/2026/CLIENTA" and "2026/CLIENTA/" behave the same as
+      // "2026/CLIENTA". Inventory paths are library-relative with no leading
+      // slash and no trailing one, so an unstripped filter would silently
+      // match nothing rather than the client the operator named.
+      subPath = value.replace(/^\/+/, "").replace(/\/+$/, "");
       index += 1;
     } else {
       throw new Error(`Unrecognized argument "${flag}". ${USAGE}`);
@@ -71,6 +75,16 @@ export function formatScanResult(result: ScanResult, storeKind: "azure-table" | 
     `Scan complete: ${result.mode === "full" ? "full enumeration" : "incremental scan"} of drive ${result.driveId}.`,
     `Files: ${result.snapshot.files.length}. Folders: ${result.snapshot.folderPaths.length}.`,
   ];
+
+  if (result.subPath !== undefined) {
+    // The enumeration above is always full; only the counts are of a filtered
+    // subset. Printed alone, the Files/Folders line reads as the size of the
+    // whole drive, so the unfiltered totals are given right alongside it.
+    lines.push(
+      `Sub-path filter applied: ${result.subPath}. The counts above are within it; the drive as a ` +
+        `whole holds ${result.unfilteredFileCount} files and ${result.unfilteredFolderCount} folders.`,
+    );
+  }
 
   const withoutEtag = result.snapshot.files.filter((file) => file.etag === "").length;
   if (withoutEtag > 0) {
