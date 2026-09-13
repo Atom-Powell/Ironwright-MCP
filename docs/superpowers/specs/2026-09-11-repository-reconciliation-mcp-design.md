@@ -24,7 +24,8 @@ Work IQ surface and every community SharePoint server found.
 ## Decisions
 
 Locked before this session, carried forward from `CLAUDE.md` and the architecture research:
-TypeScript with the official MCP SDK and the Microsoft Graph JS SDK;
+TypeScript with the official MCP SDK, and plain `fetch` for Microsoft Graph rather than the
+Graph JS SDK (amended 2026-09-13; see the graph-lib paragraph below);
 `StreamableHTTPServerTransport` in stateless mode with a new `McpServer` per request;
 path-based driveItem addressing over ID addressing, `$batch`, delta query with persisted
 `deltaLink`s, and Microsoft Search as the out-of-taxonomy cross-check; Excel persistent

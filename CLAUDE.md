@@ -181,4 +181,6 @@ connector carries it.
 ## Reference
 
 - MCP TypeScript SDK: `https://github.com/modelcontextprotocol/typescript-sdk`
-- Microsoft Graph JS SDK: `https://github.com/microsoftgraph/msgraph-sdk-javascript`
+- Microsoft Graph JS SDK: `https://github.com/microsoftgraph/msgraph-sdk-javascript`. Not a
+  dependency; see the Decision Record. Useful as a reference for Graph's request and response
+  shapes.
