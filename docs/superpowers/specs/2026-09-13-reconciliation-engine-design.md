@@ -94,8 +94,17 @@ correct folder is misnamed, both wrong is misnamed and misplaced, and a slot wit
 is missing.
 
 **Non-monthly cadences.** A quarter resolves to one month through `periodAnchor`, so with the
-default anchor of `last` a file naming month six satisfies the second quarter. Matching compares
-the parsed month against the anchored month, never against the quarter.
+default anchor of `last` the second quarter is owed under month six. Both sides of the
+comparison are anchored: the expected period when it is derived, and a file's parsed period at
+the moment it is parsed. Every month of a quarter therefore resolves to that quarter's anchor,
+and a quarterly audit naming April, May or June all satisfy the same Q2 slot.
+
+That is deliberate. The alternative, comparing a file's raw parsed month against the anchored
+month, would turn a Q2 audit named for April into a missing slot plus an unexpected orphan: it
+would report a report that exists as one that does not, and send someone to produce it again.
+That is the failure the fourth evaluation question exists to catch. Whether such a filename is
+acceptable at all is a recognizer verdict, which is where a naming judgment belongs, and the
+`misnamed` state is how the file still gets reported for renaming.
 
 **Duplicates.** Candidates rank by state in the order above, best wins the slot, and every other
 candidate becomes a duplicate finding naming that slot. Ties break by most recently modified,
