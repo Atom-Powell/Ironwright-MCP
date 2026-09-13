@@ -319,3 +319,17 @@ comment asserting the stale-workbook cause was corrected during the fix wave, si
 cannot observe which case it is looking at, but the conflation is still in the report shape. A
 third kind would separate them. That changes the report and the golden fixture, and nobody has
 yet asked the question that needs the distinction, so it waits for a real repository.
+
+**A recognizer must now declare a month or a month name.** Added while closing a never-matches
+footgun: a recognizer whose pattern captures no period could never satisfy any slot, and the
+profile loader accepted it silently. The check is right for every cadence the engine supports
+today, all of which report under a month. It would be wrong for a genuinely annual deliverable
+whose filename carries only a year, which the parser already refuses for the same reason, so
+nothing regressed. If an annual cadence is ever added, this validation and the parser's period
+resolution have to move together.
+
+**Lint does not catch a dynamic import of a stage module.** The entry-point rule added during
+the fix wave catches static imports, re-exports, `export *`, `require` and every path spelling
+tried against it, but `await import("../domain/reconcile/expected.js")` produces no message.
+Left as is: the rule's purpose is to stop the boundary eroding through ordinary code, and
+nothing in this codebase imports dynamically. Worth revisiting only if a dynamic import appears.

@@ -30,6 +30,20 @@ ETag, plus a flat list of folder paths. The ETag travels with the file because a
 move plan needs it as an `If-Match` precondition, and the moment the engine saw the file is the
 honest moment to capture it.
 
+Two input contracts the engine enforces itself, both added after the first whole-branch review
+found the engine wrong about each. **The workbook must name each client on exactly one row.** Two
+rows for one client is refused, naming the client, because which row's effective date and
+cadence flags should win is genuinely ambiguous and choosing one silently would be a guess. It is
+refused rather than merged because before the check existed the second row doubled every finding
+and every count for that client, silently, which is the worst thing a compliance report can do.
+**A repository file listed twice under one path is collapsed, not refused**, keeping the record
+with the most recent modified date. A path identifies one item, so two entries naming it are one
+file listed twice; delta enumeration can legitimately emit an item on more than one page, so a
+repeat there is transport noise rather than a data error. The asymmetry is deliberate: a
+hand-maintained workbook's repeats are ambiguous, a machine-generated listing's are not. Which
+record survives is decided by the modified date rather than by list position, because the engine
+cannot observe the order its input was assembled in.
+
 Empty folders are computed, not supplied. A folder is empty exactly when no file and no deeper
 folder sits beneath it, and deriving that from the two lists means the Graph layer cannot report
 it wrongly.
@@ -75,10 +89,16 @@ from is not evidence of anything.
 
 Orphans split in two, and the distinction earns its place. A file whose name will not parse is
 **unrecognized**. A file that parses cleanly but names a client, period or deliverable nobody
-owes is **unexpected**, and that usually means the workbook is stale rather than the repository
-being wrong. The evaluation questions note that the workbook's own freshness is the system's
-blind spot; unexpected orphans are the closest the engine can honestly get to pointing at it,
-and they should not be presented as more than a hint.
+owes is **unexpected**.
+
+An unexpected orphan covers two situations the engine cannot tell apart, and the report must not
+claim otherwise. The file may name something genuinely nobody owes, which often means the
+workbook is stale. Or its period may simply fall outside the reporting window, in which case
+nothing is wrong at all and it is an older report sitting where it belongs. The evaluation
+questions note that the workbook's own freshness is the system's blind spot, and unexpected
+orphans are the closest the engine can honestly get to pointing at it, but pointing is all they
+do: presented as evidence of staleness they would be asserting a cause no code here can observe.
+Whether to separate the two into their own kinds is recorded as an open item.
 
 ## Matching
 
