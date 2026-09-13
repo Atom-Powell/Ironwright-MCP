@@ -333,3 +333,24 @@ the fix wave catches static imports, re-exports, `export *`, `require` and every
 tried against it, but `await import("../domain/reconcile/expected.js")` produces no message.
 Left as is: the rule's purpose is to stop the boundary eroding through ordinary code, and
 nothing in this codebase imports dynamically. Worth revisiting only if a dynamic import appears.
+
+## Outstanding operator action: delete the test tenant's server application
+
+Raised 2026-09-13, after phase 3 merged.
+
+The first live setup run created `Ironwright Repository Reconciliation`, app id
+`1c02621a-e9b9-4b7b-a5da-f74e03e2e1ed`, in the `helloironwright` developer tenant. It is still
+there, and its client secret was displayed in a Claude Code session's scrollback, so it should be
+treated as exposed and the application deleted rather than merely rotated.
+
+Deleting it needs two steps, not one. Entra's delete of an application registration is a soft
+delete: the object sits in the tenant's deleted items for 30 days, where anyone with Application
+Administrator can restore it along with its credentials. So delete the application, then purge it
+from **App registrations, Deleted applications, Delete permanently**, or the secret is recoverable
+for a month.
+
+Deleting the application leaves the per-site permission entry behind, naming an identity that no
+longer exists. Removing that entry needs an app-only token carrying `Sites.FullControl.All`, so it
+needs a grant issuer to exist. On a developer tenant the orphaned entry grants access to nothing
+and is not worth recreating a grant issuer for. See the teardown hole above, which is the product
+gap this is one instance of.
