@@ -8,7 +8,7 @@ import type {
   RepositoryFile,
   RepositorySnapshot,
   WorkbookSnapshot,
-} from "../../../src/domain/reconcile/types.js";
+} from "../../../src/domain/reconcile/index.js";
 
 // Deliverable ids and tokens are deliberately different strings, and the
 // profile declares its deliverables in an order that is not their sorted

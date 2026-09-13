@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Profile } from "../../../src/domain/profile/schema.js";
-import type { RepositoryFile, RepositorySnapshot, WorkbookSnapshot } from "../../../src/domain/reconcile/types.js";
+import type { RepositoryFile, RepositorySnapshot, WorkbookSnapshot } from "../../../src/domain/reconcile/index.js";
 
 /**
  * `parseFile` and `createFileParser` return identical results for the same
