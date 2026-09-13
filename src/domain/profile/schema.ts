@@ -10,6 +10,64 @@ function isValidRegex(pattern: string): boolean {
   }
 }
 
+/**
+ * The named capture groups a pattern declares, or undefined when the pattern
+ * will not compile at all -- which `isValidRegex` above has already reported,
+ * so there is nothing to add here.
+ *
+ * Read off the compiled regex rather than scanned out of the source text. An
+ * alternation with an empty first branch matches the empty string, and the
+ * resulting match carries a key in `groups` for every group the pattern
+ * declares, whichever branch actually participated. Scanning the text for
+ * "(?<name>" would also count one written inside a character class, where it
+ * is not a capture group at all.
+ */
+function declaredGroupNames(pattern: string): Set<string> | undefined {
+  try {
+    const groups = new RegExp(`|${pattern}`).exec("")?.groups;
+    return new Set(groups === undefined ? [] : Object.keys(groups));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * What a recognizer's pattern has to capture for the engine to be able to use
+ * a match at all, and what that capture feeds.
+ *
+ * A recognizer without one of these is accepted by every other check and then
+ * matches nothing, forever: the parser drops a match with no client and a
+ * match with no year, and falls through to the next recognizer. The profile
+ * author's file comes back "unrecognized", which reads as the repository
+ * being wrong when it is the profile. The deliverable is not on this list
+ * because a recognizer declares one of its own.
+ *
+ * The month is the third member of the class and appears below rather than
+ * here, because it is satisfied by either of two group names and this list is
+ * one required name per entry. Covering only two of the three would be worse
+ * than covering none: an author who has watched the client and year checks
+ * fire reads silence about a missing month as approval.
+ */
+const REQUIRED_RECOGNIZER_CAPTURES: ReadonlyArray<{ name: string; feeds: string }> = [
+  { name: "client", feeds: "name the client the file belongs to" },
+  { name: "year", feeds: "resolve the period the file covers" },
+];
+
+/**
+ * A period needs a month as well as a year, and the parser will read it from
+ * either a numeric `month` capture or a `monthName` one, so a recognizer has
+ * to declare one of the two and never needs both. Real profiles use each:
+ * a compact alias captures "202602" as digits, a legacy spaced name captures
+ * "February" as a word.
+ *
+ * Only the declaration is checked. Whether a declared group captures a month
+ * that exists is a runtime question the parser already answers, and at the
+ * point it decides, an undeclared group and an out-of-range value are the
+ * same undefined; conflating the two here would mean reporting a value nobody
+ * has read yet.
+ */
+const MONTH_CAPTURE_ALTERNATIVES = ["month", "monthName"] as const;
+
 export const CadenceSchema = z.enum(["monthly", "quarterly", "semiannual", "annual"]);
 export const PeriodAnchorSchema = z.enum(["first", "last"]);
 export const VerdictSchema = z.enum(["compliant", "misnamed"]);
@@ -89,11 +147,21 @@ export const ProfileSchema = z
     });
 
     const deliverableIds = new Set<string>();
+    const deliverableTokens = new Set<string>();
     profile.deliverables.forEach((deliverable, index) => {
       if (deliverableIds.has(deliverable.id)) {
         ctx.addIssue({ code: custom, path: ["deliverables", index, "id"], message: `duplicate deliverable id "${deliverable.id}"` });
       }
       deliverableIds.add(deliverable.id);
+
+      // The reconciliation engine maps a token parsed out of a filename back
+      // to a deliverable id (a later stage of the engine, not this schema),
+      // so two deliverables sharing a token would make that lookup ambiguous
+      // with no correct id to return.
+      if (deliverableTokens.has(deliverable.token)) {
+        ctx.addIssue({ code: custom, path: ["deliverables", index, "token"], message: `duplicate deliverable token "${deliverable.token}"` });
+      }
+      deliverableTokens.add(deliverable.token);
     });
 
     const columnKeys = new Set(Object.keys(profile.workbookMapping.columns));
@@ -120,6 +188,26 @@ export const ProfileSchema = z
           path: ["naming", "recognizers", index, "deliverable"],
           message: `no deliverable is declared with id "${recognizer.deliverable}"`,
         });
+      }
+
+      const groups = declaredGroupNames(recognizer.pattern);
+      if (groups !== undefined) {
+        for (const capture of REQUIRED_RECOGNIZER_CAPTURES) {
+          if (groups.has(capture.name)) continue;
+          ctx.addIssue({
+            code: custom,
+            path: ["naming", "recognizers", index, "pattern"],
+            message: `recognizer "${recognizer.id}" declares no (?<${capture.name}>...) capture, so no match of it can ${capture.feeds} and the recognizer can never accept a filename: add a (?<${capture.name}>...) group to its pattern`,
+          });
+        }
+
+        if (!MONTH_CAPTURE_ALTERNATIVES.some((name) => groups.has(name))) {
+          ctx.addIssue({
+            code: custom,
+            path: ["naming", "recognizers", index, "pattern"],
+            message: `recognizer "${recognizer.id}" declares no (?<month>...) or (?<monthName>...) capture, so no match of it can resolve the period the file covers and the recognizer can never accept a filename: add a (?<month>...) group for digits, or a (?<monthName>...) group for a month spelled out, to its pattern`,
+          });
+        }
       }
     });
 

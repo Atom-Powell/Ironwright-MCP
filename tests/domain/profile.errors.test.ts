@@ -77,6 +77,115 @@ describe("loadProfile rejections", () => {
     );
   });
 
+  it("rejects duplicate deliverable tokens", () => {
+    expectIssue(
+      {
+        ...validProfile,
+        deliverables: [
+          validProfile.deliverables[0],
+          { ...validProfile.deliverables[0], id: "OtherDeliverable" },
+        ],
+      },
+      'duplicate deliverable token "MonthlyTraining"',
+    );
+  });
+
+  // A recognizer that captures no client, or no year, is accepted by every
+  // other check in this schema and then matches nothing at all: the parser
+  // drops a match it cannot read a client or a period out of and falls through
+  // to the next recognizer. The author gets silence, and the file the
+  // recognizer was written for comes back as unrecognized, which reads as the
+  // repository being wrong when the profile is.
+  it("rejects a recognizer whose pattern captures no client", () => {
+    expectIssue(
+      {
+        ...validProfile,
+        naming: {
+          ...validProfile.naming,
+          recognizers: [
+            { id: "no-client", pattern: "^Report (?<year>\\d{4})\\.xlsx$", deliverable: "MonthlyTraining", verdict: "misnamed" },
+          ],
+        },
+      },
+      'recognizer "no-client" declares no (?<client>...) capture',
+    );
+  });
+
+  it("rejects a recognizer whose pattern captures no year", () => {
+    expectIssue(
+      {
+        ...validProfile,
+        naming: {
+          ...validProfile.naming,
+          recognizers: [
+            { id: "no-year", pattern: "^(?<client>[A-Z0-9]+) Safety\\.xlsx$", deliverable: "MonthlyTraining", verdict: "misnamed" },
+          ],
+        },
+      },
+      'recognizer "no-year" declares no (?<year>...) capture',
+    );
+  });
+
+  it("rejects a recognizer whose pattern captures neither a month nor a month name", () => {
+    // The third member of the same never-matches class. Half-covering it
+    // would be worse than not covering it at all: an author who has watched
+    // the client and year checks fire reads silence here as approval and
+    // ships a recognizer that can never match a filename.
+    expectIssue(
+      {
+        ...validProfile,
+        naming: {
+          ...validProfile.naming,
+          recognizers: [
+            {
+              id: "no-month",
+              pattern: "^(?<client>[A-Z0-9]+) Annual (?<year>\\d{4})\\.xlsx$",
+              deliverable: "MonthlyTraining",
+              verdict: "misnamed",
+            },
+          ],
+        },
+      },
+      'recognizer "no-month" declares no (?<month>...) or (?<monthName>...) capture',
+    );
+  });
+
+  it("names the recognizer and says what to add", () => {
+    expectIssue(
+      {
+        ...validProfile,
+        naming: {
+          ...validProfile.naming,
+          recognizers: [
+            { id: "no-year", pattern: "^(?<client>[A-Z0-9]+) Safety\\.xlsx$", deliverable: "MonthlyTraining", verdict: "misnamed" },
+          ],
+        },
+      },
+      "add a (?<year>...) group to its pattern",
+    );
+  });
+
+  it("does not add a capture complaint to a recognizer whose pattern will not compile", () => {
+    // The pattern's own check already reports that, and a second complaint
+    // about groups a regex engine could not even read would be noise the
+    // author has to work out how to ignore.
+    try {
+      loadProfile({
+        ...validProfile,
+        naming: {
+          ...validProfile.naming,
+          recognizers: [{ id: "bad-regex", pattern: "([unclosed", deliverable: "MonthlyTraining", verdict: "misnamed" }],
+        },
+      });
+      throw new Error("expected loadProfile to reject this profile");
+    } catch (error) {
+      const issues = (error as ProfileValidationError).issues.join("\n");
+
+      expect(issues).toContain("must be a valid regular expression");
+      expect(issues).not.toContain("declares no");
+    }
+  });
+
   it("rejects duplicate recognizer ids", () => {
     expectIssue(
       {
