@@ -106,16 +106,42 @@ function rollUpByClient(workbook: WorkbookSnapshot, artifacts: ArtifactFinding[]
 }
 
 /**
+ * Whether `candidate` describes a later state of the file than `held` does,
+ * for two entries already known to name the same path.
+ *
+ * Most recently modified first, exactly as `compareCandidates` in `match.ts`
+ * separates two otherwise equal candidates. That is not a coincidence to be
+ * tidied away later: "which of two records of this file is current" is one
+ * question, and answering it twice, differently, is how two parts of a report
+ * start disagreeing. Timestamps are ISO 8601 strings in one consistent format,
+ * so a plain string compare orders them without parsing a `Date`, which the
+ * domain layer must not do anyway.
+ *
+ * The remaining keys exist to make the choice total rather than to express a
+ * preference. Two entries agreeing on `modified` and `etag` describe the same
+ * version of the file, so nothing is at stake between them; picking by a fixed
+ * rule rather than by which arrived first is what keeps the whole report
+ * invariant under reordering, which is the only property here worth having.
+ */
+function supersedes(candidate: RepositoryFile, held: RepositoryFile): boolean {
+  if (candidate.modified !== held.modified) return candidate.modified > held.modified;
+  if (candidate.etag !== held.etag) return candidate.etag > held.etag;
+  if (candidate.name !== held.name) return candidate.name > held.name;
+  return candidate.size > held.size;
+}
+
+/**
  * One entry per path, keeping each path's position from the first time it was
- * listed and its contents from the last.
+ * listed and its contents from whichever entry describes the file's latest
+ * state.
  *
  * A path identifies one item in a document library, so two entries naming one
- * path are one file listed twice rather than two files, and collapsing them
- * cannot lose information. Left uncollapsed they became two candidates for one
- * slot: one won the slot and the other was reported as a duplicate at the
- * winner's own path, so the report said the same file was both the compliant
- * artifact and a redundant copy of it, and a move or cleanup plan built on the
- * duplicate list would have targeted the compliant file.
+ * path are one file listed twice rather than two files. Left uncollapsed they
+ * became two candidates for one slot: one won the slot and the other was
+ * reported as a duplicate at the winner's own path, so the report said the
+ * same file was both the compliant artifact and a redundant copy of it, and a
+ * move or cleanup plan built on the duplicate list would have targeted the
+ * compliant file.
  *
  * A repeat is a transport artifact rather than a repository problem to report,
  * which is why this collapses quietly where a repeated workbook client throws:
@@ -125,15 +151,27 @@ function rollUpByClient(workbook: WorkbookSnapshot, artifacts: ArtifactFinding[]
  * listing's repeats are noise. `findEmptyFolders` already takes this view of
  * `folderPaths`, so the engine now holds it about both lists rather than one.
  *
- * The later entry's contents win because an item re-emitted by delta was
- * re-emitted after changing, so the later entry is the one carrying the state
- * it changed to. When the two entries are identical, which is what a plain
- * paging overlap produces, the choice is not observable either way.
+ * Nothing here reads the entries' order, and it must not: `RepositorySnapshot`
+ * promises no ordering on `files`, and a phase-2 layer that merged a delta page
+ * with a Search cross-check would leave whatever order either had behind. The
+ * survivor is chosen from what the entries say about themselves, by
+ * `supersedes` above, so the same set of entries produces the same report
+ * however it is arranged. What the collapse discards is a description of the
+ * file that a later description supersedes; the item itself is still in the
+ * report, which is the sense in which nothing is lost. The survivor's ETag is
+ * what a phase-4 rename or move plan carries as its `If-Match` precondition,
+ * so the wrong survivor is a stale precondition against a real client file.
  */
 function dedupeFilesByPath(files: readonly RepositoryFile[]): RepositoryFile[] {
   const byPath = new Map<string, RepositoryFile>();
   for (const file of files) {
-    byPath.set(file.path, file);
+    const held = byPath.get(file.path);
+    // Map.set on an existing key replaces the value and leaves the insertion
+    // position alone, which is what keeps the path where it was first listed
+    // while its contents come from the entry that supersedes.
+    if (held === undefined || supersedes(file, held)) {
+      byPath.set(file.path, file);
+    }
   }
   return [...byPath.values()];
 }
