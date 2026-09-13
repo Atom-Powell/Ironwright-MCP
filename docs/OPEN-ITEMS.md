@@ -283,3 +283,39 @@ fakes. The `--delete-bootstrap` path added afterward is in the same position: it
 refusal, its ambiguous-match refusal, and its success message are covered by tests against
 fakes, not by a live delete against a real tenant. No live failure on any of these paths has
 been observed.
+
+## Deferred from the reconciliation engine's whole-branch review, 2026-09-13
+
+The engine's final review raised fourteen findings. One Critical and four Important were fixed
+in the same wave, along with six of the Minors. Three were deferred deliberately, and one open
+question came out of a fix.
+
+**Duplicates and orphans carry no ETag.** `types.ts` says an ETag travels with a file because a
+later rename or move plan needs it as an `If-Match` precondition, and the moment the engine saw
+the file is the honest moment to capture it. Matched artifacts carry one. Duplicates and orphans
+do not, and both are exactly the files a remediation plan will want to act on: a duplicate is a
+rename or delete candidate and a misfiled orphan is a move candidate. Adding the field is
+cheap; it changes the report shape and the golden fixture, which is why it was not done at the
+close of the phase. Settle it when phase 4 writes the first plan generator, because that is the
+consumer whose needs decide the shape.
+
+**A client name containing a path separator renders an impossible filename.** A workbook row
+naming a client `NORTH/SOUTH` produces an expected path and filename with an embedded separator,
+so the slot can never be satisfied and the client is permanently reported as missing everything.
+No validation rejects it. The fix is a character restriction on the client column, but the right
+character set is a question about real customer data rather than a code decision, and guessing
+it now risks rejecting a legitimate name. Decide it against a real workbook.
+
+**Two different causes share one error sentence.** `match.ts` reuses the exact wording that
+`profile/schema.ts` uses for a different failure. Both messages are individually accurate, so
+this is a diagnosability cost rather than a correctness one: an operator searching for the text
+lands on two unrelated call sites. Worth fixing when either message is next touched.
+
+**Should an out-of-window file be its own orphan kind?** The `unexpected` kind covers two
+situations that mean different things. A file naming a client, period or deliverable nobody owes
+usually means the workbook is stale. A file whose period simply falls outside the reporting
+window means nothing is wrong at all: it is last year's report sitting where it belongs. The
+comment asserting the stale-workbook cause was corrected during the fix wave, since the engine
+cannot observe which case it is looking at, but the conflation is still in the report shape. A
+third kind would separate them. That changes the report and the golden fixture, and nobody has
+yet asked the question that needs the distinction, so it waits for a real repository.
