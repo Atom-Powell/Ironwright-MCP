@@ -122,6 +122,16 @@ Cheap to settle now, ten files later.
 
 ## Known minor issues
 
+**CLOSED 2026-09-12 by `3b72f52`, "feat: add --delete-bootstrap so the documented teardown is
+executable", refined by `884aab3` and `c91ce2b`.** `docs/SETUP.md` recommended deleting the
+grant issuer once setup was done, and the command provided no way to do it. `--delete-bootstrap`
+now finds the grant issuer by display name and deletes it, using only the operator's delegated
+sign-in, refuses an ambiguous match rather than deleting one of several identically named
+applications, and refuses to run alongside `--create-bootstrap`. A normal run's success output,
+on both the confirmed and unconfirmed verification paths, now also names `--delete-bootstrap` as
+the way to remove the grant issuer's standing permission once the site is onboarded, since the
+teardown documented only in a file nobody reopens does not happen.
+
 **CLOSED 2026-09-12 by `aaeaa57`, "fix: close the rollback gap, replication race, and stale
 remedy in setup".** A site permission granted immediately before a malformed response was not
 rolled back: the field check threw before the permission id was captured, so the rollback
@@ -196,4 +206,7 @@ application-permission-only restriction is real, and the bootstrap approach reso
 
 Still unexercised: every failure path. Rollback, the propagation retry, the preflight refusal,
 the duplicate-bootstrap guard, and every diagnostic message have been tested only against
-fakes. They are covered by 313 tests, but no live failure has been observed.
+fakes. The `--delete-bootstrap` path added afterward is in the same position: its not-found
+refusal, its ambiguous-match refusal, and its success message are covered by tests against
+fakes, not by a live delete against a real tenant. No live failure on any of these paths has
+been observed.

@@ -105,21 +105,45 @@ which the environment variables do not.
 ## Retiring the grant issuer after setup
 
 The recommended posture is to delete the grant-issuing application once setup is done, and to
-recreate it with `--create-bootstrap` when the next site is onboarded. Its only job is issuing
-per-site grants, which happens during a normal run and never afterward, so the running server
-does not need it and neither does anything else. Deleting it shrinks the window in which a
-tenant-wide SharePoint credential exists at all, from a week down to the minutes the setup
-takes, and removes the standing application that holds `Sites.FullControl.All` along with it.
+recreate it with `--create-bootstrap` when the next site is onboarded:
 
-The secret expires on its own either way. `--create-bootstrap` sets an explicit seven-day
-expiry rather than accepting Graph's two-year default, so a grant issuer that nobody remembers
-to delete stops being a usable credential within the week. Recreating it later costs one
-command and produces a fresh secret, so there is no rotation procedure to maintain and nothing
-to renew.
+```bash
+npm run setup -- --tenant=<tenant-id> --delete-bootstrap
+```
 
-Keep it only if you are onboarding sites often enough that recreating it each time is real
-friction, and if you do, treat it as a privileged credential with an expiry date rather than
-as permanent infrastructure.
+This takes no `--site`, for the same reason `--create-bootstrap` does not: the grant issuer
+never touches a site itself. It signs you in with a device code, finds the application by the
+display name `--create-bootstrap` used (pass `--name` if you gave it a different one), and
+deletes it. It refuses to run alongside `--create-bootstrap`, and it refuses to guess which
+application to delete if more than one matches that name, rather than removing one of several
+identically named holders of `Sites.FullControl.All`.
+
+The secret's seven-day expiry and deletion are not the same thing, and treating them as
+interchangeable is the mistake this section exists to prevent. The expiry disables one
+credential: after the secret lapses, nobody can mint a new token with it, but the application
+object is untouched, and so is the admin-consented `Sites.FullControl.All` role assignment it
+holds. Anyone in the tenant with Application Administrator rights can add a new secret to that
+application and regain tenant-wide SharePoint access, with no further consent prompt, for as long
+as the application still exists. Deletion removes the application object itself, and with it every
+role assignment it held. Only deletion ends the standing privilege; expiry only ends one way of
+using it.
+
+This matters more in a customer tenant than in a developer one. Leaving the grant issuer in
+place there means the product retains an application with full control over every SharePoint
+site the customer owns, indefinitely, whether or not its current secret still works. Deleting it
+after each onboarding means that access existed for the length of one setup run. Those are two
+different answers to a client's security review, and only one of them is true if the grant
+issuer was left in place because its secret happened to expire rather than because someone
+deleted it.
+
+Deleting the grant issuer does not affect the deployed server. The server's own application
+holds `Sites.Selected` and its own per-site grant, both issued during the normal run, and
+neither depends on the grant issuer continuing to exist. The deployed server keeps working after
+`--delete-bootstrap` succeeds.
+
+Keep the grant issuer only if you are onboarding sites often enough that recreating it each time
+is real friction, and if you do, treat it as a privileged credential with an expiry date rather
+than as permanent infrastructure.
 
 ## Running the normal setup
 
