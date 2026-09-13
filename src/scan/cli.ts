@@ -86,18 +86,29 @@ export function formatScanResult(result: ScanResult, storeKind: "azure-table" | 
     );
   }
 
+  // changesFromDeltaItems records `item.eTag ?? ""` and `item.lastModifiedDateTime ?? ""` the
+  // same way, so a missing modified date is the same gap as a missing ETag and is reported the
+  // same way: named only when there is something to report.
   const withoutEtag = result.snapshot.files.filter((file) => file.etag === "").length;
-  if (withoutEtag > 0) {
+  const withoutModified = result.snapshot.files.filter((file) => file.modified === "").length;
+  if (withoutEtag > 0 || withoutModified > 0) {
+    const gaps = [
+      withoutEtag > 0 ? `${withoutEtag} carry no ETag` : undefined,
+      withoutModified > 0 ? `${withoutModified} carry no modified date` : undefined,
+    ].filter((gap): gap is string => gap !== undefined);
+
     lines.push(
-      `${withoutEtag} of those files carry no ETag. Graph did not report one, and this snapshot ` +
-        "stores an empty string rather than marking the value absent, so a later plan that uses " +
-        "an ETag as a precondition cannot tell those files apart from ones with a real ETag.",
+      `Of those files, ${gaps.join(", and ")}. Graph did not report ${gaps.length > 1 ? "those values" : "one"}, ` +
+        "and this snapshot stores an empty string rather than marking the value absent, so a " +
+        "later plan that uses an ETag as a precondition, or a report that reads the modified " +
+        "date, cannot tell those files apart from ones with a real value.",
     );
   }
 
   lines.push(
     `Graph requests: ${result.graphRequests}. Delta pages: ${result.pages}.`,
-    `Store: ${storeKind}. Changes applied: ${result.changesApplied}. Write operations: ${result.storeBatches}.`,
+    `Store: ${storeKind}. Changes applied: ${result.changesApplied}. ` +
+      `Write operations from applying those changes: ${result.storeBatches}.`,
     `Scanned at: ${result.snapshot.scannedAt}.`,
   );
 
@@ -105,7 +116,9 @@ export function formatScanResult(result: ScanResult, storeKind: "azure-table" | 
     lines.push(
       "This run resynced: the stored deltaLink was no longer valid, so the stored inventory was " +
         "discarded and the drive enumerated from scratch. That is why this run cost a full " +
-        "enumeration rather than an incremental one.",
+        "enumeration rather than an incremental one. The writes that cleared the stale inventory " +
+        "before this enumeration began are not included in the write-operations count above, and " +
+        "on a large library they are its single largest write cost.",
     );
   }
 

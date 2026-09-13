@@ -67,7 +67,7 @@ describe("formatScanResult", () => {
     expect(lines).toContain("Scan complete: full enumeration of drive drive-1.");
     expect(lines).toContain("Files: 2. Folders: 1.");
     expect(lines).toContain("Graph requests: 4. Delta pages: 2.");
-    expect(lines).toContain("Store: azure-table. Changes applied: 3. Write operations: 1.");
+    expect(lines).toContain("Store: azure-table. Changes applied: 3. Write operations from applying those changes: 1.");
   });
 
   it("says a resync happened and why it cost what it cost", () => {
@@ -75,6 +75,15 @@ describe("formatScanResult", () => {
 
     expect(lines).toMatch(/resync/i);
     expect(lines).toMatch(/stored deltaLink was no longer valid/i);
+  });
+
+  it("says a resync's clearing writes are not in the write-operations count", () => {
+    // clearInventory returns nothing, so its delete transactions are in no
+    // counter formatScanResult can read. The largest write cost of a resync on
+    // a large library is exactly the one this line must not claim to cover.
+    const lines = formatScanResult(result({ resynced: true }), "azure-table").join("\n");
+
+    expect(lines).toMatch(/not included in the write-operations count/i);
   });
 
   it("warns that an in-memory run cannot be incremental", () => {
@@ -104,8 +113,50 @@ describe("formatScanResult", () => {
       "azure-table",
     ).join("\n");
 
-    expect(lines).toMatch(/1 of those files carry no ETag/);
+    expect(lines).toMatch(/1 carry no ETag/);
     expect(lines).toMatch(/Graph did not report one/);
+  });
+
+  it("names the count of files with no modified date when some files lack one", () => {
+    // changes.ts records item.lastModifiedDateTime ?? "" exactly as it records
+    // item.eTag ?? "", so the same gap on the same fixture shape is asserted here.
+    const lines = formatScanResult(
+      result({
+        snapshot: {
+          files: [
+            { path: "2026/a.xlsx", name: "a.xlsx", size: 1, modified: "", etag: "e" },
+            { path: "2026/b.xlsx", name: "b.xlsx", size: 1, modified: "2026-09-01T00:00:00Z", etag: "e" },
+          ],
+          folderPaths: ["2026"],
+          scannedAt: "2026-09-13T12:00:00.000Z",
+          searchCrossCheckIncluded: false,
+        },
+      }),
+      "azure-table",
+    ).join("\n");
+
+    expect(lines).toMatch(/1 carry no modified date/);
+  });
+
+  it("names both counts when files lack an ETag, a modified date, or both", () => {
+    const lines = formatScanResult(
+      result({
+        snapshot: {
+          files: [
+            { path: "2026/a.xlsx", name: "a.xlsx", size: 1, modified: "", etag: "" },
+            { path: "2026/b.xlsx", name: "b.xlsx", size: 1, modified: "2026-09-01T00:00:00Z", etag: "e" },
+          ],
+          folderPaths: ["2026"],
+          scannedAt: "2026-09-13T12:00:00.000Z",
+          searchCrossCheckIncluded: false,
+        },
+      }),
+      "azure-table",
+    ).join("\n");
+
+    expect(lines).toMatch(/1 carry no ETag/);
+    expect(lines).toMatch(/1 carry no modified date/);
+    expect(lines).toMatch(/Graph did not report those values/);
   });
 
   it("names the sub-path filter and gives the unfiltered totals alongside the filtered ones", () => {
@@ -123,12 +174,13 @@ describe("formatScanResult", () => {
     expect(formatScanResult(result(), "azure-table").join("\n")).not.toMatch(/[Ss]ub-path/);
   });
 
-  it("says nothing about missing ETags when every file has one", () => {
-    // As much a check as the positive case: a line that always prints tells an
-    // operator nothing, so the absence of the ETag warning is asserted here
-    // for a result where every file in the fixture already carries one.
+  it("says nothing about a missing ETag or modified date when every file has both", () => {
+    // As much a check as the positive cases: a line that always prints tells an
+    // operator nothing, so the absence of the warning is asserted here for a
+    // result where every file in the fixture already carries both values.
     const lines = formatScanResult(result(), "azure-table").join("\n");
 
     expect(lines).not.toMatch(/ETag/);
+    expect(lines).not.toMatch(/modified date/);
   });
 });
