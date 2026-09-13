@@ -10,6 +10,46 @@ function isValidRegex(pattern: string): boolean {
   }
 }
 
+/**
+ * The named capture groups a pattern declares, or undefined when the pattern
+ * will not compile at all -- which `isValidRegex` above has already reported,
+ * so there is nothing to add here.
+ *
+ * Read off the compiled regex rather than scanned out of the source text. An
+ * alternation with an empty first branch matches the empty string, and the
+ * resulting match carries a key in `groups` for every group the pattern
+ * declares, whichever branch actually participated. Scanning the text for
+ * "(?<name>" would also count one written inside a character class, where it
+ * is not a capture group at all.
+ */
+function declaredGroupNames(pattern: string): Set<string> | undefined {
+  try {
+    const groups = new RegExp(`|${pattern}`).exec("")?.groups;
+    return new Set(groups === undefined ? [] : Object.keys(groups));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * What a recognizer's pattern has to capture for the engine to be able to use
+ * a match at all, and what that capture feeds.
+ *
+ * A recognizer without one of these is accepted by every other check and then
+ * matches nothing, forever: the parser drops a match with no client and a
+ * match with no year, and falls through to the next recognizer. The profile
+ * author's file comes back "unrecognized", which reads as the repository
+ * being wrong when it is the profile. The deliverable is not on this list
+ * because a recognizer declares one of its own; the month is not, because a
+ * missing month capture and an impossible month value are the same undefined
+ * at the point the parser decides, and only the first of those is visible
+ * here.
+ */
+const REQUIRED_RECOGNIZER_CAPTURES: ReadonlyArray<{ name: string; feeds: string }> = [
+  { name: "client", feeds: "name the client the file belongs to" },
+  { name: "year", feeds: "resolve the period the file covers" },
+];
+
 export const CadenceSchema = z.enum(["monthly", "quarterly", "semiannual", "annual"]);
 export const PeriodAnchorSchema = z.enum(["first", "last"]);
 export const VerdictSchema = z.enum(["compliant", "misnamed"]);
@@ -130,6 +170,18 @@ export const ProfileSchema = z
           path: ["naming", "recognizers", index, "deliverable"],
           message: `no deliverable is declared with id "${recognizer.deliverable}"`,
         });
+      }
+
+      const groups = declaredGroupNames(recognizer.pattern);
+      if (groups !== undefined) {
+        for (const capture of REQUIRED_RECOGNIZER_CAPTURES) {
+          if (groups.has(capture.name)) continue;
+          ctx.addIssue({
+            code: custom,
+            path: ["naming", "recognizers", index, "pattern"],
+            message: `recognizer "${recognizer.id}" declares no (?<${capture.name}>...) capture, so no match of it can ${capture.feeds} and the recognizer can never accept a filename: add a (?<${capture.name}>...) group to its pattern`,
+          });
+        }
       }
     });
 

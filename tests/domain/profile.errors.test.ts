@@ -90,6 +90,78 @@ describe("loadProfile rejections", () => {
     );
   });
 
+  // A recognizer that captures no client, or no year, is accepted by every
+  // other check in this schema and then matches nothing at all: the parser
+  // drops a match it cannot read a client or a period out of and falls through
+  // to the next recognizer. The author gets silence, and the file the
+  // recognizer was written for comes back as unrecognized, which reads as the
+  // repository being wrong when the profile is.
+  it("rejects a recognizer whose pattern captures no client", () => {
+    expectIssue(
+      {
+        ...validProfile,
+        naming: {
+          ...validProfile.naming,
+          recognizers: [
+            { id: "no-client", pattern: "^Report (?<year>\\d{4})\\.xlsx$", deliverable: "MonthlyTraining", verdict: "misnamed" },
+          ],
+        },
+      },
+      'recognizer "no-client" declares no (?<client>...) capture',
+    );
+  });
+
+  it("rejects a recognizer whose pattern captures no year", () => {
+    expectIssue(
+      {
+        ...validProfile,
+        naming: {
+          ...validProfile.naming,
+          recognizers: [
+            { id: "no-year", pattern: "^(?<client>[A-Z0-9]+) Safety\\.xlsx$", deliverable: "MonthlyTraining", verdict: "misnamed" },
+          ],
+        },
+      },
+      'recognizer "no-year" declares no (?<year>...) capture',
+    );
+  });
+
+  it("names the recognizer and says what to add", () => {
+    expectIssue(
+      {
+        ...validProfile,
+        naming: {
+          ...validProfile.naming,
+          recognizers: [
+            { id: "no-year", pattern: "^(?<client>[A-Z0-9]+) Safety\\.xlsx$", deliverable: "MonthlyTraining", verdict: "misnamed" },
+          ],
+        },
+      },
+      "add a (?<year>...) group to its pattern",
+    );
+  });
+
+  it("does not add a capture complaint to a recognizer whose pattern will not compile", () => {
+    // The pattern's own check already reports that, and a second complaint
+    // about groups a regex engine could not even read would be noise the
+    // author has to work out how to ignore.
+    try {
+      loadProfile({
+        ...validProfile,
+        naming: {
+          ...validProfile.naming,
+          recognizers: [{ id: "bad-regex", pattern: "([unclosed", deliverable: "MonthlyTraining", verdict: "misnamed" }],
+        },
+      });
+      throw new Error("expected loadProfile to reject this profile");
+    } catch (error) {
+      const issues = (error as ProfileValidationError).issues.join("\n");
+
+      expect(issues).toContain("must be a valid regular expression");
+      expect(issues).not.toContain("declares no");
+    }
+  });
+
   it("rejects duplicate recognizer ids", () => {
     expectIssue(
       {
