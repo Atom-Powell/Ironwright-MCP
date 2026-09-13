@@ -2054,7 +2054,14 @@ export class FakeTableClient implements TableClientLike {
     this.transactions += 1;
     if (actions.length > 100) throw new Error("a transaction may not exceed 100 entities");
     for (const action of actions) {
-      if (action[0] === "upsert") await this.upsertEntity(action[1]);
+      if (action[0] === "upsert") {
+        await this.upsertEntity(action[1]);
+      } else {
+        // Removed from the map directly rather than through deleteEntity, so that
+        // clearInventory's transactional deletes do not inflate the individual-delete
+        // count the write-shape test asserts on.
+        this.rows.delete(`${action[1].partitionKey}/${action[1].rowKey}`);
+      }
     }
   }
 }
