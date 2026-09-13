@@ -1,6 +1,6 @@
 import type { SetupGraph } from "./adapter.js";
 import { SetupFailedError } from "./errors.js";
-import { GraphRequestError } from "./graph-error.js";
+import { GraphRequestError } from "../graph/errors.js";
 import {
   MICROSOFT_GRAPH_APP_ID,
   SITES_FULL_CONTROL_ROLE_CLAIM,

@@ -1,4 +1,4 @@
-import { GraphRequestError } from "./graph-error.js";
+import { GraphRequestError } from "../graph/errors.js";
 import { appRolesFromAccessToken } from "./steps.js";
 import type {
   AppRegistrationRequest,

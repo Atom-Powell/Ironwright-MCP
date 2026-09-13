@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { acquireTokenWithRetry, describeSetupFailure, extractAccessToken, parseArgs } from "../../src/setup/cli.js";
-import { GraphRequestError } from "../../src/setup/graph-error.js";
+import { GraphRequestError } from "../../src/graph/errors.js";
 // Imported from errors.js, not run.js: run.js drags the adapter and its fetch
 // calls into this module graph, which is exactly what extracting the error
 // type was meant to prevent.

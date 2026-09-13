@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SetupGraph } from "../../src/setup/adapter.js";
-import { GraphRequestError } from "../../src/setup/graph-error.js";
+import { GraphRequestError } from "../../src/graph/errors.js";
 import type { SetupResult } from "../../src/setup/run.js";
 import { SetupFailedError, runSetup } from "../../src/setup/run.js";
 import { SITES_SELECTED_ROLE_CLAIM } from "../../src/setup/steps.js";

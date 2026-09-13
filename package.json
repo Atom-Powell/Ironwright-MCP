@@ -13,7 +13,8 @@
     "test:errors": "vitest run .errors.test",
     "dev": "tsx watch src/server/main.ts",
     "start": "node dist/server/main.js",
-    "setup": "tsx src/setup/main.ts"
+    "setup": "tsx src/setup/main.ts",
+    "scan": "tsx src/scan/main.ts"
   },
   "repository": {
     "type": "git",
@@ -32,6 +33,7 @@
   },
   "private": true,
   "dependencies": {
+    "@azure/data-tables": "^13.3.2",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "express": "^5.2.1",
     "zod": "^3.25.76"

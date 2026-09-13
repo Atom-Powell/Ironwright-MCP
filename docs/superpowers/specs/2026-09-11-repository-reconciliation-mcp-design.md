@@ -24,7 +24,8 @@ Work IQ surface and every community SharePoint server found.
 ## Decisions
 
 Locked before this session, carried forward from `CLAUDE.md` and the architecture research:
-TypeScript with the official MCP SDK and the Microsoft Graph JS SDK;
+TypeScript with the official MCP SDK, and plain `fetch` for Microsoft Graph rather than the
+Graph JS SDK (amended 2026-09-13; see the graph-lib paragraph below);
 `StreamableHTTPServerTransport` in stateless mode with a new `McpServer` per request;
 path-based driveItem addressing over ID addressing, `$batch`, delta query with persisted
 `deltaLink`s, and Microsoft Search as the out-of-taxonomy cross-check; Excel persistent
@@ -105,8 +106,9 @@ A `$batch` builder respecting the 20-request and 4 MB caps, supporting `dependsO
 auto-splitting larger batches. A delta client that persists `deltaLink`s. An Excel session
 manager using `persistChanges: true`, a single-flight queue per workbook, and automatic
 recreation when an expired session returns 404. A `Retry-After`-aware backoff wrapper on
-every call. A `conflictBehavior` helper. Auth arrives through a token-provider interface so
-tests inject a fake.
+every call. A `conflictBehavior` helper. Every call goes through plain `fetch`; see
+`2026-09-13-graph-repository-snapshot-design.md` for why the Graph JS SDK was declined.
+Auth arrives through a token-provider interface so tests inject a fake.
 
 **`store`** is the state index behind a `StateStore` interface, with an Azure Table Storage
 implementation for real use and an in-memory implementation for tests.
@@ -297,9 +299,14 @@ collections are stored one entity per member rather than as a single serialized 
 | Table | Partition key | Row key | Holds |
 |---|---|---|---|
 | `DeltaLinks` | profileId | driveId | `deltaLink`, last scan timestamp |
-| `Inventory` | profileId + driveId | path hash | path, name, type, size, modified, ETag |
+| `Inventory` | profileId + driveId | driveItem id | path, name, type, size, modified, ETag |
 | `Plans` | profileId | planId | kind, created timestamp, content hash, status |
 | `PlanItems` | planId | item index | before state, after state, ETag, per-item outcome |
+
+The inventory is keyed by item id rather than by a path hash because delta cannot maintain a
+path-keyed table: a deleted item arrives as an id and a `deleted` facet carrying no path at all,
+and a moved item arrives under the same id with a new path, so a path-keyed table has nothing to
+hash on a delete and leaves a ghost row behind on every move. Corrected 2026-09-13.
 
 ## Testing
 
@@ -336,8 +343,12 @@ copy of production.
    broken app registration, and because "everyone
    ships the same Azure AD walkthrough and nobody improves it" is a documented ecosystem-wide
    missed opportunity. This runs repeatedly under one-instance-per-tenant.
-2. **Graph layer and store.** Path addressing, ETags, `$batch`, delta, Excel sessions,
-   backoff, `conflictBehavior`, and both `StateStore` implementations.
+2. **Graph layer and store.** Split in two on 2026-09-13, because the original entry was seven
+   units and contained work with no caller until phase 6. **2a:** token provider, backoff, path
+   addressing, ETag capture, delta, both `StateStore` implementations, and a scripted `scan`
+   command that produces a persisted `RepositorySnapshot`. **2b:** `$batch`, the Microsoft Search
+   cross-check, Excel sessions, and the `WorkbookSnapshot`. `conflictBehavior` moves to phase 6,
+   where a write tool first reads it.
 3. **Domain engine.** Expected-state derivation, renderers, matcher, diff. Pure and
    fixture-tested. Has no dependency on phase 2 and can be built in parallel with it.
 4. **Read tools.** `inventory_tree`, `describe_workbook`,

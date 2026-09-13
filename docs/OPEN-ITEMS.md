@@ -105,6 +105,13 @@ exposes only stubs, but the read tools return a customer's repository inventory 
 tools can bulk-rename it. Copilot Studio registration forces an auth choice regardless, so
 this is an unrecorded decision rather than a deferred one. Settle it before phase 2.
 
+**Status at the start of phase 2a, 2026-09-13.** Of the three decisions the design spec required
+before phase 2, two are settled and recorded above: the per-site grant does not accept a
+delegated token, and the MCP endpoint authenticates through Container Apps built-in Entra auth.
+The third, which delegated scopes the setup sign-in must request, is still open. It governs the
+setup command's device-code flow and not the server's app-only Graph access, so it does not block
+phase 2a and phase 2a does not close it.
+
 ## Carried into later phases
 
 **Hosting phase.** A production image built with `npm ci --omit=dev && npm run build` will
@@ -354,3 +361,91 @@ longer exists. Removing that entry needs an app-only token carrying `Sites.FullC
 needs a grant issuer to exist. On a developer tenant the orphaned entry grants access to nothing
 and is not worth recreating a grant issuer for. See the teardown hole above, which is the product
 gap this is one instance of.
+
+## Phase 2a: covered only by fakes, 2026-09-13
+
+Phase 2a has not been run against a real tenant. No Graph call, no Azure Storage call, and no
+Azurite run has ever been made by this code. Everything below is verified against fake
+transports and a fake table client, and nothing more should be read into it than that.
+
+**What is covered.** The Graph client and its `Retry-After` backoff in both the delta-seconds and
+HTTP-date header forms. The token provider's caching and single-flight behavior. Path addressing
+in both directions and drive resolution. The delta pager, including its resync detection. Both
+state store implementations, run against one shared conformance suite. The change conversion and
+the snapshot assembly. The scan's orchestration, including its resync path. Every message the
+scan command prints. All of it against fakes, all of it green, none of it against Graph or Azure
+Table Storage.
+
+**The claim this phase exists to support is unverified.** The reason phase 2a exists is that a
+recursive per-folder inventory cost hundreds of Graph calls, and delta plus a persisted
+continuation link should reduce that to a small bounded number. The scan reports its own Graph
+request count precisely so that claim can be checked against a real tenant. It has not been
+checked. Until a live run happens, the request-count reduction is a design argument, not
+evidence.
+
+**One line that is unproven and cannot be proven by a fake.**
+`tableStateStoreFromConnectionString` in `src/store/table.ts` bridges the real
+`@azure/data-tables` `TableClient` to the narrow `TableClientLike` interface with an
+`as unknown as` cast:
+
+```
+deltaLinks: TableClient.fromConnectionString(connectionString, "DeltaLinks") as unknown as TableClientLike,
+inventory: TableClient.fromConnectionString(connectionString, "Inventory") as unknown as TableClientLike,
+```
+
+A reviewer confirmed against the installed package that the real client does not structurally
+satisfy `TableClientLike` without the cast, so the compiler checks nothing at that line and no
+fake can either. The first real connection is what validates it. `ensureTables` is tested against
+the fake but has likewise never created a real table.
+
+**The ETag gap, as a precondition for phase 6.** `src/scan/changes.ts` records a file's ETag as
+`item.eTag ?? ""`. The domain's `RepositoryFile.etag` is a required string, so a file for which
+Graph sent no ETag is stored as an empty string that nothing downstream can distinguish from a
+real one. That field exists specifically so a plan generator can use it as an `If-Match`
+precondition. The scan command now reports how many files carry no ETag, so the gap is visible
+to an operator, but the type still cannot express absence. Phase 6 must settle this before any
+write tool sends an `If-Match`, and the honest fix is to make the field optional, which changes
+the reconciliation engine's frozen report shape and its golden fixture.
+
+**The environment variable naming split, as a precondition for hosting.** `npm run setup` prints
+`AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET`. The server reads `IW_TENANT_ID`,
+`IW_CLIENT_ID` and `IW_CLIENT_SECRET`. The missing-credentials message now states the mapping at
+the moment of failure, which unblocks an operator, but two names for one value is the actual
+defect. The hosting phase is where these names get written into a deployment definition and is
+where they should be unified.
+
+**Why the live run has not happened.** The design called for a live run against the developer
+tenant used for phase 1: a synthetic library, a profile for it, Azurite, a cold scan, an
+immediate second scan, and one scan after each of an add, a rename, a move, and a delete. None of
+that ran in the implementing session. It needs a synthetic library created in the tenant by hand
+and working server-application credentials, and the server application from the phase 1 setup
+run should not be reused: its client secret was displayed in a session's scrollback, and the
+outstanding operator action above is to delete and purge it, not rotate it. A session that cannot
+create tenant resources or hold live credentials cannot perform this run, so it is left to the
+operator.
+
+**What the operator does to close this out.**
+
+1. Settle the credentials question first. Delete and purge the exposed server application per the
+   outstanding operator action above, then either create a new server application for the
+   developer tenant or run `npm run setup` again to produce one.
+2. In the developer tenant, create a synthetic document library with a small tree matching the
+   example profile's taxonomy: a year folder, two client folders, and three or four files. Use no
+   real client data.
+3. Write a profile JSON for the synthetic library under `profiles/`, which is git-ignored.
+4. Start Azurite.
+5. Run a cold scan against the profile. Record the mode, the file and folder counts, the Graph
+   request count, and the write-operation count.
+6. Run the scan again immediately. Record whether it reports `incremental`, whether it avoided a
+   resync, and the Graph request count, against the design's expectation of a small bounded
+   number.
+7. Add a file to the synthetic library and scan. Rename a file and scan. Move a file between
+   client folders and scan. Delete a file and scan. After each, confirm the snapshot tracks the
+   change and that no ghost row survives the move.
+8. Record the actual numbers and outcomes from steps 5 through 7 in this file, in a new dated
+   section, following the tone of the 2026-09-12 setup entry above: name the numbers, name what
+   still was not exercised, and do not describe an untested path as working.
+
+Until those numbers exist, this phase's central claim, that delta plus a persisted continuation
+link bounds the Graph request count, is unverified. The numbers belong in this file when they
+exist, not before.
