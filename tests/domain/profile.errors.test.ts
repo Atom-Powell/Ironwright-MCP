@@ -126,6 +126,30 @@ describe("loadProfile rejections", () => {
     );
   });
 
+  it("rejects a recognizer whose pattern captures neither a month nor a month name", () => {
+    // The third member of the same never-matches class. Half-covering it
+    // would be worse than not covering it at all: an author who has watched
+    // the client and year checks fire reads silence here as approval and
+    // ships a recognizer that can never match a filename.
+    expectIssue(
+      {
+        ...validProfile,
+        naming: {
+          ...validProfile.naming,
+          recognizers: [
+            {
+              id: "no-month",
+              pattern: "^(?<client>[A-Z0-9]+) Annual (?<year>\\d{4})\\.xlsx$",
+              deliverable: "MonthlyTraining",
+              verdict: "misnamed",
+            },
+          ],
+        },
+      },
+      'recognizer "no-month" declares no (?<month>...) or (?<monthName>...) capture',
+    );
+  });
+
   it("names the recognizer and says what to add", () => {
     expectIssue(
       {

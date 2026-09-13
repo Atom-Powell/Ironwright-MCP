@@ -29,6 +29,37 @@ describe("ProfileSchema", () => {
     expect(parsed.deliverables[0]?.periodAnchor).toBe("last");
   });
 
+  // The required-capture check asks for a month OR a month name, never both,
+  // and each half of that has to be exercised on its own. A rule that
+  // demanded a numeric (?<month>) would reject legacy-spaced, which is the
+  // recognizer shape the golden fixture and the example profile both ship.
+  it("accepts a recognizer that captures a month name and no numeric month", () => {
+    const parsed = ProfileSchema.parse(validProfile);
+
+    expect(parsed.naming.recognizers[0]?.id).toBe("legacy-spaced");
+    expect(parsed.naming.recognizers[0]?.pattern).toContain("(?<monthName>");
+    expect(parsed.naming.recognizers[0]?.pattern).not.toContain("(?<month>");
+  });
+
+  it("accepts a recognizer that captures a numeric month and no month name", () => {
+    const numericMonth = {
+      ...validProfile,
+      naming: {
+        ...validProfile.naming,
+        recognizers: [
+          {
+            id: "alias-compact",
+            pattern: "^(?<client>[A-Z0-9]+)-(?<year>\\d{4})(?<month>\\d{2})-Training\\.xlsx$",
+            deliverable: "MonthlyTraining",
+            verdict: "compliant",
+          },
+        ],
+      },
+    };
+
+    expect(() => ProfileSchema.parse(numericMonth)).not.toThrow();
+  });
+
   it("defaults recognizers to an empty list", () => {
     const withoutRecognizers = {
       ...validProfile,

@@ -40,15 +40,33 @@ function declaredGroupNames(pattern: string): Set<string> | undefined {
  * match with no year, and falls through to the next recognizer. The profile
  * author's file comes back "unrecognized", which reads as the repository
  * being wrong when it is the profile. The deliverable is not on this list
- * because a recognizer declares one of its own; the month is not, because a
- * missing month capture and an impossible month value are the same undefined
- * at the point the parser decides, and only the first of those is visible
- * here.
+ * because a recognizer declares one of its own.
+ *
+ * The month is the third member of the class and appears below rather than
+ * here, because it is satisfied by either of two group names and this list is
+ * one required name per entry. Covering only two of the three would be worse
+ * than covering none: an author who has watched the client and year checks
+ * fire reads silence about a missing month as approval.
  */
 const REQUIRED_RECOGNIZER_CAPTURES: ReadonlyArray<{ name: string; feeds: string }> = [
   { name: "client", feeds: "name the client the file belongs to" },
   { name: "year", feeds: "resolve the period the file covers" },
 ];
+
+/**
+ * A period needs a month as well as a year, and the parser will read it from
+ * either a numeric `month` capture or a `monthName` one, so a recognizer has
+ * to declare one of the two and never needs both. Real profiles use each:
+ * a compact alias captures "202602" as digits, a legacy spaced name captures
+ * "February" as a word.
+ *
+ * Only the declaration is checked. Whether a declared group captures a month
+ * that exists is a runtime question the parser already answers, and at the
+ * point it decides, an undeclared group and an out-of-range value are the
+ * same undefined; conflating the two here would mean reporting a value nobody
+ * has read yet.
+ */
+const MONTH_CAPTURE_ALTERNATIVES = ["month", "monthName"] as const;
 
 export const CadenceSchema = z.enum(["monthly", "quarterly", "semiannual", "annual"]);
 export const PeriodAnchorSchema = z.enum(["first", "last"]);
@@ -180,6 +198,14 @@ export const ProfileSchema = z
             code: custom,
             path: ["naming", "recognizers", index, "pattern"],
             message: `recognizer "${recognizer.id}" declares no (?<${capture.name}>...) capture, so no match of it can ${capture.feeds} and the recognizer can never accept a filename: add a (?<${capture.name}>...) group to its pattern`,
+          });
+        }
+
+        if (!MONTH_CAPTURE_ALTERNATIVES.some((name) => groups.has(name))) {
+          ctx.addIssue({
+            code: custom,
+            path: ["naming", "recognizers", index, "pattern"],
+            message: `recognizer "${recognizer.id}" declares no (?<month>...) or (?<monthName>...) capture, so no match of it can resolve the period the file covers and the recognizer can never accept a filename: add a (?<month>...) group for digits, or a (?<monthName>...) group for a month spelled out, to its pattern`,
           });
         }
       }
