@@ -1,5 +1,5 @@
-import type { Placeholder } from "../profile/placeholders.js";
-import { monthName } from "./months.js";
+import { TOKEN_PATTERN, type Placeholder } from "../profile/placeholders.js";
+import { assertValidMonth, monthName } from "./months.js";
 import type { Period } from "./types.js";
 
 export interface RenderContext {
@@ -8,16 +8,26 @@ export interface RenderContext {
   deliverable: string;
 }
 
-const TOKEN_PATTERN = /\{([^}]*)\}/g;
-
 // Keyed by the Placeholder union from the profile validator's own token set,
 // with every member required, so adding a token there without a resolver here
 // (or vice versa) is a compile error rather than a profile that validates but
 // renders wrong, or a template the renderer accepts that the validator rejects.
+//
+// "month" and "month:02" call assertValidMonth themselves rather than relying
+// on monthName to be the only guard: an invalid month must fail the same way
+// no matter which of the three month-reading tokens a template happens to
+// use, not produce a clear error for one and a silently wrong string ("13"
+// where nothing can be 13 months into a year) for the other two.
 const RESOLVERS: Record<Placeholder, (context: RenderContext) => string> = {
   year: (context) => String(context.period.year),
-  month: (context) => String(context.period.month),
-  "month:02": (context) => String(context.period.month).padStart(2, "0"),
+  month: (context) => {
+    assertValidMonth(context.period.month);
+    return String(context.period.month);
+  },
+  "month:02": (context) => {
+    assertValidMonth(context.period.month);
+    return String(context.period.month).padStart(2, "0");
+  },
   monthName: (context) => monthName(context.period.month),
   client: (context) => context.client,
   deliverable: (context) => context.deliverable,

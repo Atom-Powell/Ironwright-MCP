@@ -21,10 +21,22 @@ export const MONTH_NAMES = [
   "December",
 ] as const;
 
-export function monthName(month: number): string {
-  const name = MONTH_NAMES[month - 1];
-  if (name === undefined) {
+/**
+ * The one place "is this a real month" is decided. Every renderer token that
+ * reads a period's month runs its value through this first, so an invalid
+ * month fails the same way (a thrown error naming the bad value) no matter
+ * which token a template happens to use, rather than only the tokens that
+ * remembered to check.
+ */
+export function assertValidMonth(month: number): void {
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
     throw new Error(`month must be between 1 and 12, got ${month}`);
   }
-  return name;
+}
+
+export function monthName(month: number): string {
+  assertValidMonth(month);
+  // Safe: assertValidMonth has already confirmed month - 1 is 0..11, which is
+  // exactly the index range MONTH_NAMES covers.
+  return MONTH_NAMES[month - 1]!;
 }

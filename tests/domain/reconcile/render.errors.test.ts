@@ -18,3 +18,24 @@ describe("renderTemplate rejections", () => {
     expect(() => renderPath(["{year}", "{quarter}"], context)).toThrow("unknown placeholder {quarter}");
   });
 });
+
+// An out-of-range month must fail the same way regardless of which of the
+// three month-reading tokens a template uses. Before this test, "month" and
+// "month:02" silently rendered "13" while "monthName" alone threw: the same
+// bad period would read as a clear bug from one token and a confidently
+// wrong filename from the other two.
+describe("renderTemplate rejections for an out-of-range month", () => {
+  const invalidMonth = { period: { year: 2026, month: 13 }, client: "CLIENTA", deliverable: "MonthlyTraining" };
+
+  it("rejects an out-of-range month through the month token", () => {
+    expect(() => renderTemplate("{month}", invalidMonth)).toThrow("month must be between 1 and 12, got 13");
+  });
+
+  it("rejects an out-of-range month through the zero-padded month token", () => {
+    expect(() => renderTemplate("{month:02}", invalidMonth)).toThrow("month must be between 1 and 12, got 13");
+  });
+
+  it("rejects an out-of-range month through the month name token", () => {
+    expect(() => renderTemplate("{monthName}", invalidMonth)).toThrow("month must be between 1 and 12, got 13");
+  });
+});

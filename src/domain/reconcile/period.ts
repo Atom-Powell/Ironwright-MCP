@@ -59,10 +59,23 @@ export interface PeriodsInWindowArgs {
 }
 
 /**
- * Every anchored period whose cadence span falls inside the trailing window,
+ * Every anchored period whose anchor month falls inside the trailing window,
  * oldest first. A monthly cadence yields one entry per month; a quarterly,
  * semiannual or annual cadence yields one entry per span, each reduced to its
  * anchored month by the same rule `anchorPeriod` applies everywhere else.
+ *
+ * The window is scanned in whole spans (`firstSpanStart` to `lastSpanStart`)
+ * because a span straddling the window's edge still needs to be considered:
+ * with a `first` anchor, a span that starts before the window can still have
+ * its anchor (its first month) land inside it. But the same straddling means
+ * a span's anchor can land on the far side of *either* edge: with a `last`
+ * anchor and `asOf` mid-span, the span's last month is later than `asOf`, and
+ * with a `first` anchor, an earlier span's first month can be earlier than
+ * the window start. Both are excluded below by checking the anchor itself
+ * against the window, not just the span it came from. Skipping only the
+ * upper bound would still let a not-yet-closed period into a report whose
+ * entire premise is that a period is reported after it closes; skipping only
+ * the lower bound would still let a stale period back in.
  */
 export function periodsInWindow(args: PeriodsInWindowArgs): Period[] {
   const { asOf, months, cadence, anchor, effectiveFrom } = args;
@@ -79,6 +92,7 @@ export function periodsInWindow(args: PeriodsInWindowArgs): Period[] {
   const periods: Period[] = [];
   for (let spanStart = firstSpanStart; spanStart <= lastSpanStart; spanStart += span) {
     const anchorIndex = anchor === "last" ? spanStart + span - 1 : spanStart;
+    if (anchorIndex < windowStartIndex || anchorIndex > windowEndIndex) continue;
     if (effectiveFromIndex !== undefined && anchorIndex < effectiveFromIndex) continue;
     periods.push(fromIndex(anchorIndex));
   }
