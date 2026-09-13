@@ -33,6 +33,17 @@ export function stateStoreConformance(create: () => StateStore): void {
     await expect(store.getDeltaLink("other", "d1")).resolves.toBeUndefined();
   });
 
+  it("records when a drive was last scanned, and reports none before a first scan", async () => {
+    const store = create();
+
+    await expect(store.getLastScanAt("example", "d1")).resolves.toBeUndefined();
+
+    await store.setDeltaLink("example", "d1", "link-1", "2026-09-13T12:00:00Z");
+
+    await expect(store.getLastScanAt("example", "d1")).resolves.toBe("2026-09-13T12:00:00Z");
+    await expect(store.getLastScanAt("example", "d2")).resolves.toBeUndefined();
+  });
+
   it("upserts by item id, so a moved item replaces its row rather than adding one", async () => {
     const store = create();
     await store.applyInventoryChanges("example", "d1", [
@@ -89,6 +100,23 @@ export function stateStoreConformance(create: () => StateStore): void {
     await expect(store.applyInventoryChanges("example", "d1", changes)).resolves.toEqual({
       changesApplied: 250,
       batches: 3,
+    });
+  });
+
+  it("counts one batch per chunk of upserts and one per delete, since deletes cannot be batched", async () => {
+    const store = create();
+    const changes = [
+      ...Array.from({ length: 120 }, (_, index) => ({
+        kind: "upsert" as const,
+        record: record({ itemId: `item-${index}` }),
+      })),
+      { kind: "delete" as const, itemId: "item-0" },
+      { kind: "delete" as const, itemId: "item-1" },
+    ];
+
+    await expect(store.applyInventoryChanges("example", "d1", changes)).resolves.toEqual({
+      changesApplied: 122,
+      batches: 4,
     });
   });
 

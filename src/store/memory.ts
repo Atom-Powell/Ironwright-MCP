@@ -2,13 +2,13 @@ import { chunk, inventoryPartitionKey, MAX_TRANSACTION_SIZE } from "./keys.js";
 import type { ApplyResult, InventoryChange, InventoryRecord, StateStore } from "./types.js";
 
 /**
- * For tests and for a local run with no storage account. It chunks the same way
- * the Table implementation does, not because memory needs it, but so that
+ * For tests and for a local run with no storage account. It counts batches the
+ * same way the Table store will, not because memory needs it, but so that
  * `batches` counts the same thing in both and the scan can print the number
  * without qualifying which store produced it.
  */
 export function createMemoryStateStore(): StateStore {
-  const deltaLinks = new Map<string, string>();
+  const deltaLinks = new Map<string, { deltaLink: string; lastScanAt: string }>();
   const inventories = new Map<string, Map<string, InventoryRecord>>();
 
   function inventoryFor(profileId: string, driveId: string): Map<string, InventoryRecord> {
@@ -23,11 +23,15 @@ export function createMemoryStateStore(): StateStore {
 
   return {
     async getDeltaLink(profileId, driveId) {
-      return deltaLinks.get(inventoryPartitionKey(profileId, driveId));
+      return deltaLinks.get(inventoryPartitionKey(profileId, driveId))?.deltaLink;
     },
 
-    async setDeltaLink(profileId, driveId, deltaLink) {
-      deltaLinks.set(inventoryPartitionKey(profileId, driveId), deltaLink);
+    async setDeltaLink(profileId, driveId, deltaLink, lastScanAt) {
+      deltaLinks.set(inventoryPartitionKey(profileId, driveId), { deltaLink, lastScanAt });
+    },
+
+    async getLastScanAt(profileId, driveId) {
+      return deltaLinks.get(inventoryPartitionKey(profileId, driveId))?.lastScanAt;
     },
 
     async clearInventory(profileId, driveId) {
