@@ -1,3 +1,6 @@
+import type { z } from "zod";
+import type { VerdictSchema } from "../profile/schema.js";
+
 /** A single calendar month. Every cadence resolves to one of these before rendering. */
 export interface Period {
   year: number;
@@ -118,3 +121,31 @@ export interface ReconciliationReport {
   emptyFolders: string[];
   clients: ClientSummary[];
 }
+
+export interface ParsedFileUnrecognized {
+  recognized: false;
+  file: RepositoryFile;
+}
+
+export interface ParsedFileRecognized extends Slot {
+  recognized: true;
+  file: RepositoryFile;
+  /**
+   * "canonical" comes from matching `naming.template` itself; the other two
+   * are a recognizer's own declared verdict, carried through unchanged so an
+   * accepted alias reads as correctly named and a legacy pattern reads as
+   * misnamed.
+   */
+  nameVerdict: "canonical" | z.infer<typeof VerdictSchema>;
+  /** Present only when a recognizer matched, never for a canonical match. */
+  recognizerId?: string;
+}
+
+/**
+ * The outcome of trying to read a client, deliverable and period out of a
+ * repository file's name. `false` means the name did not parse at all; a
+ * file that parses but names a client, period or deliverable nobody owes is
+ * still `recognized: true` here, since that judgment belongs to the matching
+ * stage, not to parsing.
+ */
+export type ParsedFile = ParsedFileRecognized | ParsedFileUnrecognized;
