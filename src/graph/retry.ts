@@ -53,24 +53,38 @@ export interface RetryVerdict {
  * Returns the last value rather than throwing when attempts run out. Only the
  * caller knows which request this was and which credential made it, so only the
  * caller can produce an error an operator can act on.
+ *
+ * `classifyError` covers a rejection from `run` itself: `fetch` rejects rather
+ * than returning a status on a DNS failure, a socket reset, or a TLS error, and
+ * `classify` never sees those because it is only ever handed a value `run`
+ * resolved with. It defaults to treating every rejection as not retriable, which
+ * is the previous behavior for every existing caller that does not pass one: the
+ * first thrown error propagates immediately.
  */
 export async function withRetry<T>(
   policy: RetryPolicy,
   run: (attempt: number) => Promise<T>,
   classify: (value: T) => RetryVerdict,
+  classifyError: (error: unknown) => boolean = () => false,
 ): Promise<T> {
-  let value = await run(1);
+  for (let attempt = 1; ; attempt += 1) {
+    let value: T;
+    try {
+      value = await run(attempt);
+    } catch (error) {
+      // A rejection this classifier does not recognize as retriable, or one on
+      // the final attempt, propagates as-is: run() produced no value here, so
+      // there is nothing for `classify` to inspect and nothing to return.
+      if (attempt >= policy.maxAttempts || !classifyError(error)) throw error;
+      await policy.sleep(Math.min(policy.baseDelayMs * 2 ** (attempt - 1), policy.maxDelayMs));
+      continue;
+    }
 
-  for (let attempt = 1; attempt < policy.maxAttempts; attempt += 1) {
     const verdict = classify(value);
-    if (!verdict.retriable) return value;
+    if (!verdict.retriable || attempt >= policy.maxAttempts) return value;
 
     const fromHeader = retryAfterDelayMs(verdict.retryAfter, policy.now());
     const backoff = policy.baseDelayMs * 2 ** (attempt - 1);
     await policy.sleep(Math.min(fromHeader ?? backoff, policy.maxDelayMs));
-
-    value = await run(attempt + 1);
   }
-
-  return value;
 }

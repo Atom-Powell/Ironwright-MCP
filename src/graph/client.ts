@@ -1,6 +1,22 @@
 import { GraphRequestError } from "./errors.js";
 import { defaultRetryPolicy, isRetriableStatus, withRetry, type RetryPolicy } from "./retry.js";
-import type { TokenProvider } from "./token.js";
+import { TokenRequestError, type TokenProvider } from "./token.js";
+
+/**
+ * `send` throws rather than returning a status for anything that never got a
+ * Graph response at all: a DNS failure, a socket reset, a TLS error, or the
+ * token endpoint's own equivalents, since `send` awaits `tokenProvider.getToken()`
+ * before its request. Those are worth retrying, unlike the two error types below,
+ * each of which already carries a decided outcome that a second attempt cannot
+ * change: a `GraphRequestError` is a Graph response with a final status, and a
+ * `TokenRequestError` for 401 is the client id or secret being wrong, which
+ * retrying does not fix.
+ */
+function isRetriableTransportError(error: unknown): boolean {
+  if (error instanceof GraphRequestError) return false;
+  if (error instanceof TokenRequestError && error.status === 401) return false;
+  return true;
+}
 
 export const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 
@@ -57,6 +73,7 @@ export function createGraphClient(options: GraphClientOptions): GraphClient {
         retry,
         () => send(url),
         (value) => ({ retriable: isRetriableStatus(value.status), retryAfter: value.retryAfter }),
+        isRetriableTransportError,
       );
 
       if (result.status < 200 || result.status >= 300) {
