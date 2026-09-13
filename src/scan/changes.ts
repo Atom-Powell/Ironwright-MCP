@@ -27,7 +27,20 @@ export function changesFromDeltaItems(items: readonly DeltaItem[]): InventoryCha
     if (item.root !== undefined) continue;
 
     if (typeof item.id !== "string" || item.id.length === 0) {
-      throw new DeltaItemError("(absent)", "the item carried no id, and the inventory is keyed by it");
+      // The id is what the inventory is keyed by, so an item without one cannot
+      // be recorded. It may still carry a name or a parent path, and those are
+      // the only handles an operator has for finding it, so the refusal reports
+      // whatever is there rather than a bare placeholder.
+      const clues = [
+        typeof item.name === "string" && item.name.length > 0 ? `name "${item.name}"` : undefined,
+        typeof item.parentReference?.path === "string" ? `parent "${item.parentReference.path}"` : undefined,
+      ].filter((clue): clue is string => clue !== undefined);
+
+      throw new DeltaItemError(
+        "(absent)",
+        "the item carried no id, and the inventory is keyed by it" +
+          (clues.length === 0 ? ", and it carried no name or parent path either" : `. It carried ${clues.join(" and ")}`),
+      );
     }
 
     if (item.deleted !== undefined) {

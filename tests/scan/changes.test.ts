@@ -35,7 +35,16 @@ describe("changesFromDeltaItems", () => {
 
   it("marks a folder and gives it size zero", () => {
     const [change] = changesFromDeltaItems([
-      { id: "i2", name: "CLIENTB", parentReference: { path: "/drives/d1/root:/2026" }, folder: {} },
+      {
+        id: "i2",
+        name: "CLIENTB",
+        parentReference: { path: "/drives/d1/root:/2026" },
+        folder: {},
+        // Graph reports a folder's size as the recursive total of its contents.
+        // A nonzero value here is what makes this test fail if the folder branch
+        // is ever removed.
+        size: 4096,
+      },
     ]);
     expect(change).toMatchObject({ kind: "upsert", record: { isFolder: true, size: 0, path: "2026/CLIENTB" } });
   });

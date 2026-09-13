@@ -18,4 +18,12 @@ describe("changesFromDeltaItems failures", () => {
       changesFromDeltaItems([{ id: "i9", parentReference: { path: "/drives/d1/root:" }, file: {} }]),
     ).toThrow(/no name/i);
   });
+
+  it("names whatever the item does carry when it has no id", () => {
+    const call = () =>
+      changesFromDeltaItems([{ name: "orphan.xlsx", parentReference: { path: "/drives/d1/root:/2026" }, file: {} }]);
+
+    expect(call).toThrow(/orphan\.xlsx/);
+    expect(call).toThrow(/\/drives\/d1\/root:\/2026/);
+  });
 });
