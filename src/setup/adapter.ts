@@ -149,8 +149,10 @@ export function createFetchSetupGraph(options: FetchSetupGraphOptions): SetupGra
       if (list.length > 1) {
         throw new Error(
           `Found ${list.length} applications named "${displayName}" in this tenant, so which one is meant is ` +
-            "ambiguous. Give the one you want a distinct --name, or remove the extra application in the Entra " +
-            "portal, then try again.",
+            "ambiguous. --name cannot tell them apart after the fact: it selects by this same display name, and " +
+            "renaming one of two applications that already share it is not something this command can do for " +
+            "you. Rename the one you do not want in the Entra portal, then pass --name matching the survivor's " +
+            "display name, or delete the extra application there directly.",
         );
       }
       const found = requireFields({ ...response, value: list[0] }, ["id", "appId"]);

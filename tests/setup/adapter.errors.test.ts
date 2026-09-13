@@ -107,7 +107,13 @@ describe("findApplicationByDisplayName ambiguous match", () => {
     );
   });
 
-  it("tells the operator how to disambiguate", async () => {
+  it("tells the operator how to disambiguate with the remedy that is actually executable", async () => {
+    // --name selects by display name; it cannot rename either of two
+    // applications that already share one. The only working remedy is to
+    // rename one in the portal first and then pass --name matching whichever
+    // application is meant to survive. A message that only pointed at --name,
+    // without mentioning the portal rename it depends on, named a step the
+    // operator could not actually carry out.
     stubFetch({
       status: 200,
       body: JSON.stringify({
@@ -118,6 +124,8 @@ describe("findApplicationByDisplayName ambiguous match", () => {
       }),
     });
 
-    await expect(graph().findApplicationByDisplayName("Ironwright Grant Issuer")).rejects.toThrow(/--name/);
+    await expect(graph().findApplicationByDisplayName("Ironwright Grant Issuer")).rejects.toThrow(
+      /rename .* in the entra portal.*--name matching the survivor/is,
+    );
   });
 });
