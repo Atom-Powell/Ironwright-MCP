@@ -118,6 +118,11 @@ export function stateStoreConformance(create: () => StateStore): void {
       changesApplied: 122,
       batches: 4,
     });
+
+    // The counts alone would pass for an implementation that reported the right
+    // numbers while applying the wrong changes, so the resulting inventory is
+    // checked too: 120 upserts less the two items deleted in the same call.
+    await expect(store.listInventory("example", "d1")).resolves.toHaveLength(118);
   });
 
   it("writes nothing for an empty change list", async () => {
