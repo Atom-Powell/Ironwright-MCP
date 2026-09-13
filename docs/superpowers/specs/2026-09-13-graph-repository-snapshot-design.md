@@ -91,10 +91,11 @@ permits, and the purity rule keeps that arrow pointing one way.
 ## Configuration
 
 One server instance per customer tenant, so there is one set of credentials rather than a set per
-profile. The tenant id, the client id and the client secret arrive as environment variables and
-are read through the existing `loadConfig`, which already refuses a malformed value by name
-rather than starting with a wrong one. The storage account arrives the same way, and its absence
-selects the in-memory store rather than failing, so a local run needs no cloud account at all.
+profile. The tenant id, the client id and the client secret arrive as environment variables, read
+by a shared config module that follows `src/server/config.ts`'s established style: refuse a
+malformed value by name rather than start with a wrong one. The storage account arrives the same
+way, and its absence selects the in-memory store rather than failing, so a local run needs no
+cloud account at all.
 
 Nothing in this slice reads a secret from disk or from a profile. Profiles are deployment
 configuration describing a repository, not a place credentials live, and the hosting phase
