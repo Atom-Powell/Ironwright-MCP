@@ -3496,6 +3496,15 @@ git commit -m "feat: add the scan command, its configuration, and its operator o
 
 This task needs the operator. It is the evidence for the claim the project was started over, and it is where phase 1 found what its tests did not.
 
+**Split, 2026-09-13.** Steps 1 through 4 need tenant access, a hand-created synthetic library, and
+working server-application credentials, none of which the implementing session has or can create;
+the server application from the phase 1 setup run is also the one whose secret was exposed and is
+awaiting deletion, so it is not available to reuse. Those four steps were not performed and remain
+the operator's to run. Step 5 was completed as a record of that: `docs/OPEN-ITEMS.md` now states
+plainly that phase 2a is verified only against fakes, names what a fake cannot prove, and gives the
+operator the same numbered procedure below to follow and record. The steps stay as written; they
+are still the procedure, just not yet executed.
+
 **Files:**
 - Modify: `docs/OPEN-ITEMS.md`
 
