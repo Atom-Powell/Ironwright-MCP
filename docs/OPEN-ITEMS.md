@@ -105,6 +105,13 @@ exposes only stubs, but the read tools return a customer's repository inventory 
 tools can bulk-rename it. Copilot Studio registration forces an auth choice regardless, so
 this is an unrecorded decision rather than a deferred one. Settle it before phase 2.
 
+**Status at the start of phase 2a, 2026-09-13.** Of the three decisions the design spec required
+before phase 2, two are settled and recorded above: the per-site grant does not accept a
+delegated token, and the MCP endpoint authenticates through Container Apps built-in Entra auth.
+The third, which delegated scopes the setup sign-in must request, is still open. It governs the
+setup command's device-code flow and not the server's app-only Graph access, so it does not block
+phase 2a and phase 2a does not close it.
+
 ## Carried into later phases
 
 **Hosting phase.** A production image built with `npm ci --omit=dev && npm run build` will

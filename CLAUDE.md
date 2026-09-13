@@ -42,14 +42,19 @@ used for development.
 
 Settled. If you think one is wrong, that is a STOP-AND-ASK, not a silent override.
 
-**Stack and transport.** TypeScript and Node with the official MCP SDK and the Microsoft Graph
-JS SDK. `StreamableHTTPServerTransport` in stateless mode with a new `McpServer` per request,
-which Copilot Studio requires and which prevents cross-request state leakage.
+**Stack and transport.** TypeScript and Node with the official MCP SDK, and plain `fetch` for
+Microsoft Graph rather than the Graph JS SDK. The SDK's value is middleware -- retry, redirect
+handling, and a batch helper -- and those are exactly the behaviors this project builds
+deliberately and tests as units, so a dependency that hides them under inherited defaults is a
+poor trade for typed models. Amended 2026-09-13; phase 1 had already gone this way without
+recording it. `StreamableHTTPServerTransport` in stateless mode with a new `McpServer` per
+request, which Copilot Studio requires and which prevents cross-request state leakage.
 
 **Graph access, in priority order.** Path-based `driveItem` addressing over ID addressing.
 `$batch` for combining requests, respecting the 20-request and 4 MB caps. Delta query with a
 persisted `deltaLink`. Microsoft Search as the cross-check for files outside the expected
-taxonomy. ETags with `If-Match` on every write.
+taxonomy. ETags with `If-Match` on every write. `$batch` and the Microsoft Search cross-check
+are built in phase 2b, with the callers that exercise them, rather than ahead of any consumer.
 
 **Excel as a database.** Persistent workbook sessions, the session header on every call,
 explicit detection and recreation of expired sessions, and a sequential single-flight queue per
