@@ -1996,6 +1996,8 @@ git commit -m "feat: add the StateStore interface, its key rules, and an in-memo
   The connection-string factory returns the clients alongside the store so the entry point can call `ensureTables` on the same pair rather than constructing a second one.
   The narrow `TableClientLike` interface exists so the transaction chunking and the delete-tolerance are testable against a fake, with no emulator and no account. `@azure/data-tables`'s real `TableClient` satisfies it structurally.
 
+  Note added during execution: Task 9's review found `lastScanAt` accepted but unobservable, so `StateStore` gained `getLastScanAt(profileId, driveId): Promise<string | undefined>`. The Table implementation below carries it, and the conformance suite pins it, so this implementation cannot pass while discarding the value.
+
 - [ ] **Step 1: Install the dependency**
 
 ```bash
@@ -2265,6 +2267,16 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
         { partitionKey: profileId, rowKey: encodeRowKey(driveId), driveId, deltaLink, lastScanAt },
         "Replace",
       );
+    },
+
+    async getLastScanAt(profileId, driveId) {
+      try {
+        const entity = await clients.deltaLinks.getEntity(profileId, encodeRowKey(driveId));
+        return typeof entity.lastScanAt === "string" ? entity.lastScanAt : undefined;
+      } catch (error) {
+        if (statusCodeOf(error) === 404) return undefined;
+        throw error;
+      }
     },
 
     async clearInventory(profileId, driveId) {
