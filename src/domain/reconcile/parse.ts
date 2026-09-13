@@ -313,7 +313,7 @@ function matchRecognizerAgainst(profile: Profile, recognizer: Recognizer, patter
  * rebuilt on every call.
  *
  * `parseFile` itself rebuilds both on every call, which is invisible in a
- * unit test that parses one file and real the first time a caller runs
+ * unit test that parses one file and costly the first time a caller runs
  * parsing across an entire repository: a repository scan calls this once per
  * file it found, potentially thousands of times, and `RegExp` compilation
  * (plus, for the canonical pattern, walking the naming template into capture
