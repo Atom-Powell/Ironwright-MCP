@@ -143,15 +143,21 @@ registry, so a tool added later inherits every check.
 
 ## Build Sequence
 
-The spec carries the full phase descriptions. Status as of 2026-09-12:
+The spec carries the full phase descriptions. Status as of 2026-09-13:
 
 1. **Foundation.** Complete and merged. Stateless transport, all ten tools registered as honest
    stubs behind the contract test, the pure profile schema, the two-layer write gate, and a
    scripted per-tenant setup verified end to end against a live tenant.
 2. **Graph performance layer.** Next. Path addressing, batch, delta, Excel sessions, the state
    store.
-3. **Reconciliation engine.** Pure and fixture-tested, no Graph dependency, so it can be built in
-   parallel with phase 2. This is the MVP checkpoint.
+3. **Reconciliation engine.** Complete, pending review. Pure and fixture-tested with no Graph
+   dependency, which is what let it be built ahead of phase 2. `reconcile` is the single public
+   entry; the four stages behind it stay internal so two tools cannot disagree about whether a
+   client is compliant. Pinned by a golden report over synthetic fixtures covering every artifact
+   state, both orphan kinds, duplicate resolution, the quarterly anchor, effective-date exclusion
+   and a client who owes nothing. The engine enforces two input contracts phase 2 must satisfy:
+   one workbook row per client, and repository files collapsed by path. This is the MVP
+   checkpoint.
 4. **Read tools wired**, then **hosting**, then **write tools**, then **Copilot Studio
    integration and governance**, then the **evaluation suite**, whose questions are
    already written in `docs/EVALUATION-QUESTIONS.md`. They exist early on purpose, so phase 3
