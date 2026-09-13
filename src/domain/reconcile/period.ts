@@ -47,6 +47,21 @@ export function anchorPeriod(period: Period, cadence: Cadence, anchor: PeriodAnc
   return fromIndex(anchorIndex);
 }
 
+/**
+ * The inclusive first and last month of a trailing window of `months` ending
+ * at `asOf`.
+ *
+ * This exists so the report can state the window it covers without restating
+ * the arithmetic: `periodsInWindow` below reads its own bounds from here, so a
+ * report header and the periods the report actually contains cannot disagree
+ * about where the window starts. A report that claims a window it did not
+ * compute is exactly the message-versus-outcome defect this project keeps
+ * relearning.
+ */
+export function windowBounds(asOf: Period, months: number): { from: Period; to: Period } {
+  return { from: fromIndex(toIndex(asOf) - months + 1), to: asOf };
+}
+
 export interface PeriodsInWindowArgs {
   /** The reference date. Never the clock: the caller supplies it. */
   asOf: Period;
@@ -81,8 +96,9 @@ export function periodsInWindow(args: PeriodsInWindowArgs): Period[] {
   const { asOf, months, cadence, anchor, effectiveFrom } = args;
   const span = CADENCE_MONTHS[cadence];
 
-  const windowStartIndex = toIndex(asOf) - months + 1;
-  const windowEndIndex = toIndex(asOf);
+  const bounds = windowBounds(asOf, months);
+  const windowStartIndex = toIndex(bounds.from);
+  const windowEndIndex = toIndex(bounds.to);
 
   const firstSpanStart = Math.floor(windowStartIndex / span) * span;
   const lastSpanStart = Math.floor(windowEndIndex / span) * span;
