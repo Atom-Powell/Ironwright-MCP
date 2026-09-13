@@ -1,0 +1,228 @@
+{
+  "profileId": "synthetic-compliance",
+  "window": {
+    "from": { "year": 2026, "month": 1 },
+    "to": { "year": 2026, "month": 6 }
+  },
+  "provenance": {
+    "scannedAt": "2026-07-06T08:30:00Z",
+    "searchCrossCheckIncluded": true,
+    "workbookSource": "/Trackers/Deliverable Tracker.xlsx#ClientRoster"
+  },
+  "artifacts": [
+    {
+      "client": "CLIENTA",
+      "deliverable": "monthly-safety",
+      "period": { "year": 2026, "month": 1 },
+      "expectedPath": "2026/CLIENTA/01-January",
+      "expectedName": "2026-01_CLIENTA_Safety.xlsx",
+      "state": "compliant",
+      "matched": {
+        "path": "2026/CLIENTA/01-January/2026-01_CLIENTA_Safety.xlsx",
+        "name": "2026-01_CLIENTA_Safety.xlsx",
+        "etag": "etag-a01"
+      }
+    },
+    {
+      "client": "CLIENTA",
+      "deliverable": "monthly-safety",
+      "period": { "year": 2026, "month": 2 },
+      "expectedPath": "2026/CLIENTA/02-February",
+      "expectedName": "2026-02_CLIENTA_Safety.xlsx",
+      "state": "compliant",
+      "matched": {
+        "path": "2026/CLIENTA/02-February/CLIENTA-202602-Safety.xlsx",
+        "name": "CLIENTA-202602-Safety.xlsx",
+        "etag": "etag-a02",
+        "recognizerId": "alias-compact"
+      }
+    },
+    {
+      "client": "CLIENTA",
+      "deliverable": "monthly-safety",
+      "period": { "year": 2026, "month": 3 },
+      "expectedPath": "2026/CLIENTA/03-March",
+      "expectedName": "2026-03_CLIENTA_Safety.xlsx",
+      "state": "misnamed",
+      "matched": {
+        "path": "2026/CLIENTA/03-March/CLIENTA Safety - March 2026.xlsx",
+        "name": "CLIENTA Safety - March 2026.xlsx",
+        "etag": "etag-a03",
+        "recognizerId": "legacy-spaced"
+      }
+    },
+    {
+      "client": "CLIENTA",
+      "deliverable": "monthly-safety",
+      "period": { "year": 2026, "month": 4 },
+      "expectedPath": "2026/CLIENTA/04-April",
+      "expectedName": "2026-04_CLIENTA_Safety.xlsx",
+      "state": "misplaced",
+      "matched": {
+        "path": "2026/Inbox/2026-04_CLIENTA_Safety.xlsx",
+        "name": "2026-04_CLIENTA_Safety.xlsx",
+        "etag": "etag-a04-inbox"
+      }
+    },
+    {
+      "client": "CLIENTA",
+      "deliverable": "monthly-safety",
+      "period": { "year": 2026, "month": 5 },
+      "expectedPath": "2026/CLIENTA/05-May",
+      "expectedName": "2026-05_CLIENTA_Safety.xlsx",
+      "state": "misnamed_and_misplaced",
+      "matched": {
+        "path": "2026/Archive/CLIENTA Safety - May 2026.xlsx",
+        "name": "CLIENTA Safety - May 2026.xlsx",
+        "etag": "etag-a05",
+        "recognizerId": "legacy-spaced"
+      }
+    },
+    {
+      "client": "CLIENTA",
+      "deliverable": "monthly-safety",
+      "period": { "year": 2026, "month": 6 },
+      "expectedPath": "2026/CLIENTA/06-June",
+      "expectedName": "2026-06_CLIENTA_Safety.xlsx",
+      "state": "missing"
+    },
+    {
+      "client": "CLIENTA",
+      "deliverable": "quarterly-audit",
+      "period": { "year": 2026, "month": 3 },
+      "expectedPath": "2026/CLIENTA/03-March",
+      "expectedName": "2026-03_CLIENTA_Audit.xlsx",
+      "state": "compliant",
+      "matched": {
+        "path": "2026/CLIENTA/03-March/2026-03_CLIENTA_Audit.xlsx",
+        "name": "2026-03_CLIENTA_Audit.xlsx",
+        "etag": "etag-a-q1"
+      }
+    },
+    {
+      "client": "CLIENTA",
+      "deliverable": "quarterly-audit",
+      "period": { "year": 2026, "month": 6 },
+      "expectedPath": "2026/CLIENTA/06-June",
+      "expectedName": "2026-06_CLIENTA_Audit.xlsx",
+      "state": "misnamed",
+      "matched": {
+        "path": "2026/CLIENTA/06-June/CLIENTA Audit 2026-04.xlsx",
+        "name": "CLIENTA Audit 2026-04.xlsx",
+        "etag": "etag-a-q2",
+        "recognizerId": "legacy-audit"
+      }
+    },
+    {
+      "client": "CLIENTB",
+      "deliverable": "monthly-safety",
+      "period": { "year": 2026, "month": 5 },
+      "expectedPath": "2026/CLIENTB/05-May",
+      "expectedName": "2026-05_CLIENTB_Safety.xlsx",
+      "state": "compliant",
+      "matched": {
+        "path": "2026/CLIENTB/05-May/2026-05_CLIENTB_Safety.xlsx",
+        "name": "2026-05_CLIENTB_Safety.xlsx",
+        "etag": "etag-b05"
+      }
+    },
+    {
+      "client": "CLIENTB",
+      "deliverable": "monthly-safety",
+      "period": { "year": 2026, "month": 6 },
+      "expectedPath": "2026/CLIENTB/06-June",
+      "expectedName": "2026-06_CLIENTB_Safety.xlsx",
+      "state": "compliant",
+      "matched": {
+        "path": "2026/CLIENTB/06-June/2026-06_CLIENTB_Safety.xlsx",
+        "name": "2026-06_CLIENTB_Safety.xlsx",
+        "etag": "etag-b06"
+      }
+    }
+  ],
+  "duplicates": [
+    {
+      "path": "2026/Archive/2026-01_CLIENTA_Safety.xlsx",
+      "name": "2026-01_CLIENTA_Safety.xlsx",
+      "slot": {
+        "client": "CLIENTA",
+        "deliverable": "monthly-safety",
+        "period": { "year": 2026, "month": 1 }
+      },
+      "state": "misplaced"
+    },
+    {
+      "path": "2026/Archive/2026-04_CLIENTA_Safety.xlsx",
+      "name": "2026-04_CLIENTA_Safety.xlsx",
+      "slot": {
+        "client": "CLIENTA",
+        "deliverable": "monthly-safety",
+        "period": { "year": 2026, "month": 4 }
+      },
+      "state": "misplaced"
+    }
+  ],
+  "orphans": [
+    {
+      "path": "2026/Archive/handover notes.txt",
+      "name": "handover notes.txt",
+      "kind": "unrecognized"
+    },
+    {
+      "path": "2026/CLIENTB/02-February/2026-02_CLIENTB_Safety.xlsx",
+      "name": "2026-02_CLIENTB_Safety.xlsx",
+      "kind": "unexpected",
+      "parsed": {
+        "client": "CLIENTB",
+        "deliverable": "monthly-safety",
+        "period": { "year": 2026, "month": 2 }
+      }
+    },
+    {
+      "path": "2026/CLIENTC/04-April/2026-04_CLIENTC_Safety.xlsx",
+      "name": "2026-04_CLIENTC_Safety.xlsx",
+      "kind": "unexpected",
+      "parsed": {
+        "client": "CLIENTC",
+        "deliverable": "monthly-safety",
+        "period": { "year": 2026, "month": 4 }
+      }
+    }
+  ],
+  "emptyFolders": ["2025/CLIENTA", "2026/CLIENTA/04-April"],
+  "clients": [
+    {
+      "client": "CLIENTA",
+      "counts": {
+        "compliant": 3,
+        "misnamed": 2,
+        "misplaced": 1,
+        "misnamed_and_misplaced": 1,
+        "missing": 1
+      },
+      "compliant": false
+    },
+    {
+      "client": "CLIENTB",
+      "counts": {
+        "compliant": 2,
+        "misnamed": 0,
+        "misplaced": 0,
+        "misnamed_and_misplaced": 0,
+        "missing": 0
+      },
+      "compliant": true
+    },
+    {
+      "client": "CLIENTC",
+      "counts": {
+        "compliant": 0,
+        "misnamed": 0,
+        "misplaced": 0,
+        "misnamed_and_misplaced": 0,
+        "missing": 0
+      },
+      "compliant": true
+    }
+  ]
+}

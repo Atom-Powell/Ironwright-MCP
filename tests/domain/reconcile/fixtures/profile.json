@@ -1,0 +1,61 @@
+{
+  "profileId": "synthetic-compliance",
+  "identity": {
+    "siteUrl": "https://contoso.sharepoint.com/sites/SyntheticCompliance",
+    "library": "Client Deliverables",
+    "workbookPath": "/Trackers/Deliverable Tracker.xlsx"
+  },
+  "taxonomy": {
+    "segments": ["{year}", "{client}", "{month:02}-{monthName}"]
+  },
+  "naming": {
+    "template": "{year}-{month:02}_{client}_{deliverable}.xlsx",
+    "recognizers": [
+      {
+        "id": "alias-compact",
+        "pattern": "^(?<client>[A-Z0-9]+)-(?<year>\\d{4})(?<month>\\d{2})-Safety\\.xlsx$",
+        "deliverable": "monthly-safety",
+        "verdict": "compliant"
+      },
+      {
+        "id": "legacy-spaced",
+        "pattern": "^(?<client>[A-Z0-9]+) Safety - (?<monthName>[A-Za-z]+) (?<year>\\d{4})\\.xlsx$",
+        "deliverable": "monthly-safety",
+        "verdict": "misnamed"
+      },
+      {
+        "id": "legacy-audit",
+        "pattern": "^(?<client>[A-Z0-9]+) Audit (?<year>\\d{4})-(?<month>\\d{2})\\.xlsx$",
+        "deliverable": "quarterly-audit",
+        "verdict": "misnamed"
+      }
+    ]
+  },
+  "deliverables": [
+    {
+      "id": "quarterly-audit",
+      "token": "Audit",
+      "cadence": "quarterly",
+      "periodAnchor": "last",
+      "appliesTo": { "workbookField": "quarterlyAudit", "truthy": true }
+    },
+    {
+      "id": "monthly-safety",
+      "token": "Safety",
+      "cadence": "monthly",
+      "periodAnchor": "last",
+      "appliesTo": { "workbookField": "monthlySafety", "truthy": true }
+    }
+  ],
+  "workbookMapping": {
+    "source": { "kind": "table", "name": "ClientRoster" },
+    "headerRow": 1,
+    "columns": {
+      "client": "Client",
+      "monthlySafety": "Monthly Safety",
+      "quarterlyAudit": "Quarterly Audit",
+      "effectiveFrom": "Effective From"
+    }
+  },
+  "window": { "mode": "rolling", "months": 6, "respectEffectiveFrom": true }
+}

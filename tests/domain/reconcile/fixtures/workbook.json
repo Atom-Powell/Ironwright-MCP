@@ -1,0 +1,20 @@
+{
+  "rows": [
+    {
+      "client": "CLIENTB",
+      "fields": { "monthlySafety": "Yes", "quarterlyAudit": "No" },
+      "effectiveFrom": "2026-05-15"
+    },
+    {
+      "client": "CLIENTC",
+      "fields": { "monthlySafety": "No", "quarterlyAudit": "No" },
+      "effectiveFrom": "2026-01-01"
+    },
+    {
+      "client": "CLIENTA",
+      "fields": { "monthlySafety": "Yes", "quarterlyAudit": "Yes" },
+      "effectiveFrom": "2024-01-01"
+    }
+  ],
+  "source": "/Trackers/Deliverable Tracker.xlsx#ClientRoster"
+}

@@ -1,0 +1,123 @@
+{
+  "files": [
+    {
+      "path": "2026/CLIENTA/01-January/2026-01_CLIENTA_Safety.xlsx",
+      "name": "2026-01_CLIENTA_Safety.xlsx",
+      "size": 24576,
+      "modified": "2026-02-03T09:15:00Z",
+      "etag": "etag-a01"
+    },
+    {
+      "path": "2026/Archive/2026-01_CLIENTA_Safety.xlsx",
+      "name": "2026-01_CLIENTA_Safety.xlsx",
+      "size": 24576,
+      "modified": "2026-06-01T11:00:00Z",
+      "etag": "etag-a01-archive"
+    },
+    {
+      "path": "2026/CLIENTA/02-February/CLIENTA-202602-Safety.xlsx",
+      "name": "CLIENTA-202602-Safety.xlsx",
+      "size": 23040,
+      "modified": "2026-03-02T08:00:00Z",
+      "etag": "etag-a02"
+    },
+    {
+      "path": "2026/CLIENTA/03-March/CLIENTA Safety - March 2026.xlsx",
+      "name": "CLIENTA Safety - March 2026.xlsx",
+      "size": 22016,
+      "modified": "2026-04-01T10:30:00Z",
+      "etag": "etag-a03"
+    },
+    {
+      "path": "2026/Archive/2026-04_CLIENTA_Safety.xlsx",
+      "name": "2026-04_CLIENTA_Safety.xlsx",
+      "size": 25600,
+      "modified": "2026-05-10T00:00:00Z",
+      "etag": "etag-a04-archive"
+    },
+    {
+      "path": "2026/Inbox/2026-04_CLIENTA_Safety.xlsx",
+      "name": "2026-04_CLIENTA_Safety.xlsx",
+      "size": 25600,
+      "modified": "2026-05-20T00:00:00Z",
+      "etag": "etag-a04-inbox"
+    },
+    {
+      "path": "2026/Archive/CLIENTA Safety - May 2026.xlsx",
+      "name": "CLIENTA Safety - May 2026.xlsx",
+      "size": 21504,
+      "modified": "2026-06-02T14:00:00Z",
+      "etag": "etag-a05"
+    },
+    {
+      "path": "2026/CLIENTA/03-March/2026-03_CLIENTA_Audit.xlsx",
+      "name": "2026-03_CLIENTA_Audit.xlsx",
+      "size": 40960,
+      "modified": "2026-04-05T12:00:00Z",
+      "etag": "etag-a-q1"
+    },
+    {
+      "path": "2026/CLIENTA/06-June/CLIENTA Audit 2026-04.xlsx",
+      "name": "CLIENTA Audit 2026-04.xlsx",
+      "size": 41984,
+      "modified": "2026-07-01T09:00:00Z",
+      "etag": "etag-a-q2"
+    },
+    {
+      "path": "2026/CLIENTB/05-May/2026-05_CLIENTB_Safety.xlsx",
+      "name": "2026-05_CLIENTB_Safety.xlsx",
+      "size": 19456,
+      "modified": "2026-06-03T09:00:00Z",
+      "etag": "etag-b05"
+    },
+    {
+      "path": "2026/CLIENTB/06-June/2026-06_CLIENTB_Safety.xlsx",
+      "name": "2026-06_CLIENTB_Safety.xlsx",
+      "size": 19456,
+      "modified": "2026-07-02T09:00:00Z",
+      "etag": "etag-b06"
+    },
+    {
+      "path": "2026/CLIENTB/02-February/2026-02_CLIENTB_Safety.xlsx",
+      "name": "2026-02_CLIENTB_Safety.xlsx",
+      "size": 18944,
+      "modified": "2026-03-04T09:00:00Z",
+      "etag": "etag-b02"
+    },
+    {
+      "path": "2026/CLIENTC/04-April/2026-04_CLIENTC_Safety.xlsx",
+      "name": "2026-04_CLIENTC_Safety.xlsx",
+      "size": 17920,
+      "modified": "2026-05-04T09:00:00Z",
+      "etag": "etag-c04"
+    },
+    {
+      "path": "2026/Archive/handover notes.txt",
+      "name": "handover notes.txt",
+      "size": 1024,
+      "modified": "2026-01-09T16:45:00Z",
+      "etag": "etag-notes"
+    }
+  ],
+  "folderPaths": [
+    "2026/CLIENTB/06-June",
+    "2026",
+    "2026/Archive",
+    "2026/Inbox",
+    "2026/CLIENTA",
+    "2026/CLIENTA/01-January",
+    "2026/CLIENTA/02-February",
+    "2026/CLIENTA/03-March",
+    "2026/CLIENTA/04-April",
+    "2026/CLIENTA/06-June",
+    "2026/CLIENTB",
+    "2026/CLIENTB/02-February",
+    "2026/CLIENTB/05-May",
+    "2026/CLIENTC",
+    "2026/CLIENTC/04-April",
+    "2025",
+    "2025/CLIENTA"
+  ],
+  "scannedAt": "2026-07-06T08:30:00Z",
+  "searchCrossCheckIncluded": true
+}
