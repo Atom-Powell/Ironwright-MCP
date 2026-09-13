@@ -143,6 +143,42 @@ describe("parseFile: canonical matching", () => {
   });
 });
 
+// A canonical match is not "the regex matched the shape"; it also has to
+// round-trip through renderTemplate back to the exact original filename.
+// {month:02} above is one placeholder where a loose capture body let through
+// something the renderer could never write; {monthName} and plain {month}
+// are two more, and the round-trip check is what closes all three (and any
+// future one) by construction instead of needing a per-token argument about
+// whether its capture body happens to be tight enough.
+describe("parseFile: canonical round-trip against the renderer's exact output", () => {
+  it("does not accept a wrongly-cased month name against a template declaring {monthName}", () => {
+    const profile = buildProfile({ template: "{year}-{monthName}_{client}_{deliverable}.xlsx", recognizers: [] });
+    // renderTemplate can only ever produce "May" here, never "MAY": the
+    // matcher's [A-Za-z]+ body accepts either, so only the round-trip check
+    // tells them apart.
+    const file = buildFile("2026-MAY_CLIENTA_Training.xlsx", "2026/CLIENTA/05-May/2026-MAY_CLIENTA_Training.xlsx");
+
+    expect(parseFile(profile, file)).toEqual({ recognized: false, file });
+  });
+
+  it("does not accept a three-letter month abbreviation against a template declaring {monthName}", () => {
+    const profile = buildProfile({ template: "{year}-{monthName}_{client}_{deliverable}.xlsx", recognizers: [] });
+    // renderTemplate can only ever produce "January", never "Jan".
+    const file = buildFile("2026-Jan_CLIENTA_Training.xlsx", "2026/CLIENTA/01-January/2026-Jan_CLIENTA_Training.xlsx");
+
+    expect(parseFile(profile, file)).toEqual({ recognized: false, file });
+  });
+
+  it("does not accept a zero-padded month against a template declaring plain {month}", () => {
+    const profile = buildProfile({ template: "{year}-{month}_{client}_{deliverable}.xlsx", recognizers: [] });
+    // renderTemplate never pads a plain {month}: it can only ever produce
+    // "5" here, never "05".
+    const file = buildFile("2026-05_CLIENTA_Training.xlsx", "2026/CLIENTA/05-May/2026-05_CLIENTA_Training.xlsx");
+
+    expect(parseFile(profile, file)).toEqual({ recognized: false, file });
+  });
+});
+
 describe("parseFile: recognizers", () => {
   it("parses a misnamed recognizer match, carrying its verdict and id, and normalizes a captured month name to the same period a numeric canonical filename produces", () => {
     const profile = buildProfile();

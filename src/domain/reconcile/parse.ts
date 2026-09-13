@@ -2,6 +2,7 @@ import { TOKEN_PATTERN } from "../profile/placeholders.js";
 import type { Profile } from "../profile/schema.js";
 import { MONTH_NAMES } from "./months.js";
 import { anchorPeriod } from "./period.js";
+import { renderTemplate } from "./render.js";
 import type { ParsedFile, Period, RepositoryFile } from "./types.js";
 
 type Deliverable = Profile["deliverables"][number];
@@ -19,6 +20,16 @@ interface RawMatch {
   client: string;
   deliverable: string;
   period: Period;
+}
+
+/**
+ * A raw match plus the deliverable object it resolved to, so a caller that
+ * needs the deliverable's token (canonical round-trip rendering) or its
+ * cadence rules is not forced to look it up a second time.
+ */
+interface Resolved {
+  match: RawMatch;
+  deliverable: Deliverable;
 }
 
 /**
@@ -228,7 +239,7 @@ function tokenToDeliverableId(profile: Profile, token: string): string | undefin
  * later instead of re-deriving the deliverable's cadence rules a second
  * time.
  */
-function finishMatch(profile: Profile, groups: Captures, fallbackDeliverableId?: string): RawMatch | undefined {
+function finishMatch(profile: Profile, groups: Captures, fallbackDeliverableId?: string): Resolved | undefined {
   const client = groups.client;
   if (client === undefined) return undefined;
 
@@ -242,27 +253,59 @@ function finishMatch(profile: Profile, groups: Captures, fallbackDeliverableId?:
   if (!rawPeriod) return undefined;
 
   const period = anchorPeriod(rawPeriod, deliverable.cadence, deliverable.periodAnchor);
-  return { client, deliverable: deliverableId, period };
+  return { match: { client, deliverable: deliverableId, period }, deliverable };
 }
 
+/**
+ * A canonical match is not "the regex matched the shape"; it is "the regex
+ * matched the shape, and rendering the values it captured reproduces this
+ * exact filename." That second check is what makes the matcher's canonical
+ * set exactly the renderer's output set, for every placeholder, rather than
+ * a per-token argument about whether a given capture body happens to be
+ * loose enough to admit something the renderer could never write. Tightening
+ * each capture body (as `{month:02}` does, above) is still worth doing as a
+ * fast, cheap rejection, but the round-trip is what actually guarantees the
+ * property, including for any placeholder added later that nobody remembers
+ * to tighten by hand: `MAY`, `may` and `Jan` all satisfy `[A-Za-z]+` for a
+ * `{monthName}` capture, and `05` satisfies `\d{1,2}` for a plain `{month}`
+ * capture, but `renderTemplate` can only ever produce `May` or `5` from
+ * those same values, so none of the three round-trips.
+ *
+ * A shape match that fails to round-trip is not the same as no match at all:
+ * it is a real client, deliverable and period, spelled in a way the profile
+ * did not render. Returning undefined here lets `parseFile` fall through to
+ * the recognizers, which is exactly the mechanism a profile has for saying
+ * which near-misses it accepts (and under which verdict) versus which ones
+ * it wants surfaced as unrecognized. Canonical matching should not silently
+ * grant its own leniency that bypasses that declaration.
+ */
 function matchCanonical(profile: Profile, name: string): RawMatch | undefined {
   const pattern = buildCanonicalPattern(profile);
   const match = pattern.exec(name);
   if (!match?.groups) return undefined;
-  return finishMatch(profile, match.groups);
+
+  const resolved = finishMatch(profile, match.groups);
+  if (!resolved) return undefined;
+
+  const context = { period: resolved.match.period, client: resolved.match.client, deliverable: resolved.deliverable.token };
+  if (renderTemplate(profile.naming.template, context) !== name) return undefined;
+
+  return resolved.match;
 }
 
 /**
  * Recognizers already carry regular expressions with named captures, applied
  * to the filename as authored in the profile: unlike the canonical matcher,
  * there is nothing to build here beyond compiling the pattern the profile
- * declared.
+ * declared, and no round-trip to check. A recognizer's pattern is not
+ * expected to equal anything `renderTemplate` would produce; it exists
+ * precisely to accept a shape the renderer does not.
  */
 function matchRecognizer(profile: Profile, recognizer: Recognizer, name: string): RawMatch | undefined {
   const pattern = new RegExp(recognizer.pattern);
   const match = pattern.exec(name);
   if (!match?.groups) return undefined;
-  return finishMatch(profile, match.groups, recognizer.deliverable);
+  return finishMatch(profile, match.groups, recognizer.deliverable)?.match;
 }
 
 /**
