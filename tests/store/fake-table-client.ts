@@ -45,6 +45,19 @@ export class FakeTableClient implements TableClientLike {
   async submitTransaction(actions: Array<["upsert", TableEntityLike, "Replace"] | ["delete", TableEntityLike]>): Promise<void> {
     this.transactions += 1;
     if (actions.length > 100) throw new Error("a transaction may not exceed 100 entities");
+
+    // A real Azure Table transaction is atomic: it must not leave some of its
+    // actions applied and others not. Every delete target is validated before
+    // anything is written, so a row that is already gone fails the whole
+    // transaction rather than the transaction silently applying everything else.
+    for (const action of actions) {
+      if (action[0] === "delete" && !this.rows.has(`${action[1].partitionKey}/${action[1].rowKey}`)) {
+        const error: Error & { statusCode?: number } = new Error("not found");
+        error.statusCode = 404;
+        throw error;
+      }
+    }
+
     for (const action of actions) {
       if (action[0] === "upsert") {
         await this.upsertEntity(action[1]);

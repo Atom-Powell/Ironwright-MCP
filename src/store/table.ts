@@ -34,6 +34,16 @@ function statusCodeOf(error: unknown): number | undefined {
   return typeof code === "number" ? code : undefined;
 }
 
+/**
+ * An OData string literal is single-quoted and escapes an embedded quote by
+ * doubling it. A drive id comes from Graph and this code does not control its
+ * alphabet, so interpolating one raw would let a single quote close the literal
+ * early and silently change which partition the query matches.
+ */
+function partitionFilter(partitionKey: string): string {
+  return `PartitionKey eq '${partitionKey.replace(/'/g, "''")}'`;
+}
+
 function toRecord(entity: TableEntityLike): InventoryRecord {
   return {
     itemId: typeof entity.itemId === "string" ? entity.itemId : decodeRowKey(entity.rowKey),
@@ -95,15 +105,32 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
       const partitionKey = inventoryPartitionKey(profileId, driveId);
       const rowKeys: string[] = [];
       for await (const entity of clients.inventory.listEntities({
-        queryOptions: { filter: `PartitionKey eq '${partitionKey}'` },
+        queryOptions: { filter: partitionFilter(partitionKey) },
       })) {
         rowKeys.push(entity.rowKey);
       }
 
       for (const group of chunk(rowKeys, MAX_TRANSACTION_SIZE)) {
-        await clients.inventory.submitTransaction(
-          group.map((rowKey): ["delete", TableEntityLike] => ["delete", { partitionKey, rowKey }]),
-        );
+        try {
+          await clients.inventory.submitTransaction(
+            group.map((rowKey): ["delete", TableEntityLike] => ["delete", { partitionKey, rowKey }]),
+          );
+        } catch {
+          // A transaction fails as a whole if any row it names is already gone,
+          // and these rows were listed moments earlier rather than locked, so a
+          // concurrent scan can remove one in between. Retrying the chunk one row
+          // at a time clears what is still there, where abandoning it would leave
+          // a resync with a partly stale inventory and no sign of that in the
+          // report. A failure that is not a missing row still propagates, because
+          // the individual deletes below raise it.
+          for (const rowKey of group) {
+            try {
+              await clients.inventory.deleteEntity(partitionKey, rowKey);
+            } catch (individual) {
+              if (statusCodeOf(individual) !== 404) throw individual;
+            }
+          }
+        }
       }
     },
 
@@ -148,7 +175,7 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
       const partitionKey = inventoryPartitionKey(profileId, driveId);
       const records: InventoryRecord[] = [];
       for await (const entity of clients.inventory.listEntities({
-        queryOptions: { filter: `PartitionKey eq '${partitionKey}'` },
+        queryOptions: { filter: partitionFilter(partitionKey) },
       })) {
         records.push(toRecord(entity));
       }

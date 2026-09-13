@@ -56,4 +56,17 @@ describe("Azure Table state store write shape", () => {
     expect(stored?.itemId).toBe("has/slash");
     await expect(store.listInventory("example", "d1")).resolves.toMatchObject([{ itemId: "has/slash" }]);
   });
+
+  it("doubles a single quote in the partition filter so a drive id cannot break out of the literal", async () => {
+    const inventory = new FakeTableClient();
+    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory });
+    const filters: string[] = [];
+    inventory.listEntities = async function* (options?: { queryOptions?: { filter?: string } }) {
+      filters.push(options?.queryOptions?.filter ?? "");
+    };
+
+    await store.listInventory("example", "d'1");
+
+    expect(filters[0]).toBe("PartitionKey eq 'example|d''1'");
+  });
 });
