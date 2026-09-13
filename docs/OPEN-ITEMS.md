@@ -189,6 +189,30 @@ own token exchange still rolls back an otherwise-correct application when it exh
 retries on a propagation error, which is the same destroy-correct-work-over-timing shape that
 was deliberately rejected for the verification path.
 
+## Should one bad workbook row abort the whole reconciliation?
+
+Raised 2026-09-13 during the reconciliation engine's second task.
+
+A malformed `effectiveFrom` cell throws, and the throw happens partway through the loop over
+clients, so a single date typed as `15/08/2026` in one client's row aborts the report for every
+client. The immediate fix was to make that failure name the client and quote the value, so an
+operator can fix the cell rather than bisecting a spreadsheet. The behavior itself was left
+alone deliberately.
+
+The alternative is to skip the offending row, record it as an issue, and report the rest. That
+is probably right for a hand-maintained tracker, where one typo in fifty rows should not cost
+the other forty-nine. It is also a change to the report's shape, since those issues need
+somewhere to live, which touches the types, the assembly stage and the golden fixture.
+
+Settle it when the engine first runs against a real workbook, because that is when we will know
+whether bad cells are rare enough that failing loudly is the better behavior. Deciding now would
+be guessing about data nobody has looked at.
+
+Worth noting the tension: this project's stated posture is to fail loudly rather than guess, and
+a reconciliation that silently omits a client is exactly the kind of quiet incompleteness the
+rest of the design refuses. Whatever is chosen, the omission has to be visible in the report
+rather than only in a log.
+
 ## Teardown has a hole for the server application
 
 Found while cleaning up after the live run, 2026-09-12.
