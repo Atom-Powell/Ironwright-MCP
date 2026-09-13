@@ -1,7 +1,12 @@
-# Phase 1 follow-ups
+# Open items
 
-Open items carried out of phase 1's reviews. Recorded here rather than in a scratch ledger
-because the later phases that need them will not read a scratch ledger.
+The project's register of decisions awaiting a human, work deliberately deferred, and an honest
+account of what is verified against a live tenant versus only against fakes.
+
+It began as a list of phase 1's review leftovers and outgrew that name, which is why it no
+longer carries it. Things land here when they need to survive past the session that found them,
+because a scratch ledger will not be read by the phase that needs it. Sections are roughly
+ordered by when they will matter, not by when they were written.
 
 ## Decisions required before the first live setup run
 
@@ -183,6 +188,24 @@ therefore cannot distinguish a verified run from an unverified one. And the new 
 own token exchange still rolls back an otherwise-correct application when it exhausts its
 retries on a propagation error, which is the same destroy-correct-work-over-timing shape that
 was deliberately rejected for the verification path.
+
+## Found by using the tool, 2026-09-12
+
+`--delete-bootstrap` was run against a tenant whose grant issuer had already been removed by
+hand. The lookup correctly found nothing and the message correctly said no action was needed.
+It also printed "Bootstrap deletion failed" and exited 1.
+
+Those disagree. If the grant issuer is already gone, the outcome the operator wanted is true,
+and reporting a failure is wrong. A script wrapping this to enforce teardown across tenants
+would read a correctly torn-down tenant as a broken one, and would retry or alert on it.
+
+Already-absent should be a success with its own message, distinct from both a completed
+deletion and a real failure, and should exit zero.
+
+This is worth recording for what it says about the testing, not just the bug. Nine reviewers,
+an enumeration requirement over every operator-facing message, and 352 tests did not surface
+it, because all of them reasoned about failure paths in the abstract. None asked what "already
+done" should mean. The first live use found it in one run.
 
 ## Verified end to end on 2026-09-12
 

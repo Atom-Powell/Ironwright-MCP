@@ -354,7 +354,9 @@ copy of production.
    cross-environment portability, and Agent 365 BYO MCP graduation when governance bandwidth
    allows. Work IQ as a complementary primitive layer is re-evaluated here against current
    documentation rather than against earlier assumptions.
-8. **Evaluation suite.** Roughly ten realistic, read-only, independently verifiable questions
+8. **Evaluation suite.** The questions are written already, in
+   `docs/EVALUATION-QUESTIONS.md`, deliberately ahead of the engine so phase 3 builds toward
+   them. Roughly ten realistic, read-only, independently verifiable questions
    requiring multi-tool reasoning against a real repository and workbook. This is the actual
    test of whether the break-the-mold goal was met.
 
@@ -414,7 +416,7 @@ message printed four lines above it.
 ## Watch items
 
 Phase 1's reviews left open questions and carried-forward risks that later phases must read.
-They are recorded in `docs/PHASE-1-FOLLOW-UPS.md`. Three of them require a decision before
+They are recorded in `docs/OPEN-ITEMS.md`. Three of them require a decision before
 phase 2 begins: whether the per-site grant accepts a delegated token, which delegated scopes
 the setup sign-in must request, and how the MCP endpoint authenticates callers.
 

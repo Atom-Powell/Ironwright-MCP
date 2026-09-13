@@ -207,7 +207,7 @@ git commit -m "feat: point the operator at grant issuer teardown when setup succ
 ### Task 3: Documentation
 
 **Files:**
-- Modify: `docs/SETUP.md`, `docs/PHASE-1-FOLLOW-UPS.md`
+- Modify: `docs/SETUP.md`, `docs/OPEN-ITEMS.md`
 
 - [ ] **Step 1: Update `docs/SETUP.md`**
 
@@ -217,7 +217,7 @@ Say that this matters more in a customer tenant than in a developer one, and why
 
 Also note what deletion does not affect. The deployed server holds `Sites.Selected` plus its own per-site grant and keeps working after the grant issuer is gone.
 
-- [ ] **Step 2: Update `docs/PHASE-1-FOLLOW-UPS.md`**
+- [ ] **Step 2: Update `docs/OPEN-ITEMS.md`**
 
 Record that the teardown gap is closed, with the commit. Note under what remains unexercised that the delete path, like every other failure path, has been tested only against fakes.
 
