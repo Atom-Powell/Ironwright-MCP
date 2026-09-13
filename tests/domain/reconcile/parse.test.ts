@@ -106,6 +106,41 @@ describe("parseFile: canonical matching", () => {
 
     expect(parseFile(profile, file)).toEqual({ recognized: false, file });
   });
+
+  // {month:02} always zero-pads when renderTemplate produces it, so a
+  // canonical name built from this template can never contain an unpadded
+  // digit here. An unpadded month must not parse as canonical: that would
+  // make the matcher's canonical set a strict superset of what the renderer
+  // can ever emit, which is exactly the two-definitions-of-canonical drift
+  // this task exists to prevent, and Task 4 turns "canonical" straight into
+  // "compliant" without re-checking it.
+  it("does not accept an unpadded month against a template declaring {month:02}", () => {
+    const profile = buildProfile();
+    const file = buildFile("2026-5_CLIENTA_Training.xlsx", "2026/CLIENTA/05-May/2026-5_CLIENTA_Training.xlsx");
+
+    expect(parseFile(profile, file)).toEqual({ recognized: false, file });
+  });
+
+  // The client capture is a plain wildcard matching literal text, not a
+  // string re-inserted into the pattern, so a client name containing regex
+  // metacharacters is data, not syntax. This is a regression test for that
+  // structural safety rather than a fix for a known bug: nothing here is
+  // expected to fail, but a future refactor that started building the
+  // pattern by string-concatenating the client name into it, instead of
+  // matching it out with a capture group, would break this silently.
+  it("parses a canonical filename whose client name contains regex metacharacters as ordinary literal text", () => {
+    const profile = buildProfile();
+    const file = buildFile("2026-05_A+B Inc_Training.xlsx", "2026/A+B Inc/05-May/2026-05_A+B Inc_Training.xlsx");
+
+    expect(parseFile(profile, file)).toEqual({
+      recognized: true,
+      file,
+      client: "A+B Inc",
+      deliverable: "monthly-training",
+      period: { year: 2026, month: 5 },
+      nameVerdict: "canonical",
+    });
+  });
 });
 
 describe("parseFile: recognizers", () => {
@@ -153,6 +188,38 @@ describe("parseFile: recognizers", () => {
       period: { year: 2026, month: 5 },
       nameVerdict: "compliant",
       recognizerId: "compact-alias",
+    });
+  });
+
+  // Only the canonical path exercised the token-to-id reverse mapping above.
+  // A recognizer's own pattern can capture a {deliverable} group too, and it
+  // runs through the same shared code, so this pins that the recognizer path
+  // gets the same treatment. The recognizer's own declared `deliverable`
+  // field is deliberately a different id ("monthly-training") from what the
+  // filename actually names ("TrainingAdvanced" -> "advanced-training"), so
+  // the assertion only passes if the captured token wins over the fallback
+  // field and gets correctly reverse-mapped, not if the fallback leaked in.
+  it("reverse-maps a recognizer's own captured deliverable token to its id, preferring the capture over the recognizer's declared fallback id", () => {
+    const profile = buildProfile({
+      recognizers: [
+        {
+          id: "legacy-token-capture",
+          pattern: "^(?<client>[A-Z0-9]+)_LegacyAlt_(?<year>\\d{4})-(?<month>\\d{2})_(?<deliverable>Training|TrainingAdvanced)\\.xlsx$",
+          deliverable: "monthly-training",
+          verdict: "misnamed",
+        },
+      ],
+    });
+    const file = buildFile("CLIENTC_LegacyAlt_2026-05_TrainingAdvanced.xlsx", "2026/CLIENTC/05-May/CLIENTC_LegacyAlt_2026-05_TrainingAdvanced.xlsx");
+
+    expect(parseFile(profile, file)).toEqual({
+      recognized: true,
+      file,
+      client: "CLIENTC",
+      deliverable: "advanced-training",
+      period: { year: 2026, month: 5 },
+      nameVerdict: "misnamed",
+      recognizerId: "legacy-token-capture",
     });
   });
 

@@ -117,11 +117,17 @@ function buildCanonicalPattern(profile: Profile): RegExp {
         source += namedGroup("year", "\\d{4}", seen);
         break;
       case "month":
-      case "month:02":
-        // Both placeholders read the same calendar month; a canonical name
-        // uses whichever one the template chose for padding, so one or two
-        // digits are both accepted here regardless of which produced it.
         source += namedGroup("month", "\\d{1,2}", seen);
+        break;
+      case "month:02":
+        // Deliberately a stricter two-digit body than plain {month}, not the
+        // same \d{1,2}: renderTemplate always zero-pads a {month:02} token,
+        // so a canonical name built from this template can never contain a
+        // single unpadded digit here. Accepting one or two digits anyway
+        // would make the matcher's canonical set a strict superset of what
+        // the renderer can ever produce, and Task 4 turns a "canonical"
+        // verdict straight into "compliant" without re-checking it.
+        source += namedGroup("month", "\\d{2}", seen);
         break;
       case "monthName":
         source += namedGroup("monthName", "[A-Za-z]+", seen);
