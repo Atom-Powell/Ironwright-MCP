@@ -153,8 +153,9 @@ The spec carries the full phase descriptions. Status as of 2026-09-12:
 3. **Reconciliation engine.** Pure and fixture-tested, no Graph dependency, so it can be built in
    parallel with phase 2. This is the MVP checkpoint.
 4. **Read tools wired**, then **hosting**, then **write tools**, then **Copilot Studio
-   integration and governance**, then the **evaluation suite** of roughly ten realistic
-   multi-tool questions, which is the actual test of whether the break-the-mold goal was met.
+   integration and governance**, then the **evaluation suite**, whose questions are
+   already written in `docs/EVALUATION-QUESTIONS.md`. They exist early on purpose, so phase 3
+   has a concrete target rather than inventing its own test afterward.
 
 Three decisions block phase 2 and are written up in `docs/OPEN-ITEMS.md`. Read them
 before starting it.

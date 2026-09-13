@@ -354,7 +354,9 @@ copy of production.
    cross-environment portability, and Agent 365 BYO MCP graduation when governance bandwidth
    allows. Work IQ as a complementary primitive layer is re-evaluated here against current
    documentation rather than against earlier assumptions.
-8. **Evaluation suite.** Roughly ten realistic, read-only, independently verifiable questions
+8. **Evaluation suite.** The questions are written already, in
+   `docs/EVALUATION-QUESTIONS.md`, deliberately ahead of the engine so phase 3 builds toward
+   them. Roughly ten realistic, read-only, independently verifiable questions
    requiring multi-tool reasoning against a real repository and workbook. This is the actual
    test of whether the break-the-mold goal was met.
 
