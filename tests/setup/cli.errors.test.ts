@@ -264,4 +264,47 @@ describe("describeSetupFailure", () => {
     expect(message).not.toMatch(/\bat\s+\S+\s+\(.*:\d+:\d+\)/);
     expect(message).not.toContain("node_modules");
   });
+
+  it("prefixes a normal run's failure as a setup failure by default", () => {
+    const message = describeSetupFailure(new Error("missing required argument --tenant=<value>"));
+
+    expect(message).toMatch(/^Setup failed:/);
+  });
+
+  it("prefixes a --delete-bootstrap failure as a deletion failure, not a setup failure", () => {
+    // A teardown refusal reading "Setup failed: No application named ...
+    // exists ... so there is nothing to delete" implies a setup attempt was
+    // made and failed, when nothing was being set up: this mode only deletes.
+    const message = describeSetupFailure(
+      new Error('No application named "Ironwright Grant Issuer" exists in this tenant, so there is nothing to delete.'),
+      "delete-bootstrap",
+    );
+
+    expect(message).toMatch(/^Bootstrap deletion failed:/);
+    expect(message).not.toMatch(/^Setup failed:/);
+  });
+
+  it("prefixes a --create-bootstrap failure as a creation failure, not a setup failure", () => {
+    const message = describeSetupFailure(
+      new Error('An application named "Ironwright Grant Issuer" already exists in this tenant.'),
+      "create-bootstrap",
+    );
+
+    expect(message).toMatch(/^Bootstrap creation failed:/);
+    expect(message).not.toMatch(/^Setup failed:/);
+  });
+
+  it("applies the mode-specific prefix to a GraphRequestError too, not just a plain Error", () => {
+    const message = describeSetupFailure(
+      new GraphRequestError({
+        method: "DELETE",
+        path: "/applications/object-1",
+        status: 403,
+        body: '{"error":{"code":"Authorization_RequestDenied"}}',
+      }),
+      "delete-bootstrap",
+    );
+
+    expect(message).toMatch(/^Bootstrap deletion failed:/);
+  });
 });

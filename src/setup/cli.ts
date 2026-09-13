@@ -269,37 +269,134 @@ export function describeBootstrapSuccess(result: { appId: string; secret: string
  * assignment it held, including Sites.FullControl.All. An expired secret only
  * disables one credential and leaves that assignment, and the application
  * that carries it, in place for anyone able to add a new secret.
+ *
+ * That claim still needs a caveat DELETE /applications does not remove: Graph
+ * soft-deletes an application, holding it in the tenant's deleted items for
+ * 30 days where the same Application Administrator rights this command
+ * needed can restore it. This paragraph reads as the answer to a client
+ * security review, and a 30-day restore window is exactly the kind of thing
+ * that review would ask about, so it names the window and the permanent purge
+ * available for it, rather than leaving deletion sounding more final than it
+ * is in the live directory.
+ *
+ * It also names the one piece of operator cleanup this command cannot do
+ * itself: IW_BOOTSTRAP_CLIENT_ID and IW_BOOTSTRAP_CLIENT_SECRET, wherever they
+ * were stored, now name an application that no longer exists. Left in place,
+ * a later normal run picks them up and fails at its preflight with a
+ * rejected-credentials message that reads like a wrong secret, not a deleted
+ * application, which sends whoever hits it after the wrong cause entirely.
  */
 export function describeDeleteBootstrapSuccess(result: { appId: string }): string {
   return (
     `Deleted application ${result.appId}. That removes the standing Sites.FullControl.All permission it held, not ` +
-    "just its secret: a deleted application keeps no access, where an expired secret alone would not have. " +
-    "Onboarding another site later needs a grant issuer again, so run this command with --create-bootstrap first."
+    "just its secret: a deleted application keeps no access, where an expired secret alone would not have. This " +
+    "delete is a soft delete in the directory: the application is recoverable for 30 days by anyone with the same " +
+    "Application Administrator rights this command needed, so if that recovery window matters, for example ahead " +
+    "of a client security review, purge it permanently from deleted items in the Entra admin portal rather than " +
+    "relying on this deletion alone. Remove IW_BOOTSTRAP_CLIENT_ID and IW_BOOTSTRAP_CLIENT_SECRET from wherever " +
+    "they were stored: they now name an application that no longer exists, and a later run that still reads them " +
+    "will fail with a rejected-credentials message that reads like a wrong secret rather than a deleted " +
+    "application. Onboarding another site later needs a grant issuer again, so run this command with " +
+    "--create-bootstrap first."
   );
 }
+
+// Identical on both the confirmed and unconfirmed arm. Only the clause naming
+// whether the grant issuer is still needed for this site differs between the
+// two; every claim after it is true regardless of whether verification could
+// confirm access, so there is no reason for it to read differently.
+const GRANT_ISSUER_TEARDOWN_TAIL =
+  "Only deleting it removes that standing permission: letting its secret expire disables a credential, not the " +
+  "application or the permission it holds. Run this command with --delete-bootstrap to delete it. Onboarding " +
+  "another site later needs a grant issuer again, so recreate it first with --create-bootstrap.";
 
 /**
  * The closing note printed after a normal run's four deployment values, on
  * both the confirmed and the unconfirmed verification path. It is not a
- * separate success message: main.ts appends it to the one tail both of those
- * paths already share, so this function carries no result data of its own.
+ * separate success message: describeSetupSuccess below appends it to the one
+ * tail both paths already share, so this function carries no result data of
+ * its own beyond which arm printed it.
  *
- * It prints while the grant issuer certainly still exists, so it states what
- * deleting it would do rather than claiming anything has already happened.
- * It also draws the same line describeDeleteBootstrapSuccess draws: the
- * secret's own seven-day expiry disables a credential, not the application or
- * the Sites.FullControl.All assignment it holds, so only deletion removes the
- * standing privilege. Collapsing that distinction here is the mistake this
- * module has made before.
+ * It prints while the grant issuer certainly still exists, so every sentence
+ * states what deleting it would do rather than claiming anything has already
+ * happened. It also draws the same line describeDeleteBootstrapSuccess draws:
+ * the secret's own seven-day expiry disables a credential, not the
+ * application or the Sites.FullControl.All assignment it holds, so only
+ * deletion removes the standing privilege. Collapsing that distinction here
+ * is a mistake this module has made before.
+ *
+ * The `confirmed` flag matters because only two of the opening sentence's
+ * three claims are actually observed at this point in the run: that the
+ * grant issuer still exists, and that it still holds Sites.FullControl.All,
+ * both established by this same execution's own preflight. Whether it is "no
+ * longer needed for this site" is not observed on the unconfirmed arm, since
+ * that arm exists precisely because the run could not prove the new
+ * application can reach the site. Asserting it anyway told an operator to
+ * destroy the one credential able to reissue the per-site grant, in the same
+ * breath as a message four lines above saying that credential might still be
+ * needed.
  */
-export function describeGrantIssuerTeardownNote(): string {
-  return (
-    "The grant issuer application is not needed for this site any longer, but it still exists and still holds " +
-    "Sites.FullControl.All across every site in this tenant. Only deleting it removes that standing permission: " +
-    "letting its secret expire disables a credential, not the application or the permission it holds. Run this " +
-    "command with --delete-bootstrap to delete it. Onboarding another site later needs a grant issuer again, so " +
-    "recreate it first with --create-bootstrap."
-  );
+export function describeGrantIssuerTeardownNote(confirmed: boolean): string {
+  const openingClause = confirmed
+    ? "The grant issuer application is not needed for this site any longer, but it still exists and still holds " +
+      "Sites.FullControl.All across every site in this tenant."
+    : "This site's access has not been confirmed yet, and the grant issuer is the only credential that can " +
+      "reissue the per-site grant, so deleting it should wait until this application's own access is confirmed. " +
+      "It still exists and still holds Sites.FullControl.All across every site in this tenant.";
+
+  return `${openingClause} ${GRANT_ISSUER_TEARDOWN_TAIL}`;
+}
+
+export interface SetupSuccessDetails {
+  /** Whether verifyAppAccess could confirm the new application can reach the site. */
+  confirmed: boolean;
+  /**
+   * Present only when confirmed is false: the reason verification could not
+   * confirm access, already formatted by interpretVerification.
+   */
+  verificationMessage?: string;
+  tenantId: string;
+  appId: string;
+  secret: string;
+  siteId: string;
+}
+
+/**
+ * The full success block for a normal run, printed on stdout, covering both
+ * the confirmed and unconfirmed verification path. A pure function, rather
+ * than a sequence of console.log calls in main.ts, so the teardown note's
+ * position relative to the four printed values, and its wording on each arm,
+ * can both be pinned by a test without running main.ts itself.
+ *
+ * The four deployment values come last among the "what happened" lines, and
+ * the teardown note comes after those, not before: someone scrolling back for
+ * the secret should not have to read past advice to find it.
+ */
+export function describeSetupSuccess(details: SetupSuccessDetails): string {
+  const lines: string[] = [];
+
+  if (details.confirmed) {
+    lines.push("Setup complete. Store these as deployment secrets, not in the repository.");
+  } else {
+    // An unconfirmed verification prints the credentials exactly as a success
+    // does, because the application and its grant are live either way and the
+    // secret is shown once. What changes is that the operator has to be told a
+    // run that could not confirm access still left both behind.
+    lines.push(
+      "Setup finished without confirming access. It kept what it created: the app registration, its client " +
+        "secret, and the per-site permission grant are all live in this tenant now, and no second run is needed.",
+    );
+    if (details.verificationMessage !== undefined) lines.push(details.verificationMessage);
+    lines.push("Store these as deployment secrets, not in the repository.");
+  }
+
+  lines.push(`  AZURE_TENANT_ID=${details.tenantId}`);
+  lines.push(`  AZURE_CLIENT_ID=${details.appId}`);
+  lines.push(`  AZURE_CLIENT_SECRET=${details.secret}`);
+  lines.push(`  IW_SITE_ID=${details.siteId}`);
+  lines.push(describeGrantIssuerTeardownNote(details.confirmed));
+
+  return lines.join("\n");
 }
 
 /**
@@ -388,25 +485,51 @@ function nextStepForGraphFailure(error: GraphRequestError): string {
   return "This does not match a known cause, so report it with the response body above.";
 }
 
+/** Which of the three modes main.ts was running when a failure reached the top level. */
+export type SetupMode = "setup" | "create-bootstrap" | "delete-bootstrap";
+
+// One command with three modes, and only one of them is actually "setup": a
+// teardown refusal prefixed "Setup failed" reads as though the normal run
+// failed, when nothing was being set up at all. --create-bootstrap creates
+// rather than tears down, so it gets its own prefix for the same reason.
+function failurePrefix(mode: SetupMode): string {
+  switch (mode) {
+    case "create-bootstrap":
+      return "Bootstrap creation failed";
+    case "delete-bootstrap":
+      return "Bootstrap deletion failed";
+    case "setup":
+      return "Setup failed";
+  }
+}
+
 /**
  * The last stop before the process exits. Without it any failure that is not a
  * SetupFailedError reaches the top-level await unhandled and prints a raw stack
  * trace, which covers the likeliest failure of all: a 403 from POST
  * /applications because the signed-in user has no rights to create one. Nothing
  * here reads error.stack, so no filesystem path reaches the terminal.
+ *
+ * `mode` defaults to "setup" because most callers of this function, including
+ * every existing test, are exercising the normal run; main.ts passes the mode
+ * it actually parsed, which is the only way this function can know a run was
+ * a teardown rather than a setup, since parseArgs can itself throw before any
+ * mode is known.
  */
-export function describeSetupFailure(error: unknown): string {
+export function describeSetupFailure(error: unknown, mode: SetupMode = "setup"): string {
+  const prefix = failurePrefix(mode);
+
   if (error instanceof SetupFailedError) {
-    return `Setup failed: ${error.message}`;
+    return `${prefix}: ${error.message}`;
   }
 
   if (error instanceof GraphRequestError) {
     const code = error.code === undefined ? "" : ` (${error.code})`;
     return (
-      `Setup failed: Graph ${error.method} ${error.path} returned ${error.status}${code}. ` +
+      `${prefix}: Graph ${error.method} ${error.path} returned ${error.status}${code}. ` +
       `${nextStepForGraphFailure(error)} Response body: ${error.body}`
     );
   }
 
-  return `Setup failed: ${error instanceof Error ? error.message : String(error)}`;
+  return `${prefix}: ${error instanceof Error ? error.message : String(error)}`;
 }
