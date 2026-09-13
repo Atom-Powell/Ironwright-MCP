@@ -108,6 +108,51 @@ describe("runScan", () => {
     expect(result.storeBatches).toBe(0);
   });
 
+  it("merges a multi-page enumeration that completes, using the final page's deltaLink", async () => {
+    const store = createMemoryStateStore();
+    const client = scriptedClient({
+      [SITE]: { id: "site-1" },
+      [DRIVES]: { value: [{ id: "drive-1", name: "Compliance Reports" }] },
+      "/drives/drive-1/root/delta": {
+        value: [
+          {
+            id: "i1",
+            name: "first.xlsx",
+            parentReference: { path: "/drives/drive-1/root:/2026" },
+            file: {},
+            size: 1,
+            lastModifiedDateTime: "2026-08-01T00:00:00Z",
+            eTag: "e1",
+          },
+        ],
+        "@odata.nextLink": "https://graph.microsoft.com/v1.0/page-2",
+      },
+      "https://graph.microsoft.com/v1.0/page-2": {
+        value: [
+          {
+            id: "i2",
+            name: "second.xlsx",
+            parentReference: { path: "/drives/drive-1/root:/2026" },
+            file: {},
+            size: 2,
+            lastModifiedDateTime: "2026-08-02T00:00:00Z",
+            eTag: "e2",
+          },
+        ],
+        "@odata.deltaLink": "https://graph.microsoft.com/v1.0/final",
+      },
+    });
+
+    const result = await runScan({ client, store, profile: PROFILE, now: NOW });
+
+    expect(result.snapshot.files.map((file) => file.path)).toEqual(["2026/first.xlsx", "2026/second.xlsx"]);
+    expect(result.pages).toBe(2);
+    // One upsert per page, applied as its own store batch.
+    expect(result.changesApplied).toBe(2);
+    expect(result.storeBatches).toBe(2);
+    await expect(store.getDeltaLink("example", "drive-1")).resolves.toBe("https://graph.microsoft.com/v1.0/final");
+  });
+
   it("reports only this call's own requests when the client is reused across scans", async () => {
     // client.requests() is cumulative since the client was constructed. Reusing
     // one client across two runScan calls -- as a tool wiring a Graph client
