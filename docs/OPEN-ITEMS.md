@@ -189,6 +189,32 @@ own token exchange still rolls back an otherwise-correct application when it exh
 retries on a propagation error, which is the same destroy-correct-work-over-timing shape that
 was deliberately rejected for the verification path.
 
+## Teardown has a hole for the server application
+
+Found while cleaning up after the live run, 2026-09-12.
+
+`--delete-bootstrap` removes the grant issuer, and that path is now covered. Nothing removes the
+server application or the per-site permission it was granted, and the two have to come apart in
+an awkward order.
+
+Deleting the server application in the portal is easy and invalidates its secret. What survives
+is the permission entry on the site, now naming an identity that no longer exists. Removing that
+entry needs an app-only token carrying `Sites.FullControl.All`, which means a grant issuer must
+exist. So an operator who followed the recommended posture, deleting the grant issuer after
+onboarding, has to recreate one solely to remove a permission entry, and creating it needs
+Privileged Role Administrator or Global Administrator.
+
+The orphaned entry grants access to nothing, so this is untidiness rather than exposure. It
+matters for two cases. Decommissioning a customer leaves residue on their site that the tool
+cannot clear. And a test run against a real tenant, which is exactly how this was found, cannot
+be fully undone by the tool that made it.
+
+Worth considering together rather than as two features: a mode that removes a server application
+and its site grant in the right order, and a decision about whether teardown should offer to
+retain the grant issuer when it can see that a server application still holds a grant it may
+later need to revoke. The second is the more interesting question, because the current advice to
+delete the grant issuer immediately is what creates the ordering problem.
+
 ## Found by using the tool, 2026-09-12
 
 `--delete-bootstrap` was run against a tenant whose grant issuer had already been removed by
