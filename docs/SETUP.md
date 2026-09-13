@@ -1,15 +1,16 @@
 # Setup
 
-One server instance serves one customer tenant. Setup is two commands rather than one. The
-first, `--create-bootstrap`, runs once per tenant and creates a small application whose only
-job is issuing site permission grants. The second, the normal run, creates the
-server's own application and grants it access to one SharePoint site, using the bootstrap
-application's credentials for the one call that a signed-in person's token cannot make. Read
-this whole document before running either command: the bootstrap application holds a
-permission broad enough that you should decide you are comfortable with the design before you
-create it, not after, and it is meant to be deleted again once setup is done.
+One server instance serves one customer tenant. Setup has three modes rather than one command.
+`--create-bootstrap` runs once per tenant and creates a small application whose only job is
+issuing site permission grants. The normal run creates the server's own application and grants
+it access to one SharePoint site, using the bootstrap application's credentials for the one
+call that a signed-in person's token cannot make. `--delete-bootstrap` removes the bootstrap
+application again once it is no longer needed. Read this whole document before running any of
+them: the bootstrap application holds a permission broad enough that you should decide you are
+comfortable with the design before you create it, not after, and it is meant to be deleted
+again once setup is done.
 
-## Why there are two commands
+## Why bootstrapping is a separate step
 
 A live run of this tool on 2026-09-12 against a real developer tenant reached the per-site
 permission grant, `POST /sites/{site-id}/permissions`, and was refused with a 403. The
@@ -46,17 +47,24 @@ forever; see "Retiring the grant issuer after setup" below.
 ## What you need
 
 - A user with Application Administrator or Cloud Application Administrator rights in the
-  target tenant, to create an app registration and its service principal. Both commands create
-  one, so both need this.
+  target tenant, to create an app registration and its service principal. `--create-bootstrap`
+  and the normal run each create one, so both of those two modes need this.
 - A user with Privileged Role Administrator or Global Administrator rights, to grant admin
-  consent for a Microsoft Graph application permission. This is required for both commands too,
-  and it is worth stating plainly because it is easy to assume Application Administrator
-  covers it: that role can consent to every API except Microsoft Graph, and both
-  `Sites.FullControl.All` and `Sites.Selected` are Microsoft Graph permissions. This is the one
-  prerequisite no script can work around. The two roles above can be the same person, and in
-  practice usually are, since a Global Administrator satisfies both.
-- Site owner rights are not required for either command. The per-site grant is issued by the
-  bootstrap application's own token, not by the signed-in operator's, so nobody running these
+  consent for a Microsoft Graph application permission. This is required for `--create-bootstrap`
+  and the normal run too, and it is worth stating plainly because it is easy to assume
+  Application Administrator covers it: that role can consent to every API except Microsoft
+  Graph, and both `Sites.FullControl.All` and `Sites.Selected` are Microsoft Graph permissions.
+  This is the one prerequisite no script can work around for those two modes. The two roles
+  above can be the same person, and in practice usually are, since a Global Administrator
+  satisfies both.
+- `--delete-bootstrap` needs only Application Administrator or Cloud Application Administrator, and needs it for a narrower reason
+  than the other two modes: deleting an application registration is a directory-object
+  operation, not a consent operation, so no admin consent is involved and Privileged Role
+  Administrator or Global Administrator is not required. This matters when deciding who can run
+  teardown in a customer tenant: it can be delegated to whoever holds either of those roles
+  there, without also asking for one of the two more senior roles.
+- Site owner rights are not required for any of the three modes. The per-site grant is issued by
+  the bootstrap application's own token, not by the signed-in operator's, so nobody running these
   commands needs any standing permission on the SharePoint site itself.
 - Node 22 or later.
 
@@ -105,21 +113,70 @@ which the environment variables do not.
 ## Retiring the grant issuer after setup
 
 The recommended posture is to delete the grant-issuing application once setup is done, and to
-recreate it with `--create-bootstrap` when the next site is onboarded. Its only job is issuing
-per-site grants, which happens during a normal run and never afterward, so the running server
-does not need it and neither does anything else. Deleting it shrinks the window in which a
-tenant-wide SharePoint credential exists at all, from a week down to the minutes the setup
-takes, and removes the standing application that holds `Sites.FullControl.All` along with it.
+recreate it with `--create-bootstrap` when the next site is onboarded:
 
-The secret expires on its own either way. `--create-bootstrap` sets an explicit seven-day
-expiry rather than accepting Graph's two-year default, so a grant issuer that nobody remembers
-to delete stops being a usable credential within the week. Recreating it later costs one
-command and produces a fresh secret, so there is no rotation procedure to maintain and nothing
-to renew.
+```bash
+npm run setup -- --tenant=<tenant-id> --delete-bootstrap
+```
 
-Keep it only if you are onboarding sites often enough that recreating it each time is real
-friction, and if you do, treat it as a privileged credential with an expiry date rather than
-as permanent infrastructure.
+This takes no `--site`, for the same reason `--create-bootstrap` does not: the grant issuer
+never touches a site itself. It signs you in with a device code, finds the application by the
+display name `--create-bootstrap` used (pass `--name` if you gave it a different one), and
+deletes it. It refuses to run alongside `--create-bootstrap`, and it refuses to guess which
+application to delete if more than one matches that name, rather than removing one of several
+identically named holders of `Sites.FullControl.All`.
+
+Unlike the normal run, `--delete-bootstrap` needs no `IW_BOOTSTRAP_CLIENT_ID` or
+`IW_BOOTSTRAP_CLIENT_SECRET`. It acts using only the signed-in device-code session, the same
+one every mode uses to create the app registration in the first place, because deleting an
+application registration needs Application Administrator rights over the directory object
+itself, not the bootstrap application's own credentials. That is deliberate: this mode exists
+for a grant issuer whose secret was never recorded or has already expired, and requiring that
+exact secret here would make it unusable in precisely the situation it is for. If you have lost
+or outlived the bootstrap secret, you do not need to recreate the grant issuer just to remove
+it; run this command as it is.
+
+The secret's seven-day expiry and deletion are not the same thing, and treating them as
+interchangeable is the mistake this section exists to prevent. The expiry disables one
+credential: after the secret lapses, nobody can mint a new token with it, but the application
+object is untouched, and so is the admin-consented `Sites.FullControl.All` role assignment it
+holds. Anyone in the tenant with Application Administrator rights can add a new secret to that
+application and regain tenant-wide SharePoint access, with no further consent prompt, for as long
+as the application still exists. Deletion removes the application object itself, and with it every
+role assignment it held. Only deletion ends the standing privilege; expiry only ends one way of
+using it.
+
+This matters more in a customer tenant than in a developer one. Leaving the grant issuer in
+place there means the product retains an application with full control over every SharePoint
+site the customer owns, indefinitely, whether or not its current secret still works. Deleting it
+after each onboarding means that access existed for the length of one setup run. Those are two
+different answers to a client's security review, and only one of them is true if the grant
+issuer was left in place because its secret happened to expire rather than because someone
+deleted it.
+
+Deleting the grant issuer does not affect the deployed server. The server's own application
+holds `Sites.Selected` and its own per-site grant, both issued during the normal run, and
+neither depends on the grant issuer continuing to exist. The deployed server keeps working after
+`--delete-bootstrap` succeeds.
+
+One caveat to the claim above that deletion ends the standing privilege: Entra's delete of an
+application registration is a soft delete, not an immediate purge. The application sits in the
+tenant's deleted items for 30 days, where the same Application Administrator rights this command
+needed can restore it, role assignment and all. That is true of every application deletion in
+Entra, not a gap specific to this command, but it is exactly the kind of detail a client security
+review is likely to ask about, since "deleted" and "gone for 30 days, then gone" are different
+answers. If the recovery window itself is a concern, purge the application permanently from
+deleted items in the Entra admin portal after this command finishes, rather than treating this
+deletion alone as final.
+
+Once the grant issuer is deleted, remove `IW_BOOTSTRAP_CLIENT_ID` and `IW_BOOTSTRAP_CLIENT_SECRET`
+from wherever you stored them. Left in place, they name an application that no longer exists,
+and the next normal run that reads them fails at its preflight with a rejected-credentials
+message that reads like a wrong secret rather than a deleted application.
+
+Keep the grant issuer only if you are onboarding sites often enough that recreating it each time
+is real friction, and if you do, treat it as a privileged credential with an expiry date rather
+than as permanent infrastructure.
 
 ## Running the normal setup
 
@@ -175,7 +232,7 @@ this command.
 ## The device code sign-in and its client id
 
 Signing in with a device code requires an Entra application to sign into, the same way any
-interactive sign-in does, and both commands use it. By default this command signs in as
+interactive sign-in does, and all three modes use it. By default this command signs in as
 `14d82eec-204b-4c2f-b7e8-296a70dab67e`, which is Microsoft's Graph Command Line Tools
 application, the public client that Microsoft Graph PowerShell and the Graph CLI sign in as. It
 exists in every tenant, so nobody has to register a public-client sign-in application of their

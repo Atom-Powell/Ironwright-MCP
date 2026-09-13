@@ -308,7 +308,10 @@ export async function runCreateBootstrap(
   // second application with an identical display name. Two of those, both
   // holding Sites.FullControl.All, is how the wrong secret gets rotated or the
   // wrong application revoked, and neither mistake is visible in the tenant's
-  // app list.
+  // app list. This call itself throws, before either branch below runs, if the
+  // name already matches more than one application: findApplicationByDisplayName
+  // refuses that case rather than returning one of them, so "found one" and
+  // "found none" are not the only two outcomes here.
   const existing = await graph.findApplicationByDisplayName(args.displayName);
   if (existing !== undefined) {
     throw new Error(
@@ -352,4 +355,34 @@ export async function runCreateBootstrap(
     await rollbackApplication(graph, objectId, appId, notice);
     throw error;
   }
+}
+
+/**
+ * Removes the grant issuer. Deleting it is what actually removes the standing
+ * privilege: the secret's expiry only disables one credential, while the
+ * application keeps its admin-consented Sites.FullControl.All assignment and
+ * anyone able to add a secret would regain tenant-wide SharePoint access
+ * without further consent.
+ */
+export async function runDeleteBootstrap(
+  graph: SetupGraph,
+  args: { displayName: string },
+  hooks: SetupHooks = {},
+): Promise<{ appId: string; objectId: string }> {
+  const notice = hooks.onNotice ?? ((): void => {});
+
+  const existing = await graph.findApplicationByDisplayName(args.displayName);
+  if (existing === undefined) {
+    throw new Error(
+      `No application named "${args.displayName}" exists in this tenant, so there is nothing to delete. ` +
+        "If the grant issuer was created with a different name, pass the same --name it was created with. " +
+        "If it was already deleted, no action is needed: deleting it is what removes the standing permission, " +
+        "and a deleted application keeps no access.",
+    );
+  }
+
+  notice(`Deleting application ${existing.appId} (object id ${existing.objectId}).`);
+  await graph.deleteApplication(existing.objectId);
+
+  return { appId: existing.appId, objectId: existing.objectId };
 }

@@ -3,13 +3,16 @@ import { createFetchSetupGraph } from "./adapter.js";
 import {
   acquireTokenWithRetry,
   describeBootstrapSuccess,
+  describeDeleteBootstrapSuccess,
   describeSetupFailure,
+  describeSetupSuccess,
   describeSignInFailure,
   extractAccessToken,
   once,
   parseArgs,
+  type SetupMode,
 } from "./cli.js";
-import { runCreateBootstrap, runSetup } from "./run.js";
+import { runCreateBootstrap, runDeleteBootstrap, runSetup } from "./run.js";
 import { assertBootstrapToken } from "./steps.js";
 
 /**
@@ -52,8 +55,15 @@ function acquireAppOnlyToken(tenantId: string, clientId: string, secret: string,
   });
 }
 
+// Read by the top-level catch below, which is outside main() and so cannot
+// see `parsed` directly. Defaults to the normal run because parseArgs itself
+// can throw before any mode is known, and a malformed invocation is a setup
+// failure in the ordinary sense, not a teardown or a bootstrap-creation one.
+let mode: SetupMode = "setup";
+
 async function main(): Promise<void> {
   const parsed = parseArgs(process.argv);
+  mode = parsed.deleteBootstrap ? "delete-bootstrap" : parsed.createBootstrap ? "create-bootstrap" : "setup";
   const { tenantId, siteUrl, displayName, write, clientId } = parsed;
 
   // Minted at most once per run. The preflight below needs this token only to
@@ -81,8 +91,11 @@ async function main(): Promise<void> {
   // admin-consented role assignment before discovering the bootstrap credentials
   // do not work, followed by a rollback that deletes everything it just made.
   // Creating the bootstrap application is what --create-bootstrap is for, so
-  // that mode is exempt.
-  if (!parsed.createBootstrap) {
+  // that mode is exempt. Deleting it is exempt for the opposite reason: this
+  // mode exists for a grant issuer whose secret was lost or has already
+  // expired, and requiring exactly that secret here would make it unusable in
+  // the one situation it was built for.
+  if (!parsed.createBootstrap && !parsed.deleteBootstrap) {
     assertBootstrapToken(await acquireBootstrapToken());
   }
 
@@ -116,6 +129,21 @@ async function main(): Promise<void> {
     acquireBootstrapToken,
   });
 
+  // Checked before --create-bootstrap below: parseArgs already refuses the two
+  // together, so at most one of these branches is ever reachable in a given
+  // run, and this one needs only the delegated sign-in above, not the
+  // bootstrap-credential preflight this command otherwise requires.
+  if (parsed.deleteBootstrap) {
+    const result = await runDeleteBootstrap(
+      graph,
+      { displayName },
+      { onNotice: (message) => console.error(message) },
+    );
+
+    console.log(describeDeleteBootstrapSuccess(result));
+    return;
+  }
+
   // A separate mode rather than a branch inside runSetup: it touches no site
   // (no resolveSite, no grantSitePermission, no verifyAppAccess), and printing
   // its output alongside runSetup's would risk conflating the two credential
@@ -148,20 +176,22 @@ async function main(): Promise<void> {
   // nothing. The exit code stays zero for the same reason the credentials are
   // printed: something real exists now and a wrapper that discards the output
   // of a failed run would throw away the only copy of the secret.
-  if (result.verification.confirmed) {
-    console.log("Setup complete. Store these as deployment secrets, not in the repository.");
-  } else {
-    console.log(
-      "Setup finished without confirming access. It kept what it created: the app registration, its client " +
-        "secret, and the per-site permission grant are all live in this tenant now, and no second run is needed.",
-    );
-    console.log(result.verification.message);
-    console.log("Store these as deployment secrets, not in the repository.");
-  }
-  console.log(`  AZURE_TENANT_ID=${tenantId}`);
-  console.log(`  AZURE_CLIENT_ID=${result.appId}`);
-  console.log(`  AZURE_CLIENT_SECRET=${result.secret}`);
-  console.log(`  IW_SITE_ID=${result.siteId}`);
+  //
+  // The whole block, values and teardown note together, comes from one pure
+  // builder rather than a sequence of console.log calls here, so its wording
+  // and the note's position after the four values can be pinned by a test
+  // without running main.ts itself. The two bootstrap modes above both return
+  // before reaching here, so neither ever prints this block.
+  console.log(
+    describeSetupSuccess({
+      confirmed: result.verification.confirmed,
+      verificationMessage: result.verification.confirmed ? undefined : result.verification.message,
+      tenantId,
+      appId: result.appId,
+      secret: result.secret,
+      siteId: result.siteId,
+    }),
+  );
 }
 
 // Every failure lands here, not just a verification failure. A 403 from POST
@@ -171,6 +201,6 @@ async function main(): Promise<void> {
 try {
   await main();
 } catch (error) {
-  console.error(describeSetupFailure(error));
+  console.error(describeSetupFailure(error, mode));
   process.exitCode = 1;
 }

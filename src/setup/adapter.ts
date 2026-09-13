@@ -139,9 +139,23 @@ export function createFetchSetupGraph(options: FetchSetupGraphOptions): SetupGra
       );
       const body = typeof response.value === "object" && response.value !== null ? response.value : {};
       const matches = (body as { value?: unknown }).value;
-      const first = Array.isArray(matches) ? (matches[0] as unknown) : undefined;
-      if (first === undefined) return undefined;
-      const found = requireFields({ ...response, value: first }, ["id", "appId"]);
+      const list = Array.isArray(matches) ? matches : [];
+      if (list.length === 0) return undefined;
+      // displayName is not unique in Entra, so this filter can return more than
+      // one application. Silently taking the first would let a caller believe a
+      // single application was found, acted on, and (on the delete path)
+      // removed, while an identically named one is left behind for a later run
+      // to trip over.
+      if (list.length > 1) {
+        throw new Error(
+          `Found ${list.length} applications named "${displayName}" in this tenant, so which one is meant is ` +
+            "ambiguous. --name cannot tell them apart after the fact: it selects by this same display name, and " +
+            "renaming one of two applications that already share it is not something this command can do for " +
+            "you. Rename the one you do not want in the Entra portal, then pass --name matching the survivor's " +
+            "display name, or delete the extra application there directly.",
+        );
+      }
+      const found = requireFields({ ...response, value: list[0] }, ["id", "appId"]);
       return { objectId: found.id, appId: found.appId };
     },
 

@@ -122,6 +122,16 @@ Cheap to settle now, ten files later.
 
 ## Known minor issues
 
+**CLOSED 2026-09-12 by `3b72f52`, "feat: add --delete-bootstrap so the documented teardown is
+executable", refined by `884aab3` and `c91ce2b`.** `docs/SETUP.md` recommended deleting the
+grant issuer once setup was done, and the command provided no way to do it. `--delete-bootstrap`
+now finds the grant issuer by display name and deletes it, using only the operator's delegated
+sign-in, refuses an ambiguous match rather than deleting one of several identically named
+applications, and refuses to run alongside `--create-bootstrap`. A normal run's success output,
+on both the confirmed and unconfirmed verification paths, now also names `--delete-bootstrap` as
+the way to remove the grant issuer's standing permission once the site is onboarded, since the
+teardown documented only in a file nobody reopens does not happen.
+
 **CLOSED 2026-09-12 by `aaeaa57`, "fix: close the rollback gap, replication race, and stale
 remedy in setup".** A site permission granted immediately before a malformed response was not
 rolled back: the field check threw before the permission id was captured, so the rollback
@@ -174,22 +184,29 @@ own token exchange still rolls back an otherwise-correct application when it exh
 retries on a propagation error, which is the same destroy-correct-work-over-timing shape that
 was deliberately rejected for the verification path.
 
-## Outstanding verification
+## Verified end to end on 2026-09-12
 
-The first live run happened on 2026-09-12 against the `helloironwright` developer tenant and
-failed at the per-site grant, as recorded at the top of this document. Everything before that
-call worked, so what is verified from that run is: device-code sign-in, site resolution,
-application and service principal creation, the Microsoft Graph app role assignment, and
-rollback on failure. That same run is also what confirmed the delegated-token restriction
-itself, since the account signing in was a Global Administrator and was still refused.
+The two-phase setup completed successfully against a real Microsoft 365 developer tenant.
+`--create-bootstrap` created the grant issuer with its service principal, a seven day secret,
+and an admin-consented `Sites.FullControl.All` role. The normal run then resolved the site,
+created the server application holding only `Sites.Selected`, added its secret and service
+principal, consented that role, issued the per-site grant on the grant issuer's app-only
+token, and verified access with a token minted for the new application. Exit code zero, and
+the confirmed path rather than the unconfirmed one, so verification returned success rather
+than hitting propagation lag.
 
-The two-phase bootstrap design that followed, `--create-bootstrap`, the preflight check on
-normal runs, and routing the per-site grant and its rollback through the bootstrap
-application's token, is implemented and covered by the unit and integration test suite against
-a fake Graph adapter. None of it has executed against a real tenant. In particular, the
-client-credentials exchange that mints an app-only token for the bootstrap application, and the
-access check in `verifyAppAccess` that confirms the server's own application can reach the
-site, have never run outside a test double. A live end-to-end run, `--create-bootstrap`
-followed by a normal run against a real site, is the only way to exercise either, and it is
-still outstanding. The setup command's bootstrap flow must not be described as verified working
-end to end until that run happens.
+This discharges the outstanding verification that had stood since phase 1. Three things had
+never executed against a tenant before this run and now have: the client credentials exchange,
+its propagation retry, and the verification call.
+
+It also confirms the diagnosis behind the whole redesign. The same grant, against the same site
+in the same tenant, was refused with 403 on a delegated token held by a Global Administrator
+and succeeded on the grant issuer's app-only token. The documented
+application-permission-only restriction is real, and the bootstrap approach resolves it.
+
+Still unexercised: every failure path. Rollback, the propagation retry, the preflight refusal,
+the duplicate-bootstrap guard, and every diagnostic message have been tested only against
+fakes. The `--delete-bootstrap` path added afterward is in the same position: its not-found
+refusal, its ambiguous-match refusal, and its success message are covered by tests against
+fakes, not by a live delete against a real tenant. No live failure on any of these paths has
+been observed.

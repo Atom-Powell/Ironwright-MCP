@@ -383,6 +383,34 @@ document settles, and omits `describe_workbook` from its tool table.
 
 `README.md` should state the license and the Ironwright product framing.
 
+## A practice this project learned the hard way
+
+Nine times during phase 1 the same defect shipped past a passing suite: a message correct
+read on its own and wrong read against what the program had actually done at the moment it
+printed. A remedy naming an application that rollback had just deleted. A prerequisite that
+stopped being true when a call moved to a different credential. Advice to consent a permission
+the command had already consented. Each was individually reasonable and each survived review,
+because a reviewer reads what changed and these were wrong in relation to code nobody touched.
+
+Careful wording did not fix it. Two things did.
+
+The first is a rule: a function that cannot observe an outcome must not assert that outcome.
+`interpretVerification` is pure and runs before rollback, so it cannot claim what rollback
+achieved. A builder printed while an application still exists cannot say the application is
+gone. Rewording such a claim more cautiously leaves the defect in place; removing it from the
+place that cannot know it is what works.
+
+The second is a practice: when changing anything an operator reads, enumerate every message
+the command can print, reconstruct each composed string from its parts, and for each one name
+the path that produces it and confirm that every object it mentions still exists at that
+moment and every action it suggests is possible with the credential the operator holds then.
+Two of the last three instances were found by that enumeration rather than by review. It is
+cheap, it is mechanical, and it finds the ones review structurally misses.
+
+Tests help less here than they should. A substring assertion passes on a message that has
+become false, and pinning a string in isolation says nothing about whether it agrees with the
+message printed four lines above it.
+
 ## Watch items
 
 Phase 1's reviews left open questions and carried-forward risks that later phases must read.
