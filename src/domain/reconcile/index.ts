@@ -12,6 +12,7 @@ import type {
   OrphanFinding,
   Period,
   ReconciliationReport,
+  RepositoryFile,
   RepositorySnapshot,
   WorkbookSnapshot,
 } from "./types.js";
@@ -98,6 +99,39 @@ function rollUpByClient(workbook: WorkbookSnapshot, artifacts: ArtifactFinding[]
 }
 
 /**
+ * One entry per path, keeping each path's position from the first time it was
+ * listed and its contents from the last.
+ *
+ * A path identifies one item in a document library, so two entries naming one
+ * path are one file listed twice rather than two files, and collapsing them
+ * cannot lose information. Left uncollapsed they became two candidates for one
+ * slot: one won the slot and the other was reported as a duplicate at the
+ * winner's own path, so the report said the same file was both the compliant
+ * artifact and a redundant copy of it, and a move or cleanup plan built on the
+ * duplicate list would have targeted the compliant file.
+ *
+ * A repeat is a transport artifact rather than a repository problem to report,
+ * which is why this collapses quietly where a repeated workbook client throws:
+ * delta query with a persisted deltaLink is what phase 2 builds its inventory
+ * on, and a delta enumeration can emit the same item on more than one page. A
+ * hand-maintained workbook's repeats are ambiguous and a machine-generated
+ * listing's repeats are noise. `findEmptyFolders` already takes this view of
+ * `folderPaths`, so the engine now holds it about both lists rather than one.
+ *
+ * The later entry's contents win because an item re-emitted by delta was
+ * re-emitted after changing, so the later entry is the one carrying the state
+ * it changed to. When the two entries are identical, which is what a plain
+ * paging overlap produces, the choice is not observable either way.
+ */
+function dedupeFilesByPath(files: readonly RepositoryFile[]): RepositoryFile[] {
+  const byPath = new Map<string, RepositoryFile>();
+  for (const file of files) {
+    byPath.set(file.path, file);
+  }
+  return [...byPath.values()];
+}
+
+/**
  * The engine's only entry point: what the workbook says each client is owed,
  * diffed against what the repository actually holds.
  *
@@ -124,7 +158,7 @@ export function reconcile(
   // carry thousands of files, so compiling them per file would repeat that
   // work for an identical result every time.
   const parse = createFileParser(profile);
-  const parsed = repository.files.map((file) => parse(file));
+  const parsed = dedupeFilesByPath(repository.files).map((file) => parse(file));
 
   const matched = matchArtifacts(profile, expected, parsed);
 
