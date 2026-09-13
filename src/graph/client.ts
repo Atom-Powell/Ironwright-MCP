@@ -48,9 +48,10 @@ export function createGraphClient(options: GraphClientOptions): GraphClient {
 
     async get<T>(pathOrUrl: string): Promise<T> {
       const url = pathOrUrl.startsWith("https://") ? pathOrUrl : `${GRAPH_BASE}${pathOrUrl}`;
-      // The path is what an operator recognizes in an error; the absolute URL of
-      // a deltaLink is opaque and carries an encoded continuation token.
-      const label = pathOrUrl.startsWith("https://") ? url.slice(GRAPH_BASE.length) : pathOrUrl;
+      // Sliced only when the prefix is genuinely there. A blind slice of the
+      // base's length turns an absolute URL from anywhere else into a fragment
+      // that names no request, and that fragment is what the operator reads.
+      const label = url.startsWith(GRAPH_BASE) ? url.slice(GRAPH_BASE.length) : url;
 
       const result = await withRetry(
         retry,

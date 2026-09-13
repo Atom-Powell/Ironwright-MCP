@@ -39,4 +39,15 @@ describe("createGraphClient failures", () => {
 
     await expect(client.get("/drives/d1")).rejects.toThrow(/not JSON/);
   });
+
+  it("labels an absolute URL from outside the v1.0 base with the whole URL, not a mis-sliced fragment", async () => {
+    const client = createGraphClient({
+      tokenProvider: TOKEN,
+      fetchImpl: (async () => new Response("{}", { status: 500 })) as typeof fetch,
+    });
+
+    await expect(client.get("https://example.invalid/some/other/endpoint")).rejects.toThrow(
+      "https://example.invalid/some/other/endpoint",
+    );
+  });
 });
