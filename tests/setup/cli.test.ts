@@ -4,6 +4,7 @@ import {
   acquireTokenWithRetry,
   describeBootstrapSuccess,
   describeDeleteBootstrapSuccess,
+  describeGrantIssuerTeardownNote,
   describeSignInFailure,
   extractAccessToken,
   once,
@@ -127,6 +128,63 @@ describe("describeDeleteBootstrapSuccess", () => {
 
     expect(message).toMatch(/not just its secret/i);
     expect(message).toMatch(/expired secret/i);
+  });
+});
+
+describe("describeGrantIssuerTeardownNote", () => {
+  it("states the grant issuer is not needed for this site", () => {
+    const message = describeGrantIssuerTeardownNote();
+
+    expect(message).toMatch(/not needed for this site/i);
+  });
+
+  it("names the delete command", () => {
+    const message = describeGrantIssuerTeardownNote();
+
+    expect(message).toContain("--delete-bootstrap");
+  });
+
+  it("names the recreate command for onboarding another site later", () => {
+    const message = describeGrantIssuerTeardownNote();
+
+    expect(message).toContain("--create-bootstrap");
+  });
+
+  it("does not assert the application is already gone", () => {
+    // At the moment this note prints, the grant issuer certainly still
+    // exists: this path is the normal run's own success path, not
+    // --delete-bootstrap's.
+    const message = describeGrantIssuerTeardownNote();
+
+    expect(message).toMatch(/still exists/i);
+    expect(message).not.toMatch(/\bdeleted\b/i);
+  });
+
+  it("does not let the secret's own expiry read as equivalent to deletion", () => {
+    const message = describeGrantIssuerTeardownNote();
+
+    expect(message).toMatch(/expire/i);
+    expect(message).toMatch(/disables a credential/i);
+  });
+});
+
+// main.ts has no test seam, so the mode gating itself (this note prints only
+// on the normal run's two success paths, never in --create-bootstrap or
+// --delete-bootstrap mode) cannot be exercised end to end here. What can be
+// pinned is that the other two modes' own success messages, which are the
+// only output those modes ever produce, do not carry this note's text.
+describe("grant issuer teardown note mode gating", () => {
+  it("is absent from the create-bootstrap success message", () => {
+    const message = describeBootstrapSuccess({ appId: "app-1", secret: "secret-1" });
+
+    expect(message).not.toContain("--delete-bootstrap");
+    expect(message).not.toMatch(/not needed for this site/i);
+  });
+
+  it("is absent from the delete-bootstrap success message", () => {
+    const message = describeDeleteBootstrapSuccess({ appId: "app-1" });
+
+    expect(message).not.toMatch(/not needed for this site/i);
   });
 });
 

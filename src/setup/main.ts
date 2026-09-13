@@ -4,6 +4,7 @@ import {
   acquireTokenWithRetry,
   describeBootstrapSuccess,
   describeDeleteBootstrapSuccess,
+  describeGrantIssuerTeardownNote,
   describeSetupFailure,
   describeSignInFailure,
   extractAccessToken,
@@ -181,6 +182,13 @@ async function main(): Promise<void> {
   console.log(`  AZURE_CLIENT_ID=${result.appId}`);
   console.log(`  AZURE_CLIENT_SECRET=${result.secret}`);
   console.log(`  IW_SITE_ID=${result.siteId}`);
+
+  // Printed after the four values above, not before, so someone scrolling
+  // back for the secret does not have to read past advice to find it. It
+  // sits below the confirmed/unconfirmed branch rather than inside either
+  // arm because both share this exact tail; the two bootstrap modes above
+  // both return before reaching here, so neither ever prints it.
+  console.log(describeGrantIssuerTeardownNote());
 }
 
 // Every failure lands here, not just a verification failure. A 403 from POST

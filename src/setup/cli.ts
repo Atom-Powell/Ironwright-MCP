@@ -279,6 +279,30 @@ export function describeDeleteBootstrapSuccess(result: { appId: string }): strin
 }
 
 /**
+ * The closing note printed after a normal run's four deployment values, on
+ * both the confirmed and the unconfirmed verification path. It is not a
+ * separate success message: main.ts appends it to the one tail both of those
+ * paths already share, so this function carries no result data of its own.
+ *
+ * It prints while the grant issuer certainly still exists, so it states what
+ * deleting it would do rather than claiming anything has already happened.
+ * It also draws the same line describeDeleteBootstrapSuccess draws: the
+ * secret's own seven-day expiry disables a credential, not the application or
+ * the Sites.FullControl.All assignment it holds, so only deletion removes the
+ * standing privilege. Collapsing that distinction here is the mistake this
+ * module has made before.
+ */
+export function describeGrantIssuerTeardownNote(): string {
+  return (
+    "The grant issuer application is not needed for this site any longer, but it still exists and still holds " +
+    "Sites.FullControl.All across every site in this tenant. Only deleting it removes that standing permission: " +
+    "letting its secret expire disables a credential, not the application or the permission it holds. Run this " +
+    "command with --delete-bootstrap to delete it. Onboarding another site later needs a grant issuer again, so " +
+    "recreate it first with --create-bootstrap."
+  );
+}
+
+/**
  * True for the two calls that use the bootstrap application's app-only token
  * rather than the signed-in operator's: grantSitePermission's POST and
  * deleteSitePermission's rollback DELETE, both against
