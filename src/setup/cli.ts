@@ -4,7 +4,7 @@
 // in main.ts, which is the untestable-without-a-tenant seam.
 
 import { SetupFailedError } from "./errors.js";
-import { GraphRequestError } from "./graph-error.js";
+import { GraphRequestError } from "../graph/errors.js";
 import { BOOTSTRAP_SECRET_LIFETIME_DAYS } from "./steps.js";
 
 export interface ParsedArgs {

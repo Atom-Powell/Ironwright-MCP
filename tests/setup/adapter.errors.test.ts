@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFetchSetupGraph } from "../../src/setup/adapter.js";
-import { GraphRequestError } from "../../src/setup/graph-error.js";
+import { GraphRequestError } from "../../src/graph/errors.js";
 import { buildAppRegistrationRequest, buildServerPasswordCredential } from "../../src/setup/steps.js";
 
 function stubFetch(response: { status: number; body: string }): void {
