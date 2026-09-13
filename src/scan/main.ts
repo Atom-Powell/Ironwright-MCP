@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { loadGraphCredentials, loadStoreConnectionString } from "../config.js";
 import { loadProfile } from "../domain/profile/load.js";
 import { createGraphClient } from "../graph/client.js";
@@ -6,12 +5,12 @@ import { clientCredentialsTokenProvider } from "../graph/token.js";
 import { createMemoryStateStore } from "../store/memory.js";
 import { ensureTables, tableStateStoreFromConnectionString } from "../store/table.js";
 import type { StateStore } from "../store/types.js";
-import { formatScanResult, parseScanArguments } from "./cli.js";
+import { formatScanResult, parseScanArguments, readProfile } from "./cli.js";
 import { runScan } from "./run.js";
 
 async function main(): Promise<void> {
   const args = parseScanArguments(process.argv.slice(2));
-  const profile = loadProfile(JSON.parse(await readFile(args.profilePath, "utf8")));
+  const profile = loadProfile(await readProfile(args.profilePath));
   const credentials = loadGraphCredentials(process.env);
   const connectionString = loadStoreConnectionString(process.env);
 

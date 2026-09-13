@@ -374,4 +374,7 @@ IW_TABLE_CONNECTION_STRING=UseDevelopmentStorage=true npm run scan -- --profile 
 The scan's own output says which store it used, states the Graph request count and the delta
 page count, and always states that the Microsoft Search cross-check did not run, since phase 2a
 never runs it and a file stored outside the expected taxonomy is invisible to this snapshot as a
-result.
+result. It also names how many of the scanned files carry no ETag at all, since Graph does not
+always report one and this phase's snapshot stores that absence as an empty string rather than
+marking it explicitly, which a later rename or move plan will need to know before trusting an
+ETag as a precondition.

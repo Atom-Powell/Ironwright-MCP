@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import type { ScanResult } from "./run.js";
 
 const USAGE = "Usage: npm run scan -- --profile <path to profile json> [--sub-path <library-relative path>]";
@@ -34,6 +35,29 @@ export function parseScanArguments(argv: readonly string[]): ScanArguments {
 
   if (profilePath === undefined) throw new Error(`--profile is required. ${USAGE}`);
   return subPath === undefined ? { profilePath } : { profilePath, subPath };
+}
+
+/**
+ * The one exception to this module's no-I/O rule. It exists here, rather than
+ * inline in main.ts, so its own failure mode -- a profile file that is not
+ * valid JSON -- has a test seam; main.ts has none by design, being the
+ * untestable-without-a-tenant part of this command.
+ *
+ * Node's own ENOENT message already carries the path when the file is
+ * missing, so a missing file identifies itself. A JSON syntax error does not:
+ * `JSON.parse` reports a character offset and nothing else, which leaves an
+ * operator holding a parser message with no way to tell which of several
+ * profile files it came from.
+ */
+export async function readProfile(profilePath: string): Promise<unknown> {
+  const text = await readFile(profilePath, "utf8");
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (error) {
+    throw new Error(
+      `The profile at ${profilePath} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 /**
