@@ -557,16 +557,18 @@ repeating this item a third time for whichever mode is touched next.
 ## CLOSED: the grant issuer's own teardown never purges it
 
 **CLOSED 2026-09-14 by `3e3fb86`, "feat: purge the grant issuer after --delete-bootstrap, gated
-behind --confirm".** `runDeleteBootstrap` now purges the grant issuer from the tenant's deleted
-items after a confirmed delete, reusing `purgeDeletedApplicationWithRetry` and its
-replication-lag retry unchanged from `runDeleteServerApp`, exactly as this item's own closing
-paragraph proposed. Because purging is irreversible in a way the delete alone is not,
+behind --confirm", refined by `afbfd97`.** `runDeleteBootstrap` now purges the grant issuer from
+the tenant's deleted items after a confirmed delete, reusing `purgeDeletedApplicationWithRetry`
+and its replication-lag retry unchanged from `runDeleteServerApp`, exactly as this item's own
+closing paragraph proposed. Because purging is irreversible in a way the delete alone is not,
 `--delete-bootstrap` now also defaults to a dry run and needs `--confirm` to act, matching
 `--delete-server-app`; every operator-facing message that names this command, including the
 normal run's own grant-issuer-teardown note and `docs/SETUP.md`, was updated so it names
-`--confirm` rather than pointing at an invocation that would now only preview. Not verified
-against a live tenant; see this file's live-testing entries above for what has and has not
-actually been exercised.
+`--confirm` rather than pointing at an invocation that would now only preview. Review caught that
+the first pass left the delete's own 404 unguarded, reporting failure and skipping the purge on
+exactly the run most likely to need it; `afbfd97` fixed that by mirroring
+`runDeleteServerApp`'s own `applicationDeleted` handling. Not verified against a live tenant; see
+this file's live-testing entries above for what has and has not actually been exercised.
 
 Original entry follows.
 
