@@ -238,6 +238,12 @@ success message no longer tell an operator to delete the grant issuer once onboa
 both now say to keep it until every site it onboarded has itself been decommissioned, because
 `--delete-server-app`'s revoke step needs that same grant issuer's app-only token.
 
+Everything in the two paragraphs above describes code, not a run. No part of this mode has ever
+made a Graph call against a tenant: its behavior is known from reading it and from tests against
+a fake `SetupGraph`, and nothing in it has been proven by use. The closure is that the mode
+exists, not that it works. The phase 2a live-run checklist further down this file now ends with a
+teardown step that would be its first real exercise.
+
 One gap survives, recorded separately below: if the delete succeeds and the purge that follows it
 fails, the mode cannot recover on a re-run, because the lookup it uses to find the application
 does not see a soft-deleted one.
@@ -319,7 +325,11 @@ Still unexercised: every failure path. Rollback, the propagation retry, the pref
 the duplicate-bootstrap guard, and every diagnostic message have been tested only against
 fakes. The `--delete-bootstrap` path added afterward is in the same position: its not-found
 refusal, its ambiguous-match refusal, and its success message are covered by tests against
-fakes, not by a live delete against a real tenant. No live failure on any of these paths has
+fakes, not by a live delete against a real tenant. `--delete-server-app`, added 2026-09-13, is
+the same again and is the larger gap of the two, because it is the mode with the most steps and
+the most destructive ones: the permissions listing and its paging, the revoke, the delete, the
+purge and its replication-lag retry, the dry run, `--force-orphan`, and every message each of
+them prints have all been run only against fakes. No live failure on any of these paths has
 been observed.
 
 ## Deferred from the reconciliation engine's whole-branch review, 2026-09-13
@@ -492,9 +502,20 @@ operator.
 7. Add a file to the synthetic library and scan. Rename a file and scan. Move a file between
    client folders and scan. Delete a file and scan. After each, confirm the snapshot tracks the
    change and that no ghost row survives the move.
-8. Record the actual numbers and outcomes from steps 5 through 7 in this file, in a new dated
+8. Tear the server application back down with `npm run setup -- --tenant=<tenant-id>
+   --site=<site-url> --delete-server-app`, first without `--confirm` and then with it. This is the
+   sitting in which that mode gets exercised against a real tenant for the first time, which the
+   teardown design expected rather than a separate trip. Two things to check that no test can
+   answer. Confirm **App registrations, Deleted applications** is empty afterward, which is the
+   only evidence the purge happened rather than returning not found against a directory that had
+   not caught up. And check whether a service principal for that application survives the delete:
+   nobody on this project has verified that deleting an application registration also removes its
+   service principal, and if one survives, this mode needs a step to remove it and the rollback in
+   `runSetup` has the same gap. Record which it was.
+9. Record the actual numbers and outcomes from steps 5 through 7 in this file, in a new dated
    section, following the tone of the 2026-09-12 setup entry above: name the numbers, name what
-   still was not exercised, and do not describe an untested path as working.
+   still was not exercised, and do not describe an untested path as working. Record step 8's two
+   answers in the same section.
 
 Until those numbers exist, this phase's central claim, that delta plus a persisted continuation
 link bounds the Graph request count, is unverified. The numbers belong in this file when they
