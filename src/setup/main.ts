@@ -150,7 +150,7 @@ async function main(): Promise<void> {
   if (parsed.deleteBootstrap) {
     const result = await runDeleteBootstrap(
       graph,
-      { displayName },
+      { displayName, confirm: parsed.confirm },
       { onNotice: (message) => console.error(message) },
     );
 
