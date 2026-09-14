@@ -29,9 +29,12 @@ function isOwed(value: string | number | boolean | null | undefined): boolean {
 function owesDeliverable(row: ClientRecord, deliverable: Deliverable): boolean {
   const field = deliverable.appliesTo.workbookField;
   // The profile validator already guarantees `field` is a key in
-  // workbookMapping.columns, so its absence here means this particular row
-  // left the cell blank rather than the profile being wrong. Blank means not
-  // owed, not a thrown error.
+  // workbookMapping.columns, so an absent entry is never the profile being
+  // wrong. It is also no longer something the workbook reader produces: that
+  // reader writes every mapped field on every row, using null for a cell that
+  // is blank or absent. So this branch now covers snapshots assembled by hand,
+  // such as the engine's own fixtures, and it treats them the way it treats a
+  // blank cell: not owed, not a thrown error.
   if (!(field in row.fields)) return false;
   return isOwed(row.fields[field]);
 }
@@ -55,6 +58,36 @@ const ISO_EFFECTIVE_FROM =
   /^(\d{4})-(\d{2})(?:-(?:0[1-9]|[12]\d|3[01]))?(?:[T ](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-](?:[01]\d|2[0-3]):?[0-5]\d)?)?$/;
 
 /**
+ * Whether a string is an effective-date value this engine can read. Exported
+ * through `index.js` so the workbook reader screens cells against the same
+ * rule the engine applies to them, rather than against a second definition of
+ * it.
+ *
+ * One predicate because two had already drifted, in both directions at once.
+ * The reader's own pattern accepted "2026-13-01" and "2026-06-45", which this
+ * one refuses, so those cells passed the reader and then threw here, aborting
+ * the whole report for every client rather than being rejected as one row. And
+ * it refused the bare "2026-06" this one accepts, so a client was dropped from
+ * a compliance report over a value the engine would have read. Both failures
+ * come from the same shape of mistake, and neither is visible from inside
+ * either module.
+ *
+ * The regex is not the whole rule: it range-checks the day but leaves the
+ * month to `assertValidMonth`, so a predicate built on the pattern alone would
+ * reintroduce the first half of the same disagreement.
+ */
+export function isIsoEffectiveFrom(value: string): boolean {
+  const match = ISO_EFFECTIVE_FROM.exec(value);
+  if (!match) return false;
+  try {
+    assertValidMonth(Number(match[2]));
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+/**
  * Reads the leading year and month out of an ISO date string by pattern
  * rather than through `Date`, so a workbook's effective date is never read
  * against the server's local timezone or the moment the parse happens to
@@ -68,12 +101,14 @@ const ISO_EFFECTIVE_FROM =
  * where a date typed "15/08/2026" or otherwise malformed shows up, so both
  * failure modes here name the client and quote the offending value.
  *
- * One malformed cell still aborts the whole report rather than excluding the
- * one client it belongs to. That is what this code does, and whether it is
- * the right behavior is an open question recorded in docs/OPEN-ITEMS.md under
- * "Should one bad workbook row abort the whole reconciliation?". Naming the
- * client and the value spares an operator bisecting a fifty-row spreadsheet
- * to find the cell; it does not spare them re-running the report.
+ * A throw here does still abort the whole report, and that is now a guard on
+ * a contract rather than the handling of a bad cell. The workbook reader
+ * screens every effective-date cell against `isIsoEffectiveFrom` above and
+ * rejects the row it belongs to, so a value reaching this line from the real
+ * reader means a caller assembled a `WorkbookSnapshot` some other way. That
+ * is the resolution recorded in docs/OPEN-ITEMS.md under "CLOSED: one bad
+ * workbook row does not abort the whole reconciliation". Naming the client
+ * and the value is what makes such a snapshot's origin findable.
  */
 function effectiveFromPeriod(client: string, iso: string): Period {
   const match = ISO_EFFECTIVE_FROM.exec(iso);
