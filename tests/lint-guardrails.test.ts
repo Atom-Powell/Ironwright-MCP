@@ -179,6 +179,28 @@ describe("the reconciliation engine's single entry point", () => {
 
     expect(ruleIds).toContain("no-restricted-imports");
   });
+
+  it("refuses a workbook layer import", async () => {
+    // src/workbook/ is the impure mapping layer that turns a grid of cell
+    // values into ClientRecords. It imports the domain layer's entry point,
+    // not the other way around, so the domain layer must not be able to
+    // reach back into it.
+    const ruleIds = await ruleIdsFor(
+      "src/domain/probe.ts",
+      'import { readWorkbookGrid } from "../../workbook/read.js";\nexport const use = readWorkbookGrid;\n',
+    );
+
+    expect(ruleIds).toContain("no-restricted-imports");
+  });
+
+  it("names the workbook layer in the purity message", async () => {
+    const messages = await messagesFor(
+      "src/domain/probe.ts",
+      'import { readWorkbookGrid } from "../../workbook/read.js";\nexport const use = readWorkbookGrid;\n',
+    );
+
+    expect(messages.join("\n")).toContain("workbook");
+  });
 });
 
 describe("the domain layer's freedom from the clock", () => {
