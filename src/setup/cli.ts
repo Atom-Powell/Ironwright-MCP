@@ -5,7 +5,7 @@
 
 import { SetupFailedError } from "./errors.js";
 import { GraphRequestError } from "../graph/errors.js";
-import type { DeleteBootstrapOutcome } from "./run.js";
+import type { DeleteBootstrapOutcome, DeleteServerAppOutcome } from "./run.js";
 import { BOOTSTRAP_SECRET_LIFETIME_DAYS } from "./steps.js";
 
 export interface ParsedArgs {
@@ -330,6 +330,71 @@ export function describeDeleteBootstrapSuccess(result: DeleteBootstrapOutcome): 
     "will fail with a rejected-credentials message that reads like a wrong secret rather than a deleted " +
     "application. Onboarding another site later needs a grant issuer again, so run this command with " +
     "--create-bootstrap first."
+  );
+}
+
+/**
+ * The full `--delete-server-app` output, printed on stdout, covering all three
+ * outcomes runDeleteServerApp can return. A pure function for the same reason
+ * describeDeleteBootstrapSuccess above is one: so its wording can be pinned by
+ * a test.
+ *
+ * Two things here are load-bearing and must not be softened. The planned
+ * branch uses no past-tense verb, because nothing has happened: this is a dry
+ * run. And the orphaned branch says a permission entry *may* remain rather
+ * than that one does: with --force-orphan the site's permissions were never
+ * listed, so the code cannot observe whether there was one, and claiming
+ * there is would assert something it did not see.
+ */
+export function describeDeleteServerAppOutcome(outcome: DeleteServerAppOutcome, siteUrl: string): string {
+  if (outcome.kind === "already-absent") {
+    return (
+      `No application named "${outcome.displayName}" exists in this tenant, so there was nothing to do and ` +
+      "nothing was deleted. If it was created under a different name, re-run with the same --name it was " +
+      "created with. If it was already removed, this is the finished state. A permission entry granted to it " +
+      `may still sit on ${siteUrl}, and this command cannot find it once the application it named is gone: ` +
+      "clearing that needs the entry identified by hand in the site's permissions."
+    );
+  }
+
+  if (outcome.kind === "planned") {
+    // Three cases, not two. An undefined permissionId means "the listing found
+    // no match" only when the listing ran; under --force-orphan it means nobody
+    // looked, and reporting that as an absence would assert something this run
+    // never observed. Task 4's review added permissionsInspected for exactly
+    // this distinction.
+    const permission = !outcome.permissionsInspected
+      ? `The site's permissions on ${siteUrl} were not inspected, because --force-orphan was given and ` +
+        "inspecting them needs a grant issuer. If an entry is granted to this application it would be " +
+        "left behind."
+      : outcome.permissionId === undefined
+        ? `No permission entry on ${siteUrl} is granted to it, so there would be nothing to revoke.`
+        : `It would first revoke permission entry ${outcome.permissionId} on ${siteUrl}.`;
+
+    return (
+      `This was a dry run and nothing was changed. Application ${outcome.appId}, object id ${outcome.objectId}, ` +
+      `is what would be removed. ${permission} It would then delete the application and purge it from the ` +
+      "tenant's deleted items, which is what ends its secret's life: a delete alone is a soft delete and leaves " +
+      "the credential restorable for 30 days. Re-run with --confirm to carry this out."
+    );
+  }
+
+  const revoked = outcome.permissionRevoked
+    ? `Revoked its permission entry on ${siteUrl}.`
+    : `No permission entry on ${siteUrl} was granted to it, so none was revoked.`;
+
+  const residue = outcome.orphanedPermission
+    ? ` A permission entry for this application may still remain on ${siteUrl}, because --force-orphan ran this ` +
+      "teardown without a grant issuer and the site's permissions were never inspected. If one remains it now " +
+      "names an identity that no longer exists, so it grants access to nothing, and removing it needs a grant " +
+      "issuer created with --create-bootstrap and the entry identified by hand."
+    : "";
+
+  return (
+    `Deleted application ${outcome.appId} and purged it from deleted items, so its secret is not recoverable: ` +
+    "an application deleted but not purged stays restorable, with its credentials, for 30 days. " +
+    `${revoked}${residue} Onboarding this site again needs a fresh application, so run this command without ` +
+    "--delete-server-app when you do."
   );
 }
 

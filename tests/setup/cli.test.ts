@@ -4,6 +4,7 @@ import {
   acquireTokenWithRetry,
   describeBootstrapSuccess,
   describeDeleteBootstrapSuccess,
+  describeDeleteServerAppOutcome,
   describeGrantIssuerTeardownNote,
   describeSetupSuccess,
   describeSignInFailure,
@@ -330,6 +331,78 @@ describe("grant issuer teardown note is confined to the normal run's success bui
     const message = describeDeleteBootstrapSuccess({ kind: "deleted", appId: "app-1", objectId: "obj-1" });
 
     expect(message).not.toMatch(/not needed for this site/i);
+  });
+});
+
+describe("describeDeleteServerAppOutcome", () => {
+  it("previews what it would remove without claiming it removed anything", () => {
+    const message = describeDeleteServerAppOutcome(
+      { kind: "planned", appId: "app-1", objectId: "obj-1", permissionId: "perm-1", permissionsInspected: true },
+      "https://contoso.sharepoint.com/sites/Example",
+    );
+
+    expect(message).toMatch(/would/i);
+    expect(message).toMatch(/--confirm/);
+    expect(message).toMatch(/app-1/);
+    expect(message).toMatch(/perm-1/);
+    expect(message).not.toMatch(/Deleted|Purged|Revoked/);
+  });
+
+  it("says the permission entry is not there when the listing ran and matched nothing", () => {
+    const message = describeDeleteServerAppOutcome(
+      { kind: "planned", appId: "app-1", objectId: "obj-1", permissionId: undefined, permissionsInspected: true },
+      "https://contoso.sharepoint.com/sites/Example",
+    );
+
+    expect(message).toMatch(/no permission entry/i);
+  });
+
+  it("says the permissions were not inspected when --force-orphan skipped the listing", () => {
+    const message = describeDeleteServerAppOutcome(
+      { kind: "planned", appId: "app-1", objectId: "obj-1", permissionId: undefined, permissionsInspected: false },
+      "https://contoso.sharepoint.com/sites/Example",
+    );
+
+    // The distinction this test exists for: an uninspected site must not be
+    // reported as an empty one.
+    expect(message).toMatch(/not inspected/i);
+    expect(message).not.toMatch(/no permission entry/i);
+  });
+
+  it("reports a completed teardown and says the credential is no longer recoverable", () => {
+    const message = describeDeleteServerAppOutcome(
+      { kind: "torn-down", appId: "app-1", objectId: "obj-1", permissionRevoked: true, orphanedPermission: false },
+      "https://contoso.sharepoint.com/sites/Example",
+    );
+
+    expect(message).toMatch(/revoked/i);
+    expect(message).toMatch(/purged/i);
+    expect(message).toMatch(/not recoverable/i);
+  });
+
+  it("names the residue exactly when the permission entry was left behind", () => {
+    const message = describeDeleteServerAppOutcome(
+      { kind: "torn-down", appId: "app-1", objectId: "obj-1", permissionRevoked: false, orphanedPermission: true },
+      "https://contoso.sharepoint.com/sites/Example",
+    );
+
+    // "may still remain", not "remains": with --force-orphan the site's
+    // permissions were never listed, so the code cannot observe whether there
+    // was an entry, and asserting one would claim something it did not see.
+    expect(message).toMatch(/may still remain/i);
+    expect(message).toMatch(/grants access to nothing/i);
+    expect(message).toMatch(/--create-bootstrap/);
+    expect(message).not.toMatch(/entry remains on/i);
+  });
+
+  it("says nothing was deleted when the application was already gone", () => {
+    const message = describeDeleteServerAppOutcome(
+      { kind: "already-absent", displayName: "Ironwright Repository Reconciliation" },
+      "https://contoso.sharepoint.com/sites/Example",
+    );
+
+    expect(message).toMatch(/nothing to do/i);
+    expect(message).not.toMatch(/Deleted application/);
   });
 });
 
