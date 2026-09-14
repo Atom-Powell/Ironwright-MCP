@@ -181,10 +181,11 @@ describe("the reconciliation engine's single entry point", () => {
   });
 
   it("refuses a workbook layer import", async () => {
-    // src/workbook/ is the impure mapping layer that turns a grid of cell
-    // values into ClientRecords. It imports the domain layer's entry point,
-    // not the other way around, so the domain layer must not be able to
-    // reach back into it.
+    // src/workbook/ is the mapping layer that turns a grid of cell values into
+    // ClientRecords. It is pure, so the fence is about layering rather than
+    // purity: it imports the domain layer's entry point, and a domain module
+    // importing back would make the dependency circular and put the engine
+    // downstream of its own caller.
     const ruleIds = await ruleIdsFor(
       "src/domain/probe.ts",
       'import { readWorkbookGrid } from "../../workbook/read.js";\nexport const use = readWorkbookGrid;\n',

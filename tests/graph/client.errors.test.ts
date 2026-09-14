@@ -145,7 +145,7 @@ describe("createGraphClient failures", () => {
     expect(attempts).toBe(1);
   });
 
-  it("names the method in the non-JSON refusal, which currently hard-codes GET", async () => {
+  it("names the method the caller actually used in the non-JSON refusal", async () => {
     const client = createGraphClient({
       tokenProvider: TOKEN,
       fetchImpl: (async () => new Response("<html>proxy</html>", { status: 200 })) as typeof fetch,

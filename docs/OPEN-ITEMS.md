@@ -535,9 +535,9 @@ Until those numbers exist, this phase's central claim, that delta plus a persist
 link bounds the Graph request count, is unverified. The numbers belong in this file when they
 exist, not before.
 
-## Phase 2b: covered only by fakes, 2026-09-14
+## Phase 2b-1: covered only by fakes, 2026-09-14
 
-Phase 2b, the workbook snapshot, has not been run against a real tenant. No Excel call has been
+Phase 2b-1, the workbook snapshot, has not been run against a real tenant. No Excel call has been
 made by this code, against a real workbook or otherwise. Everything below is verified against
 fake Graph transports, and nothing more should be read into it than that.
 

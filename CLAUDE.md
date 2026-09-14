@@ -53,8 +53,10 @@ request, which Copilot Studio requires and which prevents cross-request state le
 **Graph access, in priority order.** Path-based `driveItem` addressing over ID addressing.
 `$batch` for combining requests, respecting the 20-request and 4 MB caps. Delta query with a
 persisted `deltaLink`. Microsoft Search as the cross-check for files outside the expected
-taxonomy. ETags with `If-Match` on every write. `$batch` and the Microsoft Search cross-check
-are built in phase 2b, with the callers that exercise them, rather than ahead of any consumer.
+taxonomy. ETags with `If-Match` on every write. Each is built with the caller that exercises it
+rather than ahead of any consumer, which is why phase 2b was split on 2026-09-14: `$batch` moves
+to phase 6, where the write tools are its first real caller, and the Microsoft Search cross-check
+becomes phase 2c.
 
 **Excel as a database.** Non-persistent workbook sessions, the session header on every call, and
 explicit detection and recreation of expired sessions. Amended 2026-09-14. Sessions are
@@ -157,20 +159,27 @@ registry, so a tool added later inherits every check.
 
 ## Build Sequence
 
-The spec carries the full phase descriptions. Status as of 2026-09-13:
+The spec carries the full phase descriptions. Status as of 2026-09-14:
 
 1. **Foundation.** Complete and merged. Stateless transport, all ten tools registered as honest
    stubs behind the contract test, the pure profile schema, the two-layer write gate, and a
    scripted per-tenant setup verified end to end against a live tenant.
-2. **Graph performance layer**, split into 2a and 2b because it is more work than one
+2. **Graph performance layer**, split into 2a, 2b-1 and 2c because it is more work than one
    implementation plan should carry.
    - **2a: the Graph layer and the repository snapshot.** Complete, pending live verification.
      The token provider, `Retry-After`-aware retry, path addressing, the delta client, both
      `StateStore` implementations, the snapshot assembler, and the `scan` command, over plain
      `fetch`. Verified against fakes; not yet run against a live tenant.
-   - **2b: batch, the Search cross-check, and the Excel session.** Not started. The `$batch`
-     builder, the Microsoft Search cross-check, the Excel session manager, and the
-     `WorkbookSnapshot`.
+   - **2b-1: the Excel session and the workbook snapshot.** Complete, covered by fakes only. The
+     non-persistent Excel session manager, the mapped range read, the pure workbook reader that
+     turns a grid into records and rejections, and `readWorkbookSnapshot`, which assembles the
+     `WorkbookSnapshot` that is the engine's second input. No Excel call has ever been made against a
+     real workbook, by this code or any other, so nothing here is verified against a tenant.
+   - **2c: the Microsoft Search cross-check.** Not started, and its own spec is still to write.
+     Until it exists every report carries `searchCrossCheckIncluded: false`.
+   - The `$batch` builder left this phase on 2026-09-14 for phase 6. A delta-driven inventory
+     has no use for it and a range read is one call either way, so its first real caller is the
+     write tools.
 3. **Reconciliation engine.** Complete, pending review. Pure and fixture-tested with no Graph
    dependency, which is what let it be built ahead of phase 2. `reconcile` is the single public
    entry; the four stages behind it stay internal so two tools cannot disagree about whether a
@@ -188,7 +197,8 @@ Of the three decisions the parent spec required before phase 2, two are settled 
 `docs/OPEN-ITEMS.md`: the per-site grant does not accept a delegated token, and the MCP endpoint
 authenticates through Container Apps built-in Entra auth. The third, which delegated scopes the
 setup command's device-code sign-in must request, is still open, but it governs that sign-in
-rather than the server's own Graph access, so it does not block phase 2b either.
+rather than the server's own Graph access, so it did not block phase 2b-1 and does not block
+2c.
 
 ## Still open
 

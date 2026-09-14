@@ -355,12 +355,12 @@ copy of production.
    addressing, ETag capture, delta, both `StateStore` implementations, and a scripted `scan`
    command that produces a persisted `RepositorySnapshot`. **2b** split further on 2026-09-14,
    because it bundled three pieces of work with three different consumers and three different
-   states of readiness. **2b** is now the workbook snapshot alone: Excel sessions and the
-   `WorkbookSnapshot`. **2c** is the Microsoft Search cross-check, its own slice with its own
-   spec still to write. `$batch` moves to phase 6, alongside `conflictBehavior`, because the
-   write tools are its first real caller: renaming two hundred files is two hundred requests
-   without it and ten with it, and building it now would pin its split boundaries and
-   partial-failure semantics against guesses about a consumer that does not exist.
+   states of readiness. **2b-1**, the name the slice's own spec uses, is now the workbook snapshot
+   alone: Excel sessions and the `WorkbookSnapshot`. **2c** is the Microsoft Search cross-check, its
+   own slice with its own spec still to write. `$batch` moves to phase 6, alongside
+   `conflictBehavior`, because the write tools are its first real caller: renaming two hundred files
+   is two hundred requests without it and ten with it, and building it now would pin its split
+   boundaries and partial-failure semantics against guesses about a consumer that does not exist.
 3. **Domain engine.** Expected-state derivation, renderers, matcher, diff. Pure and
    fixture-tested. Has no dependency on phase 2 and can be built in parallel with it.
 4. **Read tools.** `inventory_tree`, `describe_workbook`,
