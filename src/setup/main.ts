@@ -4,6 +4,7 @@ import {
   acquireTokenWithRetry,
   describeBootstrapSuccess,
   describeDeleteBootstrapSuccess,
+  describeDeleteServerAppOutcome,
   describeSetupFailure,
   describeSetupSuccess,
   describeSignInFailure,
@@ -12,7 +13,7 @@ import {
   parseArgs,
   type SetupMode,
 } from "./cli.js";
-import { runCreateBootstrap, runDeleteBootstrap, runSetup } from "./run.js";
+import { runCreateBootstrap, runDeleteBootstrap, runDeleteServerApp, runSetup } from "./run.js";
 import { assertBootstrapToken } from "./steps.js";
 
 /**
@@ -63,7 +64,13 @@ let mode: SetupMode = "setup";
 
 async function main(): Promise<void> {
   const parsed = parseArgs(process.argv);
-  mode = parsed.deleteBootstrap ? "delete-bootstrap" : parsed.createBootstrap ? "create-bootstrap" : "setup";
+  mode = parsed.deleteServerApp
+    ? "delete-server-app"
+    : parsed.deleteBootstrap
+      ? "delete-bootstrap"
+      : parsed.createBootstrap
+        ? "create-bootstrap"
+        : "setup";
   const { tenantId, siteUrl, displayName, write, clientId } = parsed;
 
   // Minted at most once per run. The preflight below needs this token only to
@@ -94,8 +101,15 @@ async function main(): Promise<void> {
   // that mode is exempt. Deleting it is exempt for the opposite reason: this
   // mode exists for a grant issuer whose secret was lost or has already
   // expired, and requiring exactly that secret here would make it unusable in
-  // the one situation it was built for.
-  if (!parsed.createBootstrap && !parsed.deleteBootstrap) {
+  // the one situation it was built for. --delete-server-app is exempt too, but
+  // not because this preflight is meaningless for it: unlike the two bootstrap
+  // modes, this teardown can genuinely need the bootstrap token, to revoke the
+  // permission entry it grants. That need depends on whether bootstrap
+  // credentials actually resolved, which the delete-server-app arm below
+  // checks for itself before acquiring anything, so folding it into this
+  // shared, unconditional check would run the exchange even under
+  // --force-orphan, where the whole point is to skip it.
+  if (!parsed.createBootstrap && !parsed.deleteBootstrap && !parsed.deleteServerApp) {
     assertBootstrapToken(await acquireBootstrapToken());
   }
 
@@ -159,6 +173,38 @@ async function main(): Promise<void> {
     return;
   }
 
+  // A separate mode, like the two bootstrap ones above: it tears down the
+  // application a normal run creates, not the grant issuer, and printing its
+  // output alongside runSetup's would risk conflating the two applications
+  // this command can act on.
+  if (parsed.deleteServerApp) {
+    // hasGrantIssuer reflects whether bootstrap credentials actually
+    // resolved, not whether --bootstrap-client-id or the environment
+    // variables were merely typed. parsed.bootstrap is already that
+    // resolution, done once by parseArgs; re-deriving it from raw argv or env
+    // here would risk a second, possibly different, answer.
+    const hasGrantIssuer = parsed.bootstrap !== undefined;
+
+    // Acquired only when there is something to acquire, and validated the
+    // same way the normal run's preflight above validates it. With
+    // --force-orphan and no bootstrap credentials, runDeleteServerApp is
+    // designed to skip the permission listing entirely and proceed as a
+    // deliberate orphan, so attempting this exchange here would fail on
+    // credentials that do not exist before that design ever gets to run.
+    if (hasGrantIssuer) {
+      assertBootstrapToken(await acquireBootstrapToken());
+    }
+
+    const result = await runDeleteServerApp(
+      graph,
+      { siteUrl, displayName, confirm: parsed.confirm, forceOrphan: parsed.forceOrphan, hasGrantIssuer },
+      { onNotice: (message) => console.error(message) },
+    );
+
+    console.log(describeDeleteServerAppOutcome(result, siteUrl));
+    return;
+  }
+
   const result = await runSetup(
     graph,
     { displayName, siteUrl, write },
@@ -180,8 +226,8 @@ async function main(): Promise<void> {
   // The whole block, values and teardown note together, comes from one pure
   // builder rather than a sequence of console.log calls here, so its wording
   // and the note's position after the four values can be pinned by a test
-  // without running main.ts itself. The two bootstrap modes above both return
-  // before reaching here, so neither ever prints this block.
+  // without running main.ts itself. The three other modes above all return
+  // before reaching here, so none of them ever prints this block.
   console.log(
     describeSetupSuccess({
       confirmed: result.verification.confirmed,

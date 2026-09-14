@@ -241,6 +241,128 @@ describe("createFetchSetupGraph", () => {
     expect(calls[0]?.authorization).toBe("Bearer bootstrap-token");
     expect(calls[1]?.authorization).toBe("Bearer admin-token");
   });
+
+  it("lists a site's permissions with the application ids inside each grant", async () => {
+    const calls = stubFetch([
+      {
+        status: 200,
+        body: JSON.stringify({
+          value: [
+            {
+              id: "perm-1",
+              grantedToIdentitiesV2: [{ application: { id: "app-a", displayName: "A" } }],
+            },
+            {
+              id: "perm-2",
+              grantedToIdentitiesV2: [
+                { application: { id: "app-b", displayName: "B" } },
+                { application: { id: "app-c", displayName: "C" } },
+              ],
+            },
+          ],
+        }),
+      },
+    ]);
+
+    const result = await graph().listSitePermissions("site-1");
+
+    expect(result).toEqual([
+      { permissionId: "perm-1", appIds: ["app-a"] },
+      { permissionId: "perm-2", appIds: ["app-b", "app-c"] },
+    ]);
+    expect(calls[0]?.url).toBe("https://graph.microsoft.com/v1.0/sites/site-1/permissions");
+    expect(calls[0]?.method).toBe("GET");
+    expect(calls[0]?.authorization).toBe("Bearer bootstrap-token");
+  });
+
+  it("follows @odata.nextLink so a match on a later page is not read as an absence", async () => {
+    // The consumer of this listing, --delete-server-app, treats no match as
+    // "no permission entry is granted to this application" and then deletes
+    // and purges. A first page read in isolation would make that an asserted
+    // absence, and leave the orphaned entry the mode exists to prevent.
+    const calls = stubFetch([
+      {
+        status: 200,
+        body: JSON.stringify({
+          value: [{ id: "perm-1", grantedToIdentitiesV2: [{ application: { id: "app-a", displayName: "A" } }] }],
+          "@odata.nextLink": "https://graph.microsoft.com/v1.0/sites/site-1/permissions?$skiptoken=abc",
+        }),
+      },
+      {
+        status: 200,
+        body: JSON.stringify({
+          value: [{ id: "perm-2", grantedToIdentitiesV2: [{ application: { id: "app-b", displayName: "B" } }] }],
+        }),
+      },
+    ]);
+
+    await expect(graph().listSitePermissions("site-1")).resolves.toEqual([
+      { permissionId: "perm-1", appIds: ["app-a"] },
+      { permissionId: "perm-2", appIds: ["app-b"] },
+    ]);
+    expect(calls.map((call) => call.url)).toEqual([
+      "https://graph.microsoft.com/v1.0/sites/site-1/permissions",
+      "https://graph.microsoft.com/v1.0/sites/site-1/permissions?$skiptoken=abc",
+    ]);
+    expect(calls[1]?.authorization).toBe("Bearer bootstrap-token");
+  });
+
+  it("reads an entry that carries no granted identities as granting to nobody", async () => {
+    stubFetch([{ status: 200, body: JSON.stringify({ value: [{ id: "perm-1" }] }) }]);
+
+    await expect(graph().listSitePermissions("site-1")).resolves.toEqual([
+      { permissionId: "perm-1", appIds: [] },
+    ]);
+  });
+
+  it("falls back to the deprecated grantedToIdentities field when a response carries no V2 identities", async () => {
+    // grantSitePermission's own request body is written in this deprecated
+    // shape (steps.ts's SitePermissionRequest), so a response that echoes back
+    // what was sent, rather than Graph's newer grantedToIdentitiesV2 shape, is
+    // a real possibility, not a hypothetical one.
+    stubFetch([
+      {
+        status: 200,
+        body: JSON.stringify({
+          value: [{ id: "perm-1", grantedToIdentities: [{ application: { id: "app-a", displayName: "A" } }] }],
+        }),
+      },
+    ]);
+
+    await expect(graph().listSitePermissions("site-1")).resolves.toEqual([
+      { permissionId: "perm-1", appIds: ["app-a"] },
+    ]);
+  });
+
+  it("skips an entry with no usable id rather than refusing the whole listing", async () => {
+    stubFetch([
+      {
+        status: 200,
+        body: JSON.stringify({
+          value: [
+            { grantedToIdentitiesV2: [{ application: { id: "app-a", displayName: "A" } }] },
+            { id: "perm-2", grantedToIdentitiesV2: [{ application: { id: "app-b", displayName: "B" } }] },
+          ],
+        }),
+      },
+    ]);
+
+    await expect(graph().listSitePermissions("site-1")).resolves.toEqual([
+      { permissionId: "perm-2", appIds: ["app-b"] },
+    ]);
+  });
+
+  it("purges a deleted application from the tenant's deleted items", async () => {
+    const calls = stubFetch([{ status: 204, body: "" }]);
+
+    await expect(graph().purgeDeletedApplication("object-1")).resolves.toBeUndefined();
+
+    expect(calls[0]).toMatchObject({
+      url: "https://graph.microsoft.com/v1.0/directory/deletedItems/object-1",
+      method: "DELETE",
+      authorization: "Bearer admin-token",
+    });
+  });
 });
 
 describe("token routing", () => {
@@ -362,6 +484,20 @@ describe("token routing", () => {
       status: 204,
       body: "",
       call: (g) => g.deleteApplication("object-1"),
+    },
+    {
+      name: "listSitePermissions",
+      token: BOOTSTRAP,
+      status: 200,
+      body: JSON.stringify({ value: [] }),
+      call: (g) => g.listSitePermissions("site-1"),
+    },
+    {
+      name: "purgeDeletedApplication",
+      token: ADMIN,
+      status: 204,
+      body: "",
+      call: (g) => g.purgeDeletedApplication("object-1"),
     },
   ];
 

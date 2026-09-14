@@ -5,6 +5,7 @@
 
 import { SetupFailedError } from "./errors.js";
 import { GraphRequestError } from "../graph/errors.js";
+import type { DeleteBootstrapOutcome, DeleteServerAppOutcome } from "./run.js";
 import { BOOTSTRAP_SECRET_LIFETIME_DAYS } from "./steps.js";
 
 export interface ParsedArgs {
@@ -15,6 +16,9 @@ export interface ParsedArgs {
   clientId: string;
   createBootstrap: boolean;
   deleteBootstrap: boolean;
+  deleteServerApp: boolean;
+  confirm: boolean;
+  forceOrphan: boolean;
   bootstrap: BootstrapCredentials | undefined;
 }
 
@@ -87,15 +91,22 @@ function emptyToUndefined(value: string | undefined): string | undefined {
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): ParsedArgs {
   const createBootstrap = argv.includes("--create-bootstrap");
   const deleteBootstrap = argv.includes("--delete-bootstrap");
+  const deleteServerApp = argv.includes("--delete-server-app");
 
-  // Creating and deleting the grant issuer are opposite acts on the same
-  // application. Letting one silently win when both flags are given is how an
-  // operator deletes the grant issuer they meant to create, or recreates the
-  // one they meant to tear down, with no indication either happened.
-  if (createBootstrap && deleteBootstrap) {
+  // Three modes that act on different applications in different directions.
+  // Letting one silently win is how an operator tears down the application they
+  // meant to create, or deletes the grant issuer they meant to keep, with no
+  // indication either happened.
+  const modes = [
+    createBootstrap ? "--create-bootstrap" : undefined,
+    deleteBootstrap ? "--delete-bootstrap" : undefined,
+    deleteServerApp ? "--delete-server-app" : undefined,
+  ].filter((mode): mode is string => mode !== undefined);
+
+  if (modes.length > 1) {
     throw new Error(
-      "--create-bootstrap and --delete-bootstrap cannot be used together. Run one, confirm its result, then run " +
-        "the other if you still need to.",
+      `${modes.join(" and ")} cannot be used together. Run one, confirm its result, then run the other if you ` +
+        "still need to.",
     );
   }
 
@@ -113,6 +124,9 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     clientId: findValue(argv, "client-id") ?? DEFAULT_DEVICE_CODE_CLIENT_ID,
     createBootstrap,
     deleteBootstrap,
+    deleteServerApp,
+    confirm: argv.includes("--confirm"),
+    forceOrphan: argv.includes("--force-orphan"),
     bootstrap: resolveBootstrapCredentials(argv, env),
   };
 }
@@ -285,8 +299,26 @@ export function describeBootstrapSuccess(result: { appId: string; secret: string
  * a later normal run picks them up and fails at its preflight with a
  * rejected-credentials message that reads like a wrong secret, not a deleted
  * application, which sends whoever hits it after the wrong cause entirely.
+ *
+ * The already-absent branch is a distinct outcome, not a smaller version of
+ * the deleted one: nothing was found, so nothing was deleted, and the message
+ * says so plainly rather than reusing language ("deleted", "removed") that
+ * would claim an action this run never took. This is the case
+ * docs/OPEN-ITEMS.md recorded on 2026-09-12: runDeleteBootstrap used to throw
+ * here, which printed a failure for a tenant that was already in the state
+ * the operator wanted.
  */
-export function describeDeleteBootstrapSuccess(result: { appId: string }): string {
+export function describeDeleteBootstrapSuccess(result: DeleteBootstrapOutcome): string {
+  if (result.kind === "already-absent") {
+    return (
+      `No application named "${result.displayName}" exists in this tenant, so there was nothing to do and ` +
+      "nothing was deleted. If the grant issuer was created under a different name, re-run with the same --name " +
+      "it was created with. If it was removed by hand or by an earlier run, this is the finished state: a grant " +
+      "issuer that does not exist holds no standing permission. Onboarding another site later needs one again, " +
+      "so run this command with --create-bootstrap first."
+    );
+  }
+
   return (
     `Deleted application ${result.appId}. That removes the standing Sites.FullControl.All permission it held, not ` +
     "just its secret: a deleted application keeps no access, where an expired secret alone would not have. This " +
@@ -301,14 +333,130 @@ export function describeDeleteBootstrapSuccess(result: { appId: string }): strin
   );
 }
 
+/**
+ * The full `--delete-server-app` output, printed on stdout, covering all three
+ * outcomes runDeleteServerApp can return. A pure function for the same reason
+ * describeDeleteBootstrapSuccess above is one: so its wording can be pinned by
+ * a test.
+ *
+ * Three things here are load-bearing and must not be softened. The planned
+ * branch uses no past-tense verb, because nothing has happened: this is a dry
+ * run. The orphaned branch says a permission entry *may* remain rather
+ * than that one does: with --force-orphan the site's permissions were never
+ * listed, so the code cannot observe whether there was one, and claiming
+ * there is would assert something it did not see. And the torn-down branch
+ * states the delete and the purge separately, from applicationDeleted and
+ * purgeConfirmed, because runDeleteServerApp tolerates a 404 from either: a
+ * single sentence covering both told an operator a secret was unrecoverable on
+ * a run that had watched neither step happen.
+ */
+export function describeDeleteServerAppOutcome(outcome: DeleteServerAppOutcome, siteUrl: string): string {
+  if (outcome.kind === "already-absent") {
+    return (
+      `No application named "${outcome.displayName}" exists in this tenant, so there was nothing to do and ` +
+      "nothing was deleted. If it was created under a different name, re-run with the same --name it was " +
+      "created with. If it was already removed, this is the finished state. A permission entry granted to it " +
+      `may still sit on ${siteUrl}, and this command cannot find it once the application it named is gone: ` +
+      // Same residue and the same command as the torn-down branch's
+      // orphaned clause below, so the advice has to match it. This branch used
+      // to name only the manual identification and omit the grant issuer, which
+      // left an operator to discover the harder half on their own.
+      "clearing that needs a grant issuer created with --create-bootstrap and the entry identified by hand " +
+      "in the site's permissions."
+    );
+  }
+
+  if (outcome.kind === "planned") {
+    // Three cases, not two. An undefined permissionId means "the listing found
+    // no match" only when the listing ran; under --force-orphan it means nobody
+    // looked, and reporting that as an absence would assert something this run
+    // never observed. Task 4's review added permissionsInspected for exactly
+    // this distinction.
+    const permission = !outcome.permissionsInspected
+      ? `The site's permissions on ${siteUrl} were not inspected, because --force-orphan was given and ` +
+        "inspecting them needs a grant issuer. If an entry is granted to this application it would be " +
+        "left behind."
+      : outcome.permissionId === undefined
+        ? `No permission entry on ${siteUrl} is granted to it, so there would be nothing to revoke.`
+        : `It would first revoke permission entry ${outcome.permissionId} on ${siteUrl}.`;
+
+    return (
+      `This was a dry run and nothing was changed. Application ${outcome.appId}, object id ${outcome.objectId}, ` +
+      `is what would be removed. ${permission} It would then delete the application and purge it from the ` +
+      "tenant's deleted items, which is what ends its secret's life: a delete alone is a soft delete and leaves " +
+      "the credential restorable for 30 days. Re-run with --confirm to carry this out."
+    );
+  }
+
+  // Gated on orphanedPermission first, the same way the planned branch gates on
+  // permissionsInspected: permissionRevoked can only be true when a grant
+  // issuer was configured, and orphanedPermission is set from the absence of
+  // one, so the two clauses below and the residue clause after them would
+  // otherwise both fire on every --force-orphan teardown, one asserting no
+  // permission was granted and the other saying nobody looked. Only one of
+  // those is ever actually observed.
+  const revoked = outcome.orphanedPermission
+    ? `Nothing was revoked: the site's permissions on ${siteUrl} were never inspected, because --force-orphan ` +
+      "ran this teardown without a grant issuer."
+    : outcome.permissionRevoked
+      ? `Revoked its permission entry on ${siteUrl}.`
+      : `No permission entry on ${siteUrl} was granted to it, so none was revoked.`;
+
+  // The reason nothing was revoked already sits in the revoked clause above, so
+  // this only adds what that clause does not: what the entry means if one
+  // remains, and what removing it needs.
+  const residue = outcome.orphanedPermission
+    ? ` A permission entry for this application may still remain on ${siteUrl}. If one remains it now names an ` +
+      "identity that no longer exists, so it grants access to nothing, and removing it needs a grant issuer " +
+      "created with --create-bootstrap and the entry identified by hand."
+    : "";
+
+  // The delete and the purge each get their own clause, because each can end in
+  // a 404 that this command tolerates, and both 404s used to fall through to the
+  // same sentence a real teardown produced. That sentence claimed a credential
+  // was unrecoverable on a run that had observed neither step.
+  const deleted = outcome.applicationDeleted
+    ? `Deleted application ${outcome.appId}.`
+    : `Application ${outcome.appId} was already gone when this run tried to delete it, so this run did not ` +
+      "delete it.";
+
+  // The dangerous half. An unconfirmed purge fires milliseconds after the
+  // delete succeeded in the same run, so nobody purged the object in that
+  // window: the likelier reading is that it has not yet surfaced in deleted
+  // items, which means it is sitting there restorable with its credentials
+  // while a "not recoverable" message would say the opposite.
+  //
+  // The retrying clause is conditional on purgeRetried, not unconditional: a
+  // 404 whose code does not match Request_ResourceNotFound gives up after one
+  // attempt with no sleep at all, and that run never tested whether
+  // replication lag was the cause. Naming the retry there would tell the
+  // operator lag was ruled out when it was never ruled on anything.
+  const purged = outcome.purgeConfirmed
+    ? "Purged it from deleted items, so its secret is not recoverable: an application deleted but not purged " +
+      "stays restorable, with its credentials, for 30 days."
+    : `The purge returned not found${
+        outcome.purgeRetried ? ", even after retrying for the directory replication lag that usually explains that," : ","
+      } so this run could not confirm the purge. Either it was already purged, or it has not yet appeared in the ` +
+      "tenant's deleted items, where an application stays restorable with its credentials for 30 days. Confirm " +
+      "that App registrations, Deleted applications is empty before treating this credential as gone.";
+
+  return (
+    `${deleted} ${purged} ${revoked}${residue} Onboarding this site again needs a fresh application, so run ` +
+    "this command without --delete-server-app when you do."
+  );
+}
+
 // Identical on both the confirmed and unconfirmed arm. Only the clause naming
 // whether the grant issuer is still needed for this site differs between the
 // two; every claim after it is true regardless of whether verification could
 // confirm access, so there is no reason for it to read differently.
 const GRANT_ISSUER_TEARDOWN_TAIL =
-  "Only deleting it removes that standing permission: letting its secret expire disables a credential, not the " +
-  "application or the permission it holds. Run this command with --delete-bootstrap to delete it. Onboarding " +
-  "another site later needs a grant issuer again, so recreate it first with --create-bootstrap.";
+  "Keep it until this site is decommissioned: tearing down the server application then still needs a grant " +
+  "issuer's app-only token to revoke its permission entry on the site, and deleting the grant issuer now would " +
+  "mean recreating one with --create-bootstrap before that teardown could run. Letting its secret expire disables " +
+  "a credential, not the application or the permission it holds; only deleting it removes that standing " +
+  "permission. When this site is decommissioned, remove the server application first, then delete the grant " +
+  "issuer with --delete-bootstrap.";
 
 /**
  * The closing note printed after a normal run's four deployment values, on
@@ -325,21 +473,28 @@ const GRANT_ISSUER_TEARDOWN_TAIL =
  * deletion removes the standing privilege. Collapsing that distinction here
  * is a mistake this module has made before.
  *
- * The `confirmed` flag matters because only two of the opening sentence's
- * three claims are actually observed at this point in the run: that the
- * grant issuer still exists, and that it still holds Sites.FullControl.All,
- * both established by this same execution's own preflight. Whether it is "no
- * longer needed for this site" is not observed on the unconfirmed arm, since
- * that arm exists precisely because the run could not prove the new
- * application can reach the site. Asserting it anyway told an operator to
- * destroy the one credential able to reissue the per-site grant, in the same
- * breath as a message four lines above saying that credential might still be
- * needed.
+ * The `confirmed` flag still picks a different opening clause per arm, but an
+ * earlier version of the confirmed clause claimed the grant issuer was "not
+ * needed for this site any longer." That was true in isolation, the same way
+ * every clause GRANT_ISSUER_TEARDOWN_TAIL's rewrite touched was true in
+ * isolation, and false as the sentence an operator actually reads next to it:
+ * the tail says keep it because this site will need it again at
+ * decommissioning, so a claim that it is no longer needed for this site read
+ * as the message arguing with itself. The confirmed clause now states only
+ * what is true and unambiguous at this point: the grant issuer has finished
+ * the one thing this run needed from it, issuing the per-site permission,
+ * which succeeds before verification runs on either arm, so it is true here
+ * regardless of what verification later finds. The unconfirmed clause still
+ * differs, but for a nearer-term reason than the tail's long-term retention
+ * advice: this site's access itself has not been confirmed, so the grant
+ * issuer may be needed again immediately, to reissue or diagnose the very
+ * grant it just made, well before "until this site is decommissioned" is
+ * even the operative question.
  */
 export function describeGrantIssuerTeardownNote(confirmed: boolean): string {
   const openingClause = confirmed
-    ? "The grant issuer application is not needed for this site any longer, but it still exists and still holds " +
-      "Sites.FullControl.All across every site in this tenant."
+    ? "The grant issuer application has finished the work this run needed it for, and it still exists and still " +
+      "holds Sites.FullControl.All across every site in this tenant."
     : "This site's access has not been confirmed yet, and the grant issuer is the only credential that can " +
       "reissue the per-site grant, so deleting it should wait until this application's own access is confirmed. " +
       "It still exists and still holds Sites.FullControl.All across every site in this tenant.";
@@ -407,17 +562,39 @@ export function describeSetupSuccess(details: SetupSuccessDetails): string {
  * family is never about the signed-in operator's directory roles or about
  * site ownership, because the operator's token never reaches this endpoint.
  */
+// The trailing (\?.*)? is what a followed @odata.nextLink carries: Graph
+// paginates this listing with a query string ($skiptoken=...), and listSitePermissions
+// follows that link with the very same bootstrap token as the first page. Without
+// tolerating a query string here, a failure on page two matches nothing and falls
+// through to the generic remedies below, including the 401 one that tells the
+// operator to sign in again on a call that never used their sign-in at all.
 function isSitePermissionsPath(path: string): boolean {
-  return /^\/sites\/[^/]+\/permissions(\/[^/]+)?$/.test(path);
+  return /^\/sites\/[^/]+\/permissions(\/[^/]+)?(\?.*)?$/.test(path);
 }
 
 // Matches DELETE /applications/{id} (deleteApplication) but not POST
 // /applications (createApplication, no id segment) or
 // /applications/{id}/addPassword (an extra segment). Method is checked by the
 // caller, not here, because the same path shape never arises for any other
-// verb this command issues.
+// verb this command issues. Not widened for a query string the way
+// isSitePermissionsPath below is: deleteApplication is a single DELETE, never
+// a paged listing, so no @odata.nextLink and no query string can ever reach
+// this matcher. Widening it would tolerate an input this call cannot produce.
 function isApplicationObjectPath(path: string): boolean {
   return /^\/applications\/[^/]+$/.test(path);
+}
+
+// Matches DELETE /directory/deletedItems/{id}, the purge issued by
+// --delete-server-app after deleteApplication already succeeded. It shares no
+// path segment with /applications/{id}, so isApplicationObjectPath cannot
+// match it, and a 403 here used to fall through to the generic tail below,
+// which names creating an application, the wrong operation entirely for a
+// call issued only once an application has already been deleted. Same
+// reasoning as isApplicationObjectPath above for not tolerating a query
+// string: purgeDeletedApplication is a single DELETE, not a listing, so this
+// path never carries one either.
+function isDeletedItemsPath(path: string): boolean {
+  return /^\/directory\/deletedItems\/[^/]+$/.test(path);
 }
 
 function nextStepForGraphFailure(error: GraphRequestError): string {
@@ -459,6 +636,21 @@ function nextStepForGraphFailure(error: GraphRequestError): string {
       "The signed-in user is not allowed to delete this application registration. Deleting one needs Application " +
       "Administrator or Cloud Application Administrator rights over it; no admin consent is involved in deleting, " +
       "so Privileged Role Administrator or Global Administrator is not required for this step."
+    );
+  }
+
+  // DELETE /directory/deletedItems/{id} is the purge, not the delete: it only
+  // ever runs after deleteApplication has already succeeded, on an object that
+  // is already soft-deleted. The generic 403 tail below names creating an app
+  // registration, which is not what this call does or what refused it.
+  // Which directory role this permanent-delete step needs is not confirmed
+  // here, so this deliberately does not name one.
+  if (error.status === 403 && isDeletedItemsPath(error.path)) {
+    return (
+      "The signed-in user is not allowed to permanently remove this already-deleted application from the " +
+      "tenant's deleted items. This is a separate step from deleting the live application, which already " +
+      "succeeded: purge it by hand in the Entra admin portal, under App registrations, Deleted applications, " +
+      "using the operator's own delegated sign-in."
     );
   }
 
@@ -523,19 +715,27 @@ function nextStepForGraphFailure(error: GraphRequestError): string {
   return "This does not match a known cause, so report it with the response body above.";
 }
 
-/** Which of the three modes main.ts was running when a failure reached the top level. */
-export type SetupMode = "setup" | "create-bootstrap" | "delete-bootstrap";
+/** Which of the four modes main.ts was running when a failure reached the top level. */
+export type SetupMode = "setup" | "create-bootstrap" | "delete-bootstrap" | "delete-server-app";
 
-// One command with three modes, and only one of them is actually "setup": a
+// One command with four modes, and only one of them is actually "setup": a
 // teardown refusal prefixed "Setup failed" reads as though the normal run
 // failed, when nothing was being set up at all. --create-bootstrap creates
 // rather than tears down, so it gets its own prefix for the same reason.
+// --delete-server-app tears down a different application than
+// --delete-bootstrap does, so conflating their prefixes would send an operator
+// to recover the wrong one.
 function failurePrefix(mode: SetupMode): string {
   switch (mode) {
     case "create-bootstrap":
       return "Bootstrap creation failed";
     case "delete-bootstrap":
       return "Bootstrap deletion failed";
+    // Teardown, not deletion: this mode revokes, deletes and purges, and the
+    // purge failure it prefixes opens "was deleted", so "deletion failed"
+    // prepended to it contradicted the sentence it introduced.
+    case "delete-server-app":
+      return "Server application teardown failed";
     case "setup":
       return "Setup failed";
   }
@@ -567,6 +767,19 @@ export function describeSetupFailure(error: unknown, mode: SetupMode = "setup"):
       `${prefix}: Graph ${error.method} ${error.path} returned ${error.status}${code}. ` +
       `${nextStepForGraphFailure(error)} Response body: ${error.body}`
     );
+  }
+
+  // The two teardown failures runDeleteServerApp raises wrap their
+  // GraphRequestError in a plain Error, because the partial state the operator
+  // is left in is the more useful headline than the Graph call that produced
+  // it. Without this the wrapped error takes the generic tail below and loses
+  // nextStepForGraphFailure's DELETE /applications branch, which exists
+  // precisely because the generic 403 message named the wrong verb, and a 403
+  // is the likeliest way that delete fails. The wrapped message already carries
+  // the status and the response body, so only the remedy sentence is missing.
+  const cause = error instanceof Error ? error.cause : undefined;
+  if (cause instanceof GraphRequestError) {
+    return `${prefix}: ${error instanceof Error ? error.message : String(error)} ${nextStepForGraphFailure(cause)}`;
   }
 
   return `${prefix}: ${error instanceof Error ? error.message : String(error)}`;

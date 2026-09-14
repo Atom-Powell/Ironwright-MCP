@@ -99,10 +99,12 @@ async function rollbackApplication(
 // Three attempts across roughly nine seconds, matching the delays cli.ts uses
 // for the token exchange's own replication-lag retry (AADSTS7000215 /
 // AADSTS700016): both problems are the same directory-replication lag showing
-// up at a different call. Nothing else is retried here, because every other
-// failure from this call is a real configuration or permissions error that
+// up at a different call. Shared by the two calls in this file that race the
+// directory: POST /servicePrincipals right after POST /applications, and the
+// purge right after the delete. Nothing else is retried, because every other
+// failure from either call is a real configuration or permissions error that
 // more attempts cannot fix.
-const SERVICE_PRINCIPAL_RETRY_DELAYS_MS = [3000, 6000] as const;
+const DIRECTORY_REPLICATION_RETRY_DELAYS_MS = [3000, 6000] as const;
 
 // Matched on Graph's own machine-readable code, not on the message text. The
 // message carries the whole response body, so a substring match retries any
@@ -129,7 +131,7 @@ async function createServicePrincipalWithRetry(
     try {
       return await graph.createServicePrincipal(appId);
     } catch (error) {
-      const delay = SERVICE_PRINCIPAL_RETRY_DELAYS_MS[index];
+      const delay = DIRECTORY_REPLICATION_RETRY_DELAYS_MS[index];
       if (delay === undefined || !isDirectoryReplicationLagError(error)) throw error;
       await sleep(delay);
     }
@@ -357,6 +359,241 @@ export async function runCreateBootstrap(
   }
 }
 
+export interface DeleteServerAppArgs {
+  siteUrl: string;
+  displayName: string;
+  confirm: boolean;
+  forceOrphan: boolean;
+  hasGrantIssuer: boolean;
+}
+
+export type DeleteServerAppOutcome =
+  | { kind: "already-absent"; displayName: string }
+  | {
+      kind: "planned";
+      appId: string;
+      objectId: string;
+      permissionId: string | undefined;
+      /**
+       * False when --force-orphan skipped the listing, so `permissionId` being
+       * undefined means "not looked at" rather than "not there". Without this a
+       * consumer cannot tell those apart, and the difference is the whole
+       * distinction between reporting an absence and asserting one.
+       */
+      permissionsInspected: boolean;
+    }
+  | {
+      kind: "torn-down";
+      appId: string;
+      objectId: string;
+      permissionRevoked: boolean;
+      orphanedPermission: boolean;
+      /**
+       * False when deleteApplication answered 404: the application was already
+       * gone by the time this run tried to remove it, so this run did not
+       * delete it. Without this the formatter cannot tell a real delete from a
+       * tolerated absence, and it said "Deleted application X" for both.
+       */
+      applicationDeleted: boolean;
+      /**
+       * False when the purge kept answering 404 through the replication-lag
+       * retry. That is not proof the object is gone: the likelier reading is
+       * that it has not surfaced in deletedItems yet, which means it is sitting
+       * there restorable with its credentials. Only a purge that actually
+       * succeeded lets the formatter say the secret is unrecoverable.
+       */
+      purgeConfirmed: boolean;
+      /**
+       * True only when the ladder actually slept at least once waiting on
+       * directory replication, as distinct from purgeConfirmed being false.
+       * A 404 whose code does not match Request_ResourceNotFound, or one from
+       * something other than Graph, gives up after the first attempt with no
+       * sleep at all: the formatter must not tell the operator lag was ruled
+       * out on a run that never waited for it.
+       */
+      purgeRetried: boolean;
+    };
+
+function statusOf(error: unknown): number | undefined {
+  return error instanceof GraphRequestError ? error.status : undefined;
+}
+
+/**
+ * Purges the soft-deleted application, retrying the one 404 that is a race
+ * rather than an answer.
+ *
+ * This call fires milliseconds after deleteApplication succeeded in the same
+ * run, so "somebody already purged it" is not the realistic cause of a 404
+ * here. Directory replication lag is: the object has not yet surfaced in
+ * deletedItems. That is the same lag, carrying the same Request_ResourceNotFound
+ * code, that POST /servicePrincipals hits right after POST /applications, so it
+ * gets the same ladder rather than a second mechanism of its own.
+ *
+ * Resolves `{ purged: true, ... }` when Graph accepted the purge, `{ purged:
+ * false, ... }` when a 404 outlasted the ladder or never matched it, and
+ * throws for every other failure, which is a real one the caller has to
+ * report. `retried` carries whether the ladder actually slept at least once,
+ * separately from `purged`: a 404 whose code does not match
+ * Request_ResourceNotFound gives up on the first attempt with no sleep at
+ * all, and the caller's message must not claim replication lag was ruled out
+ * on a run that never tested for it.
+ */
+async function purgeDeletedApplicationWithRetry(
+  graph: SetupGraph,
+  objectId: string,
+  sleep: (ms: number) => Promise<void>,
+): Promise<{ purged: boolean; retried: boolean }> {
+  let retried = false;
+  for (let index = 0; ; index += 1) {
+    try {
+      await graph.purgeDeletedApplication(objectId);
+      return { purged: true, retried };
+    } catch (error) {
+      if (statusOf(error) !== 404) throw error;
+      const delay = DIRECTORY_REPLICATION_RETRY_DELAYS_MS[index];
+      // A 404 that is not the replication-lag code, or one that has outlasted
+      // the ladder, is reported as an unconfirmed purge rather than thrown: the
+      // object may be gone or may be lagging, and this run cannot tell which.
+      if (delay === undefined || !isDirectoryReplicationLagError(error)) return { purged: false, retried };
+      await sleep(delay);
+      retried = true;
+    }
+  }
+}
+
+/**
+ * Removes a server application and the per-site permission it was granted.
+ *
+ * The order is forced rather than chosen. The permission entry is matched to
+ * the application by app id, so the revoke has to happen while that identity
+ * still exists; deleting first leaves an entry naming an identity that is gone,
+ * which is the residue this mode exists to stop producing. The purge is what
+ * actually ends the credential's life: Entra's delete is a soft delete with a
+ * 30 day restore window, so stopping at the delete schedules the removal rather
+ * than performing it.
+ */
+export async function runDeleteServerApp(
+  graph: SetupGraph,
+  args: DeleteServerAppArgs,
+  hooks: SetupHooks = {},
+): Promise<DeleteServerAppOutcome> {
+  const notice = hooks.onNotice ?? ((): void => {});
+  const sleep = hooks.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+
+  const existing = await graph.findApplicationByDisplayName(args.displayName);
+  if (existing === undefined) {
+    // The outcome the operator asked for is already true. Nothing else in this
+    // function can run without an app id to match a permission entry against.
+    return { kind: "already-absent", displayName: args.displayName };
+  }
+
+  // resolveSite takes the hostname-and-server-relative form, not the URL as
+  // typed. runSetup builds it the same way; passing the raw URL yields a 400.
+  const { siteId } = await graph.resolveSite(siteIdPathFromUrl(args.siteUrl));
+
+  let permissionId: string | undefined;
+  if (args.hasGrantIssuer) {
+    const permissions = await graph.listSitePermissions(siteId);
+    permissionId = permissions.find((entry) => entry.appIds.includes(existing.appId))?.permissionId;
+  } else if (!args.forceOrphan) {
+    // Reached only when no grant issuer is configured, which is exactly when
+    // the listing above did not run. So this branch cannot know whether a grant
+    // exists, and saying it does would assert something nobody looked for.
+    throw new Error(
+      `Revoking a site permission needs a grant issuer's app-only token, and none was configured, so nothing ` +
+        `was touched: application ${existing.appId} still exists, and whether it still holds a permission on ` +
+        `${args.siteUrl} was not checked, because checking needs the grant issuer this run does not have. ` +
+        "Create one with --create-bootstrap and re-run, or pass --force-orphan to delete and purge the " +
+        "application anyway and leave any permission entry behind.",
+    );
+  }
+
+  if (!args.confirm) {
+    return {
+      kind: "planned",
+      appId: existing.appId,
+      objectId: existing.objectId,
+      permissionId,
+      permissionsInspected: args.hasGrantIssuer,
+    };
+  }
+
+  let permissionRevoked = false;
+  if (permissionId !== undefined) {
+    // Named by the site URL the operator typed, not by siteId: every other
+    // message in this mode uses the URL, and mixing the two made stderr and
+    // stdout read as though they were about two different sites.
+    notice(`Revoking site permission ${permissionId} on ${args.siteUrl}.`);
+    await graph.deleteSitePermission(siteId, permissionId);
+    permissionRevoked = true;
+  }
+
+  notice(`Deleting application ${existing.appId} (object id ${existing.objectId}).`);
+  let applicationDeleted = true;
+  try {
+    await graph.deleteApplication(existing.objectId);
+  } catch (error) {
+    if (statusOf(error) !== 404) {
+      const state = permissionRevoked
+        ? "The site permission was revoked, and the application still exists"
+        : "No site permission was revoked, and the application still exists";
+      throw new Error(
+        `${state}: deleting ${existing.appId} failed. Re-running is safe and will finish the job. ` +
+          `Underlying failure: ${detail(error)}`,
+        // Preserved rather than flattened so describeSetupFailure can still
+        // reach nextStepForGraphFailure's DELETE /applications branch, which is
+        // the remedy for a 403 here and the likeliest way this call fails.
+        { cause: error },
+      );
+    }
+    // A 404 means the application was gone before this run's delete reached it,
+    // most likely a concurrent teardown between the lookup and this call. The
+    // outcome the operator asked for is still true, but this run did not
+    // perform the delete and must not report that it did.
+    applicationDeleted = false;
+  }
+
+  notice(`Purging application ${existing.objectId} from deleted items.`);
+  let purgeConfirmed: boolean;
+  let purgeRetried: boolean;
+  try {
+    const purgeResult = await purgeDeletedApplicationWithRetry(graph, existing.objectId, sleep);
+    purgeConfirmed = purgeResult.purged;
+    purgeRetried = purgeResult.retried;
+  } catch (error) {
+    // Unlike the delete failure above, re-running does not retry this: the
+    // application is now soft-deleted, which findApplicationByDisplayName's
+    // own lookup (GET /applications) does not return, so a re-run reports
+    // already-absent and never calls purgeDeletedApplication again. The
+    // fix is a manual purge, not another run of this command.
+    throw new Error(
+      `Application ${existing.appId} was deleted, but purging it from deleted items failed, so it is ` +
+        "soft-deleted rather than gone: the object stays in the tenant's deleted items for 30 days and " +
+        "anyone who can restore it gets its credentials back with it. Re-running this command will not " +
+        "retry the purge, because the lookup this command uses to find the application does not return a " +
+        `soft-deleted one, so a re-run reports it already absent. Purge it by hand: ` +
+        `DELETE /directory/deletedItems/${existing.objectId}, using the operator's own delegated token. ` +
+        `Underlying failure: ${detail(error)}`,
+      { cause: error },
+    );
+  }
+
+  return {
+    kind: "torn-down",
+    appId: existing.appId,
+    objectId: existing.objectId,
+    permissionRevoked,
+    orphanedPermission: !args.hasGrantIssuer,
+    applicationDeleted,
+    purgeConfirmed,
+    purgeRetried,
+  };
+}
+
+export type DeleteBootstrapOutcome =
+  | { kind: "deleted"; appId: string; objectId: string }
+  | { kind: "already-absent"; displayName: string };
+
 /**
  * Removes the grant issuer. Deleting it is what actually removes the standing
  * privilege: the secret's expiry only disables one credential, while the
@@ -368,21 +605,20 @@ export async function runDeleteBootstrap(
   graph: SetupGraph,
   args: { displayName: string },
   hooks: SetupHooks = {},
-): Promise<{ appId: string; objectId: string }> {
+): Promise<DeleteBootstrapOutcome> {
   const notice = hooks.onNotice ?? ((): void => {});
 
   const existing = await graph.findApplicationByDisplayName(args.displayName);
   if (existing === undefined) {
-    throw new Error(
-      `No application named "${args.displayName}" exists in this tenant, so there is nothing to delete. ` +
-        "If the grant issuer was created with a different name, pass the same --name it was created with. " +
-        "If it was already deleted, no action is needed: deleting it is what removes the standing permission, " +
-        "and a deleted application keeps no access.",
-    );
+    // Absent is the outcome the operator asked for, not a failure. Reporting it
+    // as one made a correctly torn-down tenant indistinguishable from a broken
+    // one, so a script enforcing teardown across tenants would retry or alert on
+    // a tenant that was already finished.
+    return { kind: "already-absent", displayName: args.displayName };
   }
 
   notice(`Deleting application ${existing.appId} (object id ${existing.objectId}).`);
   await graph.deleteApplication(existing.objectId);
 
-  return { appId: existing.appId, objectId: existing.objectId };
+  return { kind: "deleted", appId: existing.appId, objectId: existing.objectId };
 }

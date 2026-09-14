@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SetupGraph } from "../../src/setup/adapter.js";
-import { parseArgs } from "../../src/setup/cli.js";
+import { describeDeleteBootstrapSuccess, parseArgs } from "../../src/setup/cli.js";
 import { runDeleteBootstrap } from "../../src/setup/run.js";
 
 const base = ["node", "main.js", "--tenant=contoso.onmicrosoft.com"];
@@ -47,6 +47,10 @@ function fakeGraph(found: { objectId: string; appId: string } | undefined): {
       calls.push(`grantSitePermission:${siteId}`);
       return { permissionId: "should-not-be-called" };
     },
+    listSitePermissions: async (siteId) => {
+      calls.push(`listSitePermissions:${siteId}`);
+      return [];
+    },
     verifyAppAccess: async () => {
       calls.push("verifyAppAccess");
       return { status: 200, body: "{}", appRoles: [] };
@@ -56,6 +60,9 @@ function fakeGraph(found: { objectId: string; appId: string } | undefined): {
     },
     deleteApplication: async (objectId) => {
       calls.push(`deleteApplication:${objectId}`);
+    },
+    purgeDeletedApplication: async (objectId) => {
+      calls.push(`purgeDeletedApplication:${objectId}`);
     },
   };
   return { graph, calls };
@@ -71,7 +78,7 @@ describe("runDeleteBootstrap", () => {
       "findApplicationByDisplayName:Ironwright Grant Issuer",
       "deleteApplication:obj-1",
     ]);
-    expect(result).toEqual({ appId: "app-1", objectId: "obj-1" });
+    expect(result).toEqual({ kind: "deleted", appId: "app-1", objectId: "obj-1" });
   });
 
   it("creates nothing and touches no site", async () => {
@@ -82,6 +89,26 @@ describe("runDeleteBootstrap", () => {
     expect(calls.some((call) => call.startsWith("createApplication"))).toBe(false);
     expect(calls.some((call) => call.startsWith("resolveSite"))).toBe(false);
     expect(calls.some((call) => call.startsWith("grantSitePermission"))).toBe(false);
+  });
+
+  it("reports an already-absent grant issuer as done, not as a failure", async () => {
+    const { graph, calls } = fakeGraph(undefined);
+
+    const outcome = await runDeleteBootstrap(graph, { displayName: "Ironwright Grant Issuer" });
+
+    expect(outcome).toEqual({ kind: "already-absent", displayName: "Ironwright Grant Issuer" });
+    expect(calls.some((call) => call.startsWith("deleteApplication"))).toBe(false);
+  });
+
+  it("says nothing was deleted when the grant issuer was already gone, and does not claim a deletion", () => {
+    const message = describeDeleteBootstrapSuccess({
+      kind: "already-absent",
+      displayName: "Ironwright Grant Issuer",
+    });
+
+    expect(message).toMatch(/no application named "Ironwright Grant Issuer"/i);
+    expect(message).toMatch(/nothing to do/i);
+    expect(message).not.toMatch(/Deleted application/);
   });
 });
 

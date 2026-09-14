@@ -1,3 +1,4 @@
+import { GRAPH_BASE } from "../graph/client.js";
 import { GraphRequestError } from "../graph/errors.js";
 import { appRolesFromAccessToken } from "./steps.js";
 import type {
@@ -17,6 +18,8 @@ export interface SetupGraph {
   resolveServicePrincipal(appId: string): Promise<{ objectId: string; appRoles: GraphAppRole[] }>;
   grantAppRole(request: AppRoleAssignmentRequest): Promise<void>;
   grantSitePermission(siteId: string, request: SitePermissionRequest): Promise<{ permissionId: string }>;
+  /** Each entry's id, with the application ids inside its granted identities. */
+  listSitePermissions(siteId: string): Promise<Array<{ permissionId: string; appIds: string[] }>>;
   verifyAppAccess(args: {
     appId: string;
     secret: string;
@@ -24,9 +27,13 @@ export interface SetupGraph {
   }): Promise<{ status: number; body: string; appRoles: string[] | undefined }>;
   deleteSitePermission(siteId: string, permissionId: string): Promise<void>;
   deleteApplication(objectId: string): Promise<void>;
+  /**
+   * Removes an already soft-deleted application from the tenant's deleted
+   * items, so it cannot be restored with its credentials intact. A teardown
+   * that stops at deleteApplication has scheduled that removal, not performed it.
+   */
+  purgeDeletedApplication(objectId: string): Promise<void>;
 }
-
-const GRAPH = "https://graph.microsoft.com/v1.0";
 
 interface GraphResponse {
   method: string;
@@ -35,13 +42,29 @@ interface GraphResponse {
   value: unknown;
 }
 
+/**
+ * `path` may be a Graph-relative path, or an absolute Graph URL when it came
+ * from an `@odata.nextLink`, which Graph returns fully qualified. Either way,
+ * what a GraphRequestError reports is a relative label, sliced from
+ * GRAPH_BASE the same way src/graph/client.ts's own `get` does: an absolute
+ * URL that does not start with GRAPH_BASE is reported whole rather than having
+ * its first characters cut off by a blind slice. This only produces the same
+ * shape of label a first-page request gets; it does not by itself make any
+ * particular matcher in cli.ts recognize that label. isSitePermissionsPath is
+ * the one this listing's own paging can actually reach, and it is widened to
+ * tolerate the query string a followed nextLink carries for exactly that
+ * reason.
+ */
 async function graphRequest(
   token: string,
   method: string,
   path: string,
   body?: unknown,
 ): Promise<GraphResponse> {
-  const response = await fetch(`${GRAPH}${path}`, {
+  const url = path.startsWith("https://") ? path : `${GRAPH_BASE}${path}`;
+  const label = url.startsWith(GRAPH_BASE) ? url.slice(GRAPH_BASE.length) : url;
+
+  const response = await fetch(url, {
     method,
     headers: {
       authorization: `Bearer ${token}`,
@@ -52,7 +75,7 @@ async function graphRequest(
 
   const text = await response.text();
   if (!response.ok) {
-    throw new GraphRequestError({ method, path, status: response.status, body: text });
+    throw new GraphRequestError({ method, path: label, status: response.status, body: text });
   }
 
   let value: unknown = undefined;
@@ -64,13 +87,13 @@ async function graphRequest(
       // often a proxy. Treating it as an empty body would hide that behind a
       // missing-field error naming the wrong cause.
       throw new Error(
-        `Graph ${method} ${path} returned ${response.status} with a body that is not JSON. ` +
+        `Graph ${method} ${label} returned ${response.status} with a body that is not JSON. ` +
           "Something other than Graph answered this request, so the setup cannot continue.",
       );
     }
   }
 
-  return { method, path, status: response.status, value };
+  return { method, path: label, status: response.status, value };
 }
 
 /**
@@ -97,6 +120,33 @@ function requireFields<K extends string>(response: GraphResponse, names: readonl
     result[name] = found;
   }
   return result;
+}
+
+/**
+ * Reads the application ids out of one permission entry's granted identities.
+ * Graph's current shape is grantedToIdentitiesV2, but the deprecated
+ * grantedToIdentities is still a real possibility here, not a hypothetical
+ * one: grantSitePermission's own request body (steps.ts's
+ * SitePermissionRequest) is written in that older shape, so a response that
+ * echoes back what was sent, rather than Graph's newer field, is exactly the
+ * kind of response this teardown will actually see. V2 is preferred when
+ * present; the legacy field is read only as a fallback, so an entry carrying
+ * both is not double-counted.
+ */
+function applicationIdsFromGrant(entry: Record<string, unknown>): string[] {
+  const identities = Array.isArray(entry.grantedToIdentitiesV2)
+    ? entry.grantedToIdentitiesV2
+    : Array.isArray(entry.grantedToIdentities)
+      ? entry.grantedToIdentities
+      : [];
+
+  return identities.flatMap((identity: unknown) => {
+    const application =
+      typeof identity === "object" && identity !== null
+        ? (identity as { application?: { id?: unknown } }).application
+        : undefined;
+    return typeof application?.id === "string" ? [application.id] : [];
+  });
 }
 
 export interface FetchSetupGraphOptions {
@@ -223,12 +273,86 @@ export function createFetchSetupGraph(options: FetchSetupGraphOptions): SetupGra
       return { permissionId: requireFields(response, ["id"]).id };
     },
 
+    async listSitePermissions(siteId) {
+      // Same endpoint family as the grant and its rollback delete, so this
+      // read needs the bootstrap application's token too: Graph refuses a
+      // delegated token on /sites/{id}/permissions regardless of the caller's
+      // directory roles. Minted once for the whole listing rather than per
+      // page: a page loop here lasts seconds and a token lasts an hour.
+      const bootstrapToken = await acquireBootstrapToken();
+
+      // Paged rather than read from the first response alone. The one consumer
+      // of this listing, --delete-server-app, treats a missing match as "no
+      // permission entry is granted to this application" and then deletes and
+      // purges. A match sitting on a second page would make that an asserted
+      // absence nothing established, and would produce exactly the orphaned
+      // entry the mode exists to prevent while reporting a clean teardown.
+      // Following @odata.nextLink is the treatment src/graph/delta.ts gives the
+      // same field; the difference is that a collection GET has no terminal
+      // marker of its own, so the absence of a nextLink is the end of the
+      // listing rather than the ambiguity delta.ts refuses on.
+      const results: Array<{ permissionId: string; appIds: string[] }> = [];
+      const requested = new Set<string>();
+      let next: string | undefined = `/sites/${siteId}/permissions`;
+
+      while (next !== undefined) {
+        // A link that repeats one already followed cannot end, and quietly
+        // looping on it is the other half of what delta.ts refuses: an
+        // enumeration that either never terminates or terminates silently
+        // incomplete.
+        if (requested.has(next)) {
+          throw new Error(
+            `Listing the permissions on site ${siteId} was sent back to a page it had already requested, so ` +
+              "the listing cannot be completed without looping. The permission entries on this site cannot be " +
+              "read, so the teardown cannot tell whether one is granted to this application.",
+          );
+        }
+        requested.add(next);
+
+        const response: GraphResponse = await graphRequest(bootstrapToken, "GET", next);
+        const body = typeof response.value === "object" && response.value !== null ? response.value : {};
+        const entries = (body as { value?: unknown }).value;
+        const list = Array.isArray(entries) ? entries : [];
+
+        // An entry this cannot make sense of is skipped rather than refused,
+        // unlike the scan layer, which refuses loudly on an item it cannot read
+        // because that item might be a file the reconciliation would otherwise
+        // silently lose track of. A permission entry we cannot parse here is not
+        // that: it is metadata about who a grant was extended to, and skipping
+        // it means the entry contributes no application id rather than a bogus
+        // one, not that the whole listing is thrown away.
+        for (const raw of list) {
+          const entry = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+          if (typeof entry.id !== "string") continue;
+          results.push({ permissionId: entry.id, appIds: applicationIdsFromGrant(entry) });
+        }
+
+        // A continuation link of any other type is refused rather than
+        // coerced: a non-string there means the response is not the shape this
+        // code reads, and stopping on it would report a partial listing as a
+        // complete one.
+        const link: unknown = (body as Record<string, unknown>)["@odata.nextLink"];
+        if (link === undefined) {
+          next = undefined;
+        } else if (typeof link === "string") {
+          next = link;
+        } else {
+          throw new Error(
+            `A permissions page for site ${siteId} carried an @odata.nextLink that is not a URL, so the rest of ` +
+              "the listing cannot be fetched and the entries read so far are not the whole set.",
+          );
+        }
+      }
+
+      return results;
+    },
+
     async verifyAppAccess({ appId, secret, siteId }) {
       // Verification deliberately uses a token minted for the new app, not the
       // administrator's token. An administrator can read the site regardless, so
       // verifying with their token would pass while the app itself is still blocked.
       const appToken = await acquireAppToken(appId, secret);
-      const response = await fetch(`${GRAPH}/sites/${siteId}/drive`, {
+      const response = await fetch(`${GRAPH_BASE}/sites/${siteId}/drive`, {
         headers: { authorization: `Bearer ${appToken}` },
       });
       // The roles claim is carried out with the result because it is the only
@@ -254,6 +378,16 @@ export function createFetchSetupGraph(options: FetchSetupGraphOptions): SetupGra
       // role assignment held by it, and the client secret lives on the
       // application object, so this one call revokes the whole credential.
       await graphRequest(adminToken, "DELETE", `/applications/${objectId}`);
+    },
+
+    async purgeDeletedApplication(objectId) {
+      // Entra's delete of an application registration is a soft delete: the
+      // object sits in the tenant's deleted items for 30 days, where anyone
+      // holding Application Administrator can restore it along with its
+      // credentials. This call, like deleteApplication before it, is on the
+      // operator's own delegated token: deletedItems is not part of the
+      // /sites/{id}/permissions family the bootstrap token exists for.
+      await graphRequest(adminToken, "DELETE", `/directory/deletedItems/${objectId}`);
     },
   };
 }

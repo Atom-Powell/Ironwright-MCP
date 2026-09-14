@@ -815,7 +815,7 @@ git commit -m "feat: orchestrate server application teardown"
 ```ts
   it("previews what it would remove without claiming it removed anything", () => {
     const message = describeDeleteServerAppOutcome(
-      { kind: "planned", appId: "app-1", objectId: "obj-1", permissionId: "perm-1" },
+      { kind: "planned", appId: "app-1", objectId: "obj-1", permissionId: "perm-1", permissionsInspected: true },
       "https://contoso.sharepoint.com/sites/Example",
     );
 
@@ -826,13 +826,25 @@ git commit -m "feat: orchestrate server application teardown"
     expect(message).not.toMatch(/Deleted|Purged|Revoked/);
   });
 
-  it("says the permission entry is not there when previewing an application that holds none", () => {
+  it("says the permission entry is not there when the listing ran and matched nothing", () => {
     const message = describeDeleteServerAppOutcome(
-      { kind: "planned", appId: "app-1", objectId: "obj-1", permissionId: undefined },
+      { kind: "planned", appId: "app-1", objectId: "obj-1", permissionId: undefined, permissionsInspected: true },
       "https://contoso.sharepoint.com/sites/Example",
     );
 
     expect(message).toMatch(/no permission entry/i);
+  });
+
+  it("says the permissions were not inspected when --force-orphan skipped the listing", () => {
+    const message = describeDeleteServerAppOutcome(
+      { kind: "planned", appId: "app-1", objectId: "obj-1", permissionId: undefined, permissionsInspected: false },
+      "https://contoso.sharepoint.com/sites/Example",
+    );
+
+    // The distinction this test exists for: an uninspected site must not be
+    // reported as an empty one.
+    expect(message).toMatch(/not inspected/i);
+    expect(message).not.toMatch(/no permission entry/i);
   });
 
   it("reports a completed teardown and says the credential is no longer recoverable", () => {
@@ -892,8 +904,16 @@ export function describeDeleteServerAppOutcome(outcome: DeleteServerAppOutcome, 
   }
 
   if (outcome.kind === "planned") {
-    const permission =
-      outcome.permissionId === undefined
+    // Three cases, not two. An undefined permissionId means "the listing found
+    // no match" only when the listing ran; under --force-orphan it means nobody
+    // looked, and reporting that as an absence would assert something this run
+    // never observed. Task 4's review added permissionsInspected for exactly
+    // this distinction.
+    const permission = !outcome.permissionsInspected
+      ? `The site's permissions on ${siteUrl} were not inspected, because --force-orphan was given and ` +
+        "inspecting them needs a grant issuer. If an entry is granted to this application it would be " +
+        "left behind."
+      : outcome.permissionId === undefined
         ? `No permission entry on ${siteUrl} is granted to it, so there would be nothing to revoke.`
         : `It would first revoke permission entry ${outcome.permissionId} on ${siteUrl}.`;
 

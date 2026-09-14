@@ -4,6 +4,7 @@ import {
   acquireTokenWithRetry,
   describeBootstrapSuccess,
   describeDeleteBootstrapSuccess,
+  describeDeleteServerAppOutcome,
   describeGrantIssuerTeardownNote,
   describeSetupSuccess,
   describeSignInFailure,
@@ -49,6 +50,36 @@ describe("parseArgs", () => {
     const parsed = parseArgs(baseArgv);
     expect(parsed.tenantId).toBe("tenant-1");
     expect(parsed.siteUrl).toBe("https://contoso.sharepoint.com/sites/Example");
+  });
+
+  it("parses the server-app teardown mode, defaulting the name to the normal run's default", () => {
+    const parsed = parseArgs([
+      "node",
+      "main.js",
+      "--tenant=contoso.onmicrosoft.com",
+      "--site=https://contoso.sharepoint.com/sites/Example",
+      "--delete-server-app",
+    ]);
+
+    expect(parsed.deleteServerApp).toBe(true);
+    expect(parsed.confirm).toBe(false);
+    expect(parsed.forceOrphan).toBe(false);
+    expect(parsed.displayName).toBe("Ironwright Repository Reconciliation");
+  });
+
+  it("reads the confirm and force-orphan flags", () => {
+    const parsed = parseArgs([
+      "node",
+      "main.js",
+      "--tenant=contoso.onmicrosoft.com",
+      "--site=https://contoso.sharepoint.com/sites/Example",
+      "--delete-server-app",
+      "--confirm",
+      "--force-orphan",
+    ]);
+
+    expect(parsed.confirm).toBe(true);
+    expect(parsed.forceOrphan).toBe(true);
   });
 });
 
@@ -106,15 +137,20 @@ describe("describeBootstrapSuccess", () => {
   });
 });
 
-describe("describeDeleteBootstrapSuccess", () => {
+// Covers the "deleted" branch only. The "already-absent" branch's own tests
+// live in delete-bootstrap.test.ts, next to runDeleteBootstrap's own
+// already-absent outcome test, so the outcome and both of its renderings
+// stay together; see task-1-report.md for why that split was chosen over
+// duplicating cases here.
+describe("describeDeleteBootstrapSuccess (deleted branch)", () => {
   it("names the application that was deleted", () => {
-    const message = describeDeleteBootstrapSuccess({ appId: "app-1" });
+    const message = describeDeleteBootstrapSuccess({ kind: "deleted", appId: "app-1", objectId: "obj-1" });
 
     expect(message).toContain("app-1");
   });
 
   it("states the standing permission is what deletion removed", () => {
-    const message = describeDeleteBootstrapSuccess({ appId: "app-1" });
+    const message = describeDeleteBootstrapSuccess({ kind: "deleted", appId: "app-1", objectId: "obj-1" });
 
     expect(message).toMatch(/standing/i);
     expect(message).toMatch(/Sites\.FullControl\.All/);
@@ -125,7 +161,7 @@ describe("describeDeleteBootstrapSuccess", () => {
     // application keeps its admin-consented role assignment until it is
     // actually deleted. A message that did not draw this line would let an
     // operator believe waiting out the week did the same job.
-    const message = describeDeleteBootstrapSuccess({ appId: "app-1" });
+    const message = describeDeleteBootstrapSuccess({ kind: "deleted", appId: "app-1", objectId: "obj-1" });
 
     expect(message).toMatch(/not just its secret/i);
     expect(message).toMatch(/expired secret/i);
@@ -137,7 +173,7 @@ describe("describeDeleteBootstrapSuccess", () => {
     // itself needed. This paragraph is framed as the answer to a client
     // security review, and a restore window is exactly what that review
     // would ask about, so overstating deletion as final here is the risk.
-    const message = describeDeleteBootstrapSuccess({ appId: "app-1" });
+    const message = describeDeleteBootstrapSuccess({ kind: "deleted", appId: "app-1", objectId: "obj-1" });
 
     expect(message).toMatch(/30.day/i);
     expect(message).toMatch(/recoverable|restore/i);
@@ -150,7 +186,7 @@ describe("describeDeleteBootstrapSuccess", () => {
     // normal run that still reads them fails at its preflight with a
     // rejected-credentials message that reads like a wrong secret, not a
     // deleted application, which is the opposite of the real cause.
-    const message = describeDeleteBootstrapSuccess({ appId: "app-1" });
+    const message = describeDeleteBootstrapSuccess({ kind: "deleted", appId: "app-1", objectId: "obj-1" });
 
     expect(message).toContain("IW_BOOTSTRAP_CLIENT_ID");
     expect(message).toContain("IW_BOOTSTRAP_CLIENT_SECRET");
@@ -159,12 +195,24 @@ describe("describeDeleteBootstrapSuccess", () => {
 });
 
 describe("describeGrantIssuerTeardownNote", () => {
-  it("states the grant issuer is not needed for this site only when access is confirmed", () => {
+  it("states the grant issuer has finished this run's work only when access is confirmed", () => {
     // The unconfirmed arm cannot make this claim: that arm exists precisely
     // because the run could not prove the new application can reach the
-    // site, so "not needed for this site any longer" is not yet observed.
-    expect(describeGrantIssuerTeardownNote(true)).toMatch(/not needed for this site/i);
-    expect(describeGrantIssuerTeardownNote(false)).not.toMatch(/not needed for this site/i);
+    // site. Its own opening clause names a nearer-term reason to keep the
+    // grant issuer instead (it may be needed again immediately to reissue or
+    // diagnose the grant), not this one.
+    expect(describeGrantIssuerTeardownNote(true)).toMatch(/finished the work this run needed it for/i);
+    expect(describeGrantIssuerTeardownNote(false)).not.toMatch(/finished the work this run needed it for/i);
+  });
+
+  it("does not let the opening clause contradict the tail's keep-it-until-decommissioned advice", () => {
+    // The two halves of this message disagreed once: the opening said the grant
+    // issuer was no longer needed for this site, and the tail said to keep it
+    // because this site would need it. Pinned as an assembled string for that
+    // reason.
+    const note = describeGrantIssuerTeardownNote(true);
+    expect(note).not.toMatch(/not needed for this site any longer/i);
+    expect(note).toMatch(/keep it until this site is decommissioned/i);
   });
 
   it("tells the unconfirmed arm to wait for confirmation before deleting", () => {
@@ -175,12 +223,12 @@ describe("describeGrantIssuerTeardownNote", () => {
     expect(message).toMatch(/only credential that can reissue the per-site grant/i);
   });
 
-  it("names the delete command on both arms", () => {
+  it("names the delete command for eventual decommissioning, on both arms", () => {
     expect(describeGrantIssuerTeardownNote(true)).toContain("--delete-bootstrap");
     expect(describeGrantIssuerTeardownNote(false)).toContain("--delete-bootstrap");
   });
 
-  it("names the recreate command for onboarding another site later, on both arms", () => {
+  it("names the recreate command needed if the grant issuer is deleted too early, on both arms", () => {
     expect(describeGrantIssuerTeardownNote(true)).toContain("--create-bootstrap");
     expect(describeGrantIssuerTeardownNote(false)).toContain("--create-bootstrap");
   });
@@ -210,7 +258,7 @@ describe("describeGrantIssuerTeardownNote", () => {
     // (that the application still exists and still holds Sites.FullControl.All,
     // and the delete/recreate instructions) is true regardless of confirmation
     // and must read identically either way.
-    const sharedTail = "Only deleting it removes that standing permission";
+    const sharedTail = "Keep it until this site is decommissioned";
     const confirmedMessage = describeGrantIssuerTeardownNote(true);
     const unconfirmedMessage = describeGrantIssuerTeardownNote(false);
 
@@ -270,8 +318,8 @@ describe("describeSetupSuccess", () => {
       verificationMessage: "not confirmed yet",
     });
 
-    expect(confirmedMessage).toMatch(/not needed for this site any longer/i);
-    expect(unconfirmedMessage).not.toMatch(/not needed for this site any longer/i);
+    expect(confirmedMessage).toMatch(/finished the work this run needed it for/i);
+    expect(unconfirmedMessage).not.toMatch(/finished the work this run needed it for/i);
     expect(unconfirmedMessage).toMatch(/wait until/i);
   });
 });
@@ -292,9 +340,156 @@ describe("grant issuer teardown note is confined to the normal run's success bui
   });
 
   it("is absent from the delete-bootstrap success message", () => {
-    const message = describeDeleteBootstrapSuccess({ appId: "app-1" });
+    const message = describeDeleteBootstrapSuccess({ kind: "deleted", appId: "app-1", objectId: "obj-1" });
 
     expect(message).not.toMatch(/not needed for this site/i);
+  });
+});
+
+describe("describeDeleteServerAppOutcome", () => {
+  it("previews what it would remove without claiming it removed anything", () => {
+    const message = describeDeleteServerAppOutcome(
+      { kind: "planned", appId: "app-1", objectId: "obj-1", permissionId: "perm-1", permissionsInspected: true },
+      "https://contoso.sharepoint.com/sites/Example",
+    );
+
+    expect(message).toMatch(/would/i);
+    expect(message).toMatch(/--confirm/);
+    expect(message).toMatch(/app-1/);
+    expect(message).toMatch(/perm-1/);
+    expect(message).not.toMatch(/Deleted|Purged|Revoked/);
+  });
+
+  it("says the permission entry is not there when the listing ran and matched nothing", () => {
+    const message = describeDeleteServerAppOutcome(
+      { kind: "planned", appId: "app-1", objectId: "obj-1", permissionId: undefined, permissionsInspected: true },
+      "https://contoso.sharepoint.com/sites/Example",
+    );
+
+    expect(message).toMatch(/no permission entry/i);
+  });
+
+  it("says the permissions were not inspected when --force-orphan skipped the listing", () => {
+    const message = describeDeleteServerAppOutcome(
+      { kind: "planned", appId: "app-1", objectId: "obj-1", permissionId: undefined, permissionsInspected: false },
+      "https://contoso.sharepoint.com/sites/Example",
+    );
+
+    // The distinction this test exists for: an uninspected site must not be
+    // reported as an empty one.
+    expect(message).toMatch(/not inspected/i);
+    expect(message).not.toMatch(/no permission entry/i);
+  });
+
+  it("reports a completed teardown and says the credential is no longer recoverable", () => {
+    const message = describeDeleteServerAppOutcome(
+      {
+        kind: "torn-down",
+        appId: "app-1",
+        objectId: "obj-1",
+        permissionRevoked: true,
+        orphanedPermission: false,
+        applicationDeleted: true,
+        purgeConfirmed: true,
+        purgeRetried: false,
+      },
+      "https://contoso.sharepoint.com/sites/Example",
+    );
+
+    expect(message).toMatch(/revoked/i);
+    expect(message).toMatch(/purged/i);
+    expect(message).toMatch(/not recoverable/i);
+    // Pins the specific revoked-clause wording, not just the loose /revoked/i
+    // match above, so a regression that swapped in the orphaned branch's
+    // "Nothing was revoked" wording on a non-orphaned outcome would fail here.
+    expect(message).toMatch(/Revoked its permission entry/);
+    expect(message).not.toMatch(/Nothing was revoked/i);
+  });
+
+  it("names the replication-lag retry only when the ladder actually ran", () => {
+    // purgeRetried is the field this test exists for: a 404 that never matched
+    // Request_ResourceNotFound gives up after zero sleeps, so the message must
+    // not claim a retry ruled out replication lag when nothing was retried.
+    const message = describeDeleteServerAppOutcome(
+      {
+        kind: "torn-down",
+        appId: "app-1",
+        objectId: "obj-1",
+        permissionRevoked: true,
+        orphanedPermission: false,
+        applicationDeleted: true,
+        purgeConfirmed: false,
+        purgeRetried: false,
+      },
+      "https://contoso.sharepoint.com/sites/Example",
+    );
+
+    expect(message).toMatch(/purge returned not found/i);
+    expect(message).not.toMatch(/even after retrying/i);
+  });
+
+  it("names the replication-lag retry when the ladder genuinely ran and still gave up", () => {
+    const message = describeDeleteServerAppOutcome(
+      {
+        kind: "torn-down",
+        appId: "app-1",
+        objectId: "obj-1",
+        permissionRevoked: true,
+        orphanedPermission: false,
+        applicationDeleted: true,
+        purgeConfirmed: false,
+        purgeRetried: true,
+      },
+      "https://contoso.sharepoint.com/sites/Example",
+    );
+
+    expect(message).toMatch(/purge returned not found/i);
+    expect(message).toMatch(/even after retrying for the directory replication lag/i);
+  });
+
+  it("names the residue exactly when the permission entry was left behind", () => {
+    const message = describeDeleteServerAppOutcome(
+      {
+        kind: "torn-down",
+        appId: "app-1",
+        objectId: "obj-1",
+        permissionRevoked: false,
+        orphanedPermission: true,
+        applicationDeleted: true,
+        purgeConfirmed: true,
+        purgeRetried: false,
+      },
+      "https://contoso.sharepoint.com/sites/Example",
+    );
+
+    // "may still remain", not "remains": with --force-orphan the site's
+    // permissions were never listed, so the code cannot observe whether there
+    // was an entry, and asserting one would claim something it did not see.
+    expect(message).toMatch(/may still remain/i);
+    expect(message).toMatch(/grants access to nothing/i);
+    expect(message).toMatch(/--create-bootstrap/);
+    expect(message).not.toMatch(/entry remains on/i);
+    // Pins the gated revoked clause itself, not just the residue clause: an
+    // orphaned outcome must say nobody looked, not that nothing was granted.
+    expect(message).toMatch(/nothing was revoked/i);
+    // The clause this test exists to guard: an uninspected site must not be
+    // reported as an empty one, in this sentence or any other.
+    expect(message).not.toMatch(/no permission entry on .* was granted to it/i);
+  });
+
+  it("says nothing was deleted when the application was already gone", () => {
+    const message = describeDeleteServerAppOutcome(
+      { kind: "already-absent", displayName: "Ironwright Repository Reconciliation" },
+      "https://contoso.sharepoint.com/sites/Example",
+    );
+
+    expect(message).toMatch(/nothing to do/i);
+    expect(message).not.toMatch(/Deleted application/);
+    // Same residue and the same command as the orphaned torn-down branch, so
+    // the advice has to name the grant issuer too. This branch used to name
+    // only the manual identification, leaving the harder half to be discovered.
+    expect(message).toMatch(/--create-bootstrap/);
+    expect(message).toMatch(/identified by hand/);
   });
 });
 
