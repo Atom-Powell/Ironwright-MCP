@@ -123,6 +123,12 @@ message and exits zero:
 
 Only a genuine partial state is a failure: some step was needed, was attempted, and failed.
 
+**The sibling bug gets fixed in the same work.** `runDeleteBootstrap` still throws when the grant
+issuer is already absent, which is the defect the open item above describes and which was never
+fixed. Designing the answer into a new mode while the identical bug sits two functions away in the
+same file would be indefensible, and the fix establishes the pattern this mode then follows. It is a
+targeted improvement to code this work is already touching, not unrelated refactoring.
+
 ## Failure reporting
 
 Every string this mode can print is enumerated and audited against what the program actually did at
