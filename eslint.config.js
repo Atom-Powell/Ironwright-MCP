@@ -83,12 +83,15 @@ export default tseslint.config(
       "no-restricted-imports": ["error", { patterns: [...PURITY_PATTERNS, RECONCILE_ENTRY_POINT_PATTERN] }],
     },
   },
-  // Everything else. `tests/domain/reconcile/**` is exempt because those are
+  // Everything else, including scripts/: a fixture generator held to the same
+  // import-boundary standard as the rest of the repo, even though it is
+  // excluded from tsconfig.json's own build and so never ships in the
+  // production image. `tests/domain/reconcile/**` is exempt because those are
   // the engine's own unit tests: proving a stage does what its brief asked for
   // requires calling that stage, and that is the one legitimate reason to
   // reach past the front door.
   {
-    files: ["src/**/*.ts", "tests/**/*.ts"],
+    files: ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts"],
     ignores: ["src/domain/**", "tests/domain/reconcile/**"],
     rules: {
       "no-restricted-imports": ["error", { patterns: [RECONCILE_ENTRY_POINT_PATTERN] }],
