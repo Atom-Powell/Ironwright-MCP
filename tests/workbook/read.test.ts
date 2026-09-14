@@ -96,4 +96,18 @@ describe("excelSerialToIsoDate", () => {
     // one-character edit that no other case in this file would catch.
     expect(excelSerialToIsoDate(61)).toBe("1900-03-01");
   });
+
+  it("accepts serial 2958465, the last day of year 9999 and the upper boundary itself", () => {
+    expect(excelSerialToIsoDate(2958465)).toBe("9999-12-31");
+  });
+
+  it("refuses a serial past year 9999, where the ISO form is no longer a ten-character date", () => {
+    // One past the boundary, and a serial far beyond it. `toISOString` switches
+    // to an expanded year up there, so the first ten characters of it come back
+    // as "+010000-01" and "+125738-04", which are not dates. Returning one of
+    // those from a function named for an ISO date is the assertion this bound
+    // exists to refuse.
+    expect(excelSerialToIsoDate(2958466)).toBeUndefined();
+    expect(excelSerialToIsoDate(45231000)).toBeUndefined();
+  });
 });

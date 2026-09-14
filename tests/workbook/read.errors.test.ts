@@ -129,6 +129,25 @@ describe("readWorkbookGrid failures", () => {
     expect(result.rejectedRows[0]?.reason).toMatch(/2026-06-45/);
   });
 
+  it("rejects an effectiveFrom serial that lands past the years the engine can read", () => {
+    // 45231000 converts to "+125738-04": past 9999 the ISO form switches to an
+    // expanded year, and the first ten characters of it are not a date. The
+    // numeric branch used to hand that string straight to the engine, which
+    // then threw on it and aborted the report for every client. It is the same
+    // abort the string branch was screened to close, reached through the other
+    // half of the same function.
+    const result = readWorkbookGrid(
+      [HEADER, ["CLIENTA", true, false, 45231], ["CLIENTB", true, false, 45231000]],
+      PROFILE,
+    );
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]?.client).toBe("CLIENTA");
+    expect(result.rejectedRows).toHaveLength(1);
+    expect(result.rejectedRows[0]?.client).toBe("CLIENTB");
+    expect(result.rejectedRows[0]?.reason).toMatch(/45231000/);
+  });
+
   it("keeps a row with a malformed effectiveFrom when the profile does not respect that column", () => {
     // With respectEffectiveFrom off the engine never reads the field, so
     // rejecting the row would drop a client out of a compliance report over a
@@ -194,4 +213,5 @@ describe("readWorkbookGrid failures", () => {
         "were renamed in the workbook or the mapping was written against a different sheet.",
     );
   });
+
 });

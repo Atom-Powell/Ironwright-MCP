@@ -26,13 +26,23 @@ export interface ReadResult {
  * rather than converted: Excel models a 29 February 1900 that never existed, so
  * that range maps ambiguously, and no effective date in a tracking workbook is
  * in 1900.
+ *
+ * 2958465 is 9999-12-31, and serials above it are refused for an unrelated
+ * reason. `toISOString` switches to an expanded-year form past that point, so
+ * taking the first ten characters of it yields "+010113-09" rather than a date,
+ * and a function named for an ISO date must not hand one of those back. This
+ * bound is the function keeping its own promise. What keeps an unreadable value
+ * away from the engine is the screen at the call site, which applies to a
+ * converted serial and to workbook text alike.
  */
 const UNIX_EPOCH_EXCEL_SERIAL = 25569;
 const MILLISECONDS_PER_DAY = 86_400_000;
 const FIRST_UNAMBIGUOUS_SERIAL = 61;
+const LAST_FOUR_DIGIT_YEAR_SERIAL = 2_958_465;
 
 export function excelSerialToIsoDate(serial: number): string | undefined {
-  if (!Number.isFinite(serial) || serial < FIRST_UNAMBIGUOUS_SERIAL) return undefined;
+  if (!Number.isFinite(serial)) return undefined;
+  if (serial < FIRST_UNAMBIGUOUS_SERIAL || serial > LAST_FOUR_DIGIT_YEAR_SERIAL) return undefined;
 
   const date = new Date((serial - UNIX_EPOCH_EXCEL_SERIAL) * MILLISECONDS_PER_DAY);
   if (Number.isNaN(date.getTime())) return undefined;
@@ -184,21 +194,32 @@ export function readWorkbookGrid(grid: unknown[][], profile: Profile): ReadResul
 
       if (field === "effectiveFrom") {
         if (cell === undefined || cell === null || cell === "") continue;
-        if (typeof cell === "number") {
-          const converted = excelSerialToIsoDate(cell);
-          if (converted !== undefined) effectiveFrom = converted;
-          else if (respectEffectiveFrom) {
-            rejection = `effectiveFrom was not a usable date: ${JSON.stringify(cell)}`;
-          }
-          // Screened against the engine's own predicate rather than a pattern
-          // of this module's, because a value this reader accepts is a value
-          // the engine has to be able to read: the two rules disagreeing is
-          // how a hand-typed cell got past here and then aborted the report
-          // from inside the engine.
-        } else if (typeof cell === "string" && isIsoEffectiveFrom(cell.trim())) {
-          effectiveFrom = cell.trim();
+
+        // One screen over both shapes a date arrives in, against the engine's
+        // own predicate rather than a pattern of this module's, because a
+        // value this reader accepts is a value the engine has to be able to
+        // read. Two rules disagreeing is how a hand-typed cell got past here
+        // and then aborted the whole report from inside the engine, and
+        // screening only the text branch left that same abort reachable
+        // through a serial: converting one is arithmetic, and arithmetic has
+        // no opinion about whether the date it lands on is a date anything
+        // downstream will take.
+        let candidate: string | undefined;
+        if (typeof cell === "number") candidate = excelSerialToIsoDate(cell);
+        else if (typeof cell === "string") candidate = cell.trim();
+
+        if (candidate !== undefined && isIsoEffectiveFrom(candidate)) {
+          effectiveFrom = candidate;
         } else if (respectEffectiveFrom) {
-          rejection = `effectiveFrom was not a date: ${JSON.stringify(cell)}`;
+          // Two wordings because an operator faces two different repairs: a
+          // number the sheet holds as a date that cannot be used as one, and a
+          // cell whose contents are not a date at all. Both quote the cell as
+          // the workbook holds it rather than whatever it converted to, since
+          // that is what the operator has to go and find.
+          rejection =
+            typeof cell === "number"
+              ? `effectiveFrom was not a usable date: ${JSON.stringify(cell)}`
+              : `effectiveFrom was not a date: ${JSON.stringify(cell)}`;
         }
         continue;
       }
