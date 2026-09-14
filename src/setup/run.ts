@@ -372,6 +372,13 @@ export type DeleteServerAppOutcome =
       appId: string;
       objectId: string;
       permissionId: string | undefined;
+      /**
+       * False when --force-orphan skipped the listing, so `permissionId` being
+       * undefined means "not looked at" rather than "not there". Without this a
+       * consumer cannot tell those apart, and the difference is the whole
+       * distinction between reporting an absence and asserting one.
+       */
+      permissionsInspected: boolean;
     }
   | {
       kind: "torn-down";
@@ -432,7 +439,13 @@ export async function runDeleteServerApp(
   }
 
   if (!args.confirm) {
-    return { kind: "planned", appId: existing.appId, objectId: existing.objectId, permissionId };
+    return {
+      kind: "planned",
+      appId: existing.appId,
+      objectId: existing.objectId,
+      permissionId,
+      permissionsInspected: args.hasGrantIssuer,
+    };
   }
 
   let permissionRevoked = false;
@@ -447,9 +460,12 @@ export async function runDeleteServerApp(
     await graph.deleteApplication(existing.objectId);
   } catch (error) {
     if (statusOf(error) !== 404) {
+      const state = permissionRevoked
+        ? "The site permission was revoked, and the application still exists"
+        : "No site permission was revoked, and the application still exists";
       throw new Error(
-        `The site permission was revoked, and the application still exists: deleting ${existing.appId} failed. ` +
-          `Re-running is safe and will finish the job. Underlying failure: ${messageOf(error)}`,
+        `${state}: deleting ${existing.appId} failed. Re-running is safe and will finish the job. ` +
+          `Underlying failure: ${messageOf(error)}`,
       );
     }
   }
@@ -458,7 +474,22 @@ export async function runDeleteServerApp(
   try {
     await graph.purgeDeletedApplication(existing.objectId);
   } catch (error) {
-    if (statusOf(error) !== 404) throw error;
+    if (statusOf(error) !== 404) {
+      // Unlike the delete failure above, re-running does not retry this: the
+      // application is now soft-deleted, which findApplicationByDisplayName's
+      // own lookup (GET /applications) does not return, so a re-run reports
+      // already-absent and never calls purgeDeletedApplication again. The
+      // fix is a manual purge, not another run of this command.
+      throw new Error(
+        `Application ${existing.appId} was deleted, but purging it from deleted items failed, so it is ` +
+          "soft-deleted rather than gone: the object stays in the tenant's deleted items for 30 days and " +
+          "anyone who can restore it gets its credentials back with it. Re-running this command will not " +
+          "retry the purge, because the lookup this command uses to find the application does not return a " +
+          `soft-deleted one, so a re-run reports it already absent. Purge it by hand: ` +
+          `DELETE /directory/deletedItems/${existing.objectId}, using the operator's own delegated token. ` +
+          `Underlying failure: ${messageOf(error)}`,
+      );
+    }
   }
 
   return {

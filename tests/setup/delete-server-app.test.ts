@@ -99,10 +99,39 @@ describe("runDeleteServerApp", () => {
       hasGrantIssuer: true,
     });
 
-    expect(outcome).toEqual({ kind: "planned", appId: "app-1", objectId: "obj-1", permissionId: "perm-1" });
+    expect(outcome).toEqual({
+      kind: "planned",
+      appId: "app-1",
+      objectId: "obj-1",
+      permissionId: "perm-1",
+      permissionsInspected: true,
+    });
     expect(calls).not.toContain("deleteSitePermission:site-1:perm-1");
     expect(calls).not.toContain("deleteApplication:obj-1");
     expect(calls).not.toContain("purgeDeletedApplication:obj-1");
+  });
+
+  it("marks the listing inspected but unmatched when a grant issuer's dry run finds no permission entry", async () => {
+    const { graph } = fakeGraph({
+      app: { objectId: "obj-1", appId: "app-1" },
+      permissions: [{ permissionId: "perm-9", appIds: ["someone-else"] }],
+    });
+
+    const outcome = await runDeleteServerApp(graph, {
+      siteUrl: "https://contoso.sharepoint.com/sites/Example",
+      displayName: "Ironwright Repository Reconciliation",
+      confirm: false,
+      forceOrphan: false,
+      hasGrantIssuer: true,
+    });
+
+    expect(outcome).toEqual({
+      kind: "planned",
+      appId: "app-1",
+      objectId: "obj-1",
+      permissionId: undefined,
+      permissionsInspected: true,
+    });
   });
 
   it("revokes, deletes and purges in that order when confirmed", async () => {

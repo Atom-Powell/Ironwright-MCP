@@ -125,6 +125,30 @@ describe("runDeleteServerApp errors", () => {
     expect(calls).not.toContain("listSitePermissions:site-1");
   });
 
+  it("with --force-orphan, a dry run reports the listing as never inspected rather than empty", async () => {
+    const { graph, calls } = fakeGraph({
+      app: { objectId: "obj-1", appId: "app-1" },
+      permissions: [],
+    });
+
+    const outcome = await runDeleteServerApp(graph, {
+      siteUrl: "https://contoso.sharepoint.com/sites/Example",
+      displayName: "Ironwright Repository Reconciliation",
+      confirm: false,
+      forceOrphan: true,
+      hasGrantIssuer: false,
+    });
+
+    expect(outcome).toEqual({
+      kind: "planned",
+      appId: "app-1",
+      objectId: "obj-1",
+      permissionId: undefined,
+      permissionsInspected: false,
+    });
+    expect(calls).not.toContain("listSitePermissions:site-1");
+  });
+
   it("tolerates a 404 from the delete and still purges", async () => {
     const { graph } = fakeGraph({
       app: { objectId: "obj-1", appId: "app-1" },
@@ -178,5 +202,46 @@ describe("runDeleteServerApp errors", () => {
 
     await expect(failure).rejects.toThrow(/permission was revoked/i);
     await expect(failure).rejects.toThrow(/application still exists/i);
+  });
+
+  it("does not claim a revoke when the delete fails and no permission entry was found", async () => {
+    const { graph } = fakeGraph({
+      app: { objectId: "obj-1", appId: "app-1" },
+      permissions: [],
+      deleteApplicationStatus: 403,
+    });
+
+    const failure = runDeleteServerApp(graph, {
+      siteUrl: "https://contoso.sharepoint.com/sites/Example",
+      displayName: "Ironwright Repository Reconciliation",
+      confirm: true,
+      forceOrphan: false,
+      hasGrantIssuer: true,
+    });
+
+    await expect(failure).rejects.toThrow(/no site permission was revoked/i);
+    await expect(failure).rejects.toThrow(/application still exists/i);
+    await failure.catch((error: unknown) => {
+      expect((error as Error).message).not.toMatch(/^The site permission was revoked/);
+    });
+  });
+
+  it("says the application was deleted and names the restore window when the purge fails", async () => {
+    const { graph } = fakeGraph({
+      app: { objectId: "obj-1", appId: "app-1" },
+      permissions: [],
+      purgeStatus: 403,
+    });
+
+    const failure = runDeleteServerApp(graph, {
+      siteUrl: "https://contoso.sharepoint.com/sites/Example",
+      displayName: "Ironwright Repository Reconciliation",
+      confirm: true,
+      forceOrphan: false,
+      hasGrantIssuer: true,
+    });
+
+    await expect(failure).rejects.toThrow(/was deleted/i);
+    await expect(failure).rejects.toThrow(/30 days/);
   });
 });
