@@ -26,7 +26,7 @@ Every task's requirements implicitly include all of these.
   Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
   Claude-Session: https://claude.ai/code/session_01Ds8MKaFZcayf4Ug91RCLo9
   ```
-- **Verification before completion.** `npm run lint`, `npm run typecheck`, `npm test` and `npm run build` must all pass before a task is called done. Run them; do not assume them. The suite stands at 979 tests across 71 files.
+- **Verification before completion.** `npm run lint`, `npm run typecheck`, `npm test` and `npm run build` must all pass before a task is called done. Run them; do not assume them. Do not treat any test count quoted to you as a baseline: `tests/source-hygiene.test.ts` emits one case per tracked text file, so the total moves whenever a file is added, documentation included. Measure the count before your change and after it, and require only that it did not shrink.
 - **Never run against a tenant.** Every task is tested against fakes. Live verification is the operator's, once.
 
 ## File Structure
@@ -224,7 +224,7 @@ Build one internal `request<T>(pathOrUrl, options)` carrying the current logic, 
     },
 ```
 
-Inside `send`, set `content-type: application/json` and serialize only when a body is present, and merge `options.headers` after the always-set ones so a caller cannot accidentally drop the bearer token.
+Inside `send`, set `content-type: application/json` and serialize only when a body is present, and spread `options.headers` BEFORE the always-set ones, so `authorization`, `accept` and `content-type` cannot be shadowed by a per-call header. Later spread wins in an object literal, so the always-set headers have to come last to be the ones that survive a collision. A caller needing a different `accept` or `content-type` changes this function rather than passing a header, which is the deliberate trade: the alternative is a caller silently dropping the bearer token and getting an auth error with no indication why.
 
 Two places currently hard-code the method and both are read by an operator. `GraphRequestError` is constructed with `method: "GET"`, and the non-JSON refusal message begins `Graph GET ${label}`. Both take `options.method`. A POST failure reporting itself as a GET is precisely the defect class this repo tracks: every clause true, the assembled sentence false.
 
