@@ -343,6 +343,13 @@ nothing in this codebase imports dynamically. Worth revisiting only if a dynamic
 
 ## Outstanding operator action: delete the test tenant's server application
 
+**DELETED 2026-09-13 by the operator. The purge is not confirmed.** The operator reported deleting
+the application. Whether it was also purged from deleted items was not stated, and nobody has
+verified it against the tenant, so this section stays open rather than closed. If the purge did not
+happen, the exposed secret remains recoverable until roughly 2026-10-13 by anyone who can restore
+the object. Confirm at **App registrations, Deleted applications**: an empty list, or the
+application absent from it, closes this. Original entry follows.
+
 Raised 2026-09-13, after phase 3 merged.
 
 The first live setup run created `Ironwright Repository Reconciliation`, app id
