@@ -51,6 +51,15 @@ describe("readWorkbookGrid", () => {
     expect(result.rows[0]?.effectiveFrom).toBe("2026-08-15");
     expect(result.rejectedRows).toEqual([]);
   });
+
+  it("produces a record with no effectiveFrom when that cell is blank, which is not a rejection", () => {
+    const result = readWorkbookGrid([HEADER, ["CLIENTA", true, false, ""]], PROFILE);
+
+    expect(result.rejectedRows).toEqual([]);
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]?.effectiveFrom).toBeUndefined();
+    expect(result.rows[0]?.fields.monthlyTraining).toBe(true);
+  });
 });
 
 describe("excelSerialToIsoDate", () => {
@@ -67,5 +76,12 @@ describe("excelSerialToIsoDate", () => {
   it("refuses a serial in Excel's 1900 range, where its phantom leap day makes the mapping ambiguous", () => {
     expect(excelSerialToIsoDate(59)).toBeUndefined();
     expect(excelSerialToIsoDate(60)).toBeUndefined();
+  });
+
+  it("accepts serial 61, the first date past the ambiguous range and the boundary itself", () => {
+    // 60 is Excel's phantom 29 February 1900, so 61 is the first serial whose
+    // mapping is unambiguous. Pinned because a boundary written as < or <= is a
+    // one-character edit that no other case in this file would catch.
+    expect(excelSerialToIsoDate(61)).toBe("1900-03-01");
   });
 });

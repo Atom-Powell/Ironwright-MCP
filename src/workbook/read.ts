@@ -73,15 +73,34 @@ export function readWorkbookGrid(grid: unknown[][], profile: Profile): ReadResul
   if (missing.length > 0) {
     // Every missing header at once. Reporting the first only costs an operator
     // one failed run per renamed column, and a mapping usually goes stale in
-    // batches when someone tidies a spreadsheet.
+    // batches when someone tidies a spreadsheet. The sentence agrees with itself
+    // in both directions because an operator reads it whole, and a plural list
+    // under a singular noun reads like a bug in the tool rather than in the
+    // workbook.
+    const several = missing.length > 1;
     throw new WorkbookMappingError(
-      `The workbook has no column headed ${missing.map((text) => `"${text}"`).join(", ")} on row ` +
-        `${profile.workbookMapping.headerRow}. The profile's workbookMapping names ${missing.length === 1 ? "it" : "them"}, ` +
-        "so either a column was renamed in the workbook or the mapping was written against a different sheet.",
+      `The workbook has no ${several ? "columns" : "column"} headed ` +
+        `${missing.map((text) => `"${text}"`).join(", ")} on row ${profile.workbookMapping.headerRow}. ` +
+        `The profile's workbookMapping names ${several ? "them" : "it"}, so either ` +
+        `${several ? "those columns were" : "that column was"} renamed in the workbook or the mapping ` +
+        "was written against a different sheet.",
     );
   }
 
-  const clientIndex = columnIndexByField.get("client") as number;
+  const clientIndex = columnIndexByField.get("client");
+  // Guarded rather than asserted, because the invariant that makes this safe is
+  // owned by two other places: the profile schema requires a client column, and
+  // the missing-header check above has already thrown if the sheet lacks one. An
+  // unchecked lookup stays correct only while both hold, and the failure if
+  // either moves is silent rather than loud: indexing a row by undefined reads
+  // as an empty cell, so every row would be skipped as blank and the report
+  // would come back empty and confident.
+  if (clientIndex === undefined) {
+    throw new WorkbookMappingError(
+      "The profile's workbookMapping names no client column, so no row could be attributed to a client. " +
+        "The profile schema requires one, so reaching this point means the schema and this reader disagree.",
+    );
+  }
   const rows: ClientRecord[] = [];
   const rejectedRows: RejectedWorkbookRow[] = [];
 
@@ -91,10 +110,28 @@ export function readWorkbookGrid(grid: unknown[][], profile: Profile): ReadResul
     if (cells === undefined) continue;
 
     const clientCell = cells[clientIndex];
-    const client = typeof clientCell === "string" ? clientCell.trim() : "";
-    // A blank client cell is a trailing empty row, which every spreadsheet has.
-    // It is not an error and must not be reported as one, or a workbook with
-    // whitespace below its table would report dozens of rejections.
+
+    // Three cases, and the line between the first two carries the weight. An
+    // absent, null or blank-string client cell is a trailing empty row, which
+    // every spreadsheet has below its table: skipped silently, because
+    // rejecting those would bury one real rejection under dozens of false ones.
+    // Anything else in that cell was put there by someone and still cannot be
+    // read as a client name, so it is rejected rather than skipped. Excel hands
+    // back a numeric client code as a number, and coercing 4021 to "4021" would
+    // be a guess about whether it matches the repository's folder names, while
+    // skipping it would drop a client out of a compliance report with no trace.
+    // A rejection is visible, and the operator decides.
+    if (clientCell === undefined || clientCell === null) continue;
+
+    if (typeof clientCell !== "string") {
+      rejectedRows.push({
+        row: sheetRow,
+        reason: `the client cell was not text: ${JSON.stringify(clientCell)}`,
+      });
+      continue;
+    }
+
+    const client = clientCell.trim();
     if (client.length === 0) continue;
 
     const fields: Record<string, string | number | boolean | null> = {};
