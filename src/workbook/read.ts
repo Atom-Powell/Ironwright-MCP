@@ -1,4 +1,5 @@
 import type { Profile } from "../domain/profile/schema.js";
+import { isIsoEffectiveFrom } from "../domain/reconcile/index.js";
 import type { ClientRecord, RejectedWorkbookRow } from "../domain/reconcile/index.js";
 
 /**
@@ -39,8 +40,6 @@ export function excelSerialToIsoDate(serial: number): string | undefined {
   return date.toISOString().slice(0, 10);
 }
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
 function cellToField(value: unknown): string | number | boolean | null {
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
   return null;
@@ -58,11 +57,17 @@ export function readWorkbookGrid(grid: unknown[][], profile: Profile): ReadResul
   }
 
   const headerIndexByText = new Map<string, number>();
+  const duplicatedHeaders = new Set<string>();
   header.forEach((cell, index) => {
-    if (typeof cell === "string" && cell.trim().length > 0) headerIndexByText.set(cell.trim(), index);
+    if (typeof cell !== "string") return;
+    const text = cell.trim();
+    if (text.length === 0) return;
+    if (headerIndexByText.has(text)) duplicatedHeaders.add(text);
+    else headerIndexByText.set(text, index);
   });
 
   const columnIndexByField = new Map<string, number>();
+  const mappedHeaders = new Set(Object.values(profile.workbookMapping.columns));
   const missing: string[] = [];
   for (const [field, headerText] of Object.entries(profile.workbookMapping.columns)) {
     const index = headerIndexByText.get(headerText);
@@ -80,10 +85,32 @@ export function readWorkbookGrid(grid: unknown[][], profile: Profile): ReadResul
     const several = missing.length > 1;
     throw new WorkbookMappingError(
       `The workbook has no ${several ? "columns" : "column"} headed ` +
-        `${missing.map((text) => `"${text}"`).join(", ")} on row ${profile.workbookMapping.headerRow}. ` +
+        `${missing.map((text) => `"${text}"`).join(", ")} on row ${profile.workbookMapping.headerRow} of the ` +
+        "range that was read. " +
         `The profile's workbookMapping names ${several ? "them" : "it"}, so either ` +
         `${several ? "those columns were" : "that column was"} renamed in the workbook or the mapping ` +
         "was written against a different sheet.",
+    );
+  }
+
+  // Only the headers the mapping names. A workbook is free to carry two
+  // columns headed "Notes" if nothing reads them, but two headed "Client" are
+  // two different columns answering to one mapping entry, and they can hold
+  // different values. Taking either one is a guess, and the guess is silent:
+  // picking the wrong "Client" column reads every row as blank, and the
+  // report comes back empty and confident, which is the same failure the
+  // clientIndex guard below exists to refuse. The engine refuses a duplicated
+  // client row outright rather than merging it; this is the same refusal one
+  // layer earlier.
+  const ambiguous = [...duplicatedHeaders].filter((text) => mappedHeaders.has(text));
+  if (ambiguous.length > 0) {
+    const several = ambiguous.length > 1;
+    throw new WorkbookMappingError(
+      `The workbook has more than one column headed ${ambiguous.map((text) => `"${text}"`).join(", ")} on ` +
+        `row ${profile.workbookMapping.headerRow} of the range that was read. The profile's workbookMapping ` +
+        `names ${several ? "them" : "it"}, and the repeated columns can hold different values, so which ` +
+        `${several ? "of them governs is" : "one governs is"} ambiguous. Rename or remove the duplicate ` +
+        `${several ? "columns" : "column"}, or point the mapping at a different sheet.`,
     );
   }
 
@@ -101,11 +128,24 @@ export function readWorkbookGrid(grid: unknown[][], profile: Profile): ReadResul
         "The profile schema requires one, so reaching this point means the schema and this reader disagree.",
     );
   }
+  // A malformed effective date is only worth a rejection when something reads
+  // the field. With respectEffectiveFrom off the engine never looks at it, so
+  // rejecting the row would cost an operator a whole client out of a
+  // compliance report over a cell nothing consults. A readable value is still
+  // carried through either way, since dropping data the sheet holds is a
+  // different kind of loss.
+  const respectEffectiveFrom = profile.window.respectEffectiveFrom;
+
   const rows: ClientRecord[] = [];
   const rejectedRows: RejectedWorkbookRow[] = [];
 
   for (let index = headerRowIndex + 1; index < grid.length; index += 1) {
-    const sheetRow = index + 1;
+    // Numbered within the range Graph returned, not within the sheet. For a
+    // table the range is the table's own, so a table starting at sheet row 12
+    // numbers its header row 1 here and its first data row 2.
+    // `RejectedWorkbookRow` carries the same caveat at the field an operator
+    // reads, and says what it would take to make the number absolute.
+    const rangeRow = index + 1;
     const cells = grid[index];
     if (cells === undefined) continue;
 
@@ -125,7 +165,7 @@ export function readWorkbookGrid(grid: unknown[][], profile: Profile): ReadResul
 
     if (typeof clientCell !== "string") {
       rejectedRows.push({
-        row: sheetRow,
+        row: rangeRow,
         reason: `the client cell was not text: ${JSON.stringify(clientCell)}`,
       });
       continue;
@@ -146,11 +186,18 @@ export function readWorkbookGrid(grid: unknown[][], profile: Profile): ReadResul
         if (cell === undefined || cell === null || cell === "") continue;
         if (typeof cell === "number") {
           const converted = excelSerialToIsoDate(cell);
-          if (converted === undefined) rejection = `effectiveFrom was not a usable date: ${JSON.stringify(cell)}`;
-          else effectiveFrom = converted;
-        } else if (typeof cell === "string" && ISO_DATE.test(cell.trim())) {
+          if (converted !== undefined) effectiveFrom = converted;
+          else if (respectEffectiveFrom) {
+            rejection = `effectiveFrom was not a usable date: ${JSON.stringify(cell)}`;
+          }
+          // Screened against the engine's own predicate rather than a pattern
+          // of this module's, because a value this reader accepts is a value
+          // the engine has to be able to read: the two rules disagreeing is
+          // how a hand-typed cell got past here and then aborted the report
+          // from inside the engine.
+        } else if (typeof cell === "string" && isIsoEffectiveFrom(cell.trim())) {
           effectiveFrom = cell.trim();
-        } else {
+        } else if (respectEffectiveFrom) {
           rejection = `effectiveFrom was not a date: ${JSON.stringify(cell)}`;
         }
         continue;
@@ -160,7 +207,7 @@ export function readWorkbookGrid(grid: unknown[][], profile: Profile): ReadResul
     }
 
     if (rejection !== undefined) {
-      rejectedRows.push({ row: sheetRow, client, reason: rejection });
+      rejectedRows.push({ row: rangeRow, client, reason: rejection });
       continue;
     }
 

@@ -3,9 +3,20 @@ import { readWorkbookGrid, WorkbookMappingError } from "../../src/workbook/read.
 import { loadProfile } from "../../src/domain/profile/load.js";
 import { readFileSync } from "node:fs";
 
-const PROFILE = loadProfile(
-  JSON.parse(readFileSync(new URL("../../examples/profiles/example.json", import.meta.url), "utf8")),
-);
+const EXAMPLE_JSON = readFileSync(new URL("../../examples/profiles/example.json", import.meta.url), "utf8");
+
+const PROFILE = loadProfile(JSON.parse(EXAMPLE_JSON));
+
+/**
+ * The example profile with respectEffectiveFrom turned off, built as a variant
+ * rather than by editing the shared fixture: every other case in this file
+ * depends on the flag being on, since that is what makes a malformed effective
+ * date worth rejecting a row over.
+ */
+const PROFILE_IGNORING_EFFECTIVE_FROM = loadProfile({
+  ...JSON.parse(EXAMPLE_JSON),
+  window: { mode: "rolling", months: 12, respectEffectiveFrom: false },
+});
 
 const HEADER = ["Client", "Monthly Training", "Quarterly Phishing", "Onboarded"];
 
@@ -42,13 +53,16 @@ describe("readWorkbookGrid failures", () => {
     expect(result.rejectedRows[0]?.reason).toMatch(/15\/08\/2026/);
   });
 
-  it("numbers a rejected row as the sheet numbers it, so an operator can find the cell", () => {
+  it("numbers a rejected row within the range that was read, not within the sheet", () => {
     const result = readWorkbookGrid(
       [HEADER, ["CLIENTA", true, false, 45231], ["CLIENTB", true, false, "nonsense"]],
       PROFILE,
     );
 
-    // headerRow 1, one good row, so the bad one is sheet row 3.
+    // headerRow 1, one good row, so the bad one is row 3 of the range. The
+    // sheet may number it differently: a table's range starts where the table
+    // does, and nothing here reads that offset from Graph.
+    expect(result.rejectedRows).toHaveLength(1);
     expect(result.rejectedRows[0]?.row).toBe(3);
   });
 
@@ -87,13 +101,87 @@ describe("readWorkbookGrid failures", () => {
     expect(result.rejectedRows).toEqual([]);
   });
 
+  it("rejects an effectiveFrom whose month cannot exist, rather than passing it to the engine", () => {
+    // "2026-13-01" satisfies the shape of an ISO date and names a thirteenth
+    // month. The reader used to pass it through on shape alone, and the engine
+    // then threw on it partway through deriving expectations, which aborted
+    // the report for every client rather than rejecting the one row.
+    const result = readWorkbookGrid(
+      [HEADER, ["CLIENTA", true, false, 45231], ["CLIENTB", true, false, "2026-13-01"]],
+      PROFILE,
+    );
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rejectedRows).toHaveLength(1);
+    expect(result.rejectedRows[0]?.client).toBe("CLIENTB");
+    expect(result.rejectedRows[0]?.reason).toMatch(/2026-13-01/);
+  });
+
+  it("rejects an effectiveFrom whose day cannot exist, rather than passing it to the engine", () => {
+    const result = readWorkbookGrid(
+      [HEADER, ["CLIENTA", true, false, 45231], ["CLIENTB", true, false, "2026-06-45"]],
+      PROFILE,
+    );
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rejectedRows).toHaveLength(1);
+    expect(result.rejectedRows[0]?.client).toBe("CLIENTB");
+    expect(result.rejectedRows[0]?.reason).toMatch(/2026-06-45/);
+  });
+
+  it("keeps a row with a malformed effectiveFrom when the profile does not respect that column", () => {
+    // With respectEffectiveFrom off the engine never reads the field, so
+    // rejecting the row would drop a client out of a compliance report over a
+    // cell nothing consults.
+    const result = readWorkbookGrid(
+      [HEADER, ["CLIENTA", true, false, 45231], ["CLIENTB", true, false, "15/08/2026"]],
+      PROFILE_IGNORING_EFFECTIVE_FROM,
+    );
+
+    expect(result.rejectedRows).toEqual([]);
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows[1]?.client).toBe("CLIENTB");
+    expect(result.rows[1]?.effectiveFrom).toBeUndefined();
+  });
+
+  it("refuses a mapped header the sheet carries twice, rather than taking one of the columns", () => {
+    // Two columns headed "Client" answer to one mapping entry and can hold
+    // different values. Silently taking the rightmost is the failure that
+    // produces an empty, confident report.
+    const call = (): unknown =>
+      readWorkbookGrid(
+        [
+          ["Client", "Monthly Training", "Quarterly Phishing", "Onboarded", "Client"],
+          ["CLIENTA", true, false, 45231, "CLIENTZ"],
+        ],
+        PROFILE,
+      );
+
+    expect(call).toThrow(WorkbookMappingError);
+    expect(call).toThrow(/more than one column headed "Client"/);
+  });
+
+  it("ignores a duplicated column the mapping does not name, which is not ambiguous", () => {
+    const result = readWorkbookGrid(
+      [
+        [...HEADER, "Notes", "Notes"],
+        ["CLIENTA", true, false, 45231, "first", "second"],
+      ],
+      PROFILE,
+    );
+
+    expect(result.rejectedRows).toEqual([]);
+    expect(result.rows).toHaveLength(1);
+  });
+
   it("reads as a whole sentence when exactly one header is missing", () => {
     const call = (): unknown =>
       readWorkbookGrid([["Client", "Monthly Training", "Quarterly Phishing"], ["CLIENTA", true, false]], PROFILE);
 
     expect(call).toThrow(
-      'The workbook has no column headed "Onboarded" on row 1. The profile\'s workbookMapping names it, ' +
-        "so either that column was renamed in the workbook or the mapping was written against a different sheet.",
+      'The workbook has no column headed "Onboarded" on row 1 of the range that was read. ' +
+        "The profile's workbookMapping names it, so either that column was renamed in the workbook " +
+        "or the mapping was written against a different sheet.",
     );
   });
 
@@ -101,9 +189,9 @@ describe("readWorkbookGrid failures", () => {
     const call = (): unknown => readWorkbookGrid([["Client"], ["CLIENTA"]], PROFILE);
 
     expect(call).toThrow(
-      'The workbook has no columns headed "Monthly Training", "Quarterly Phishing", "Onboarded" on row 1. ' +
-        "The profile's workbookMapping names them, so either those columns were renamed in the workbook " +
-        "or the mapping was written against a different sheet.",
+      'The workbook has no columns headed "Monthly Training", "Quarterly Phishing", "Onboarded" on row 1 ' +
+        "of the range that was read. The profile's workbookMapping names them, so either those columns " +
+        "were renamed in the workbook or the mapping was written against a different sheet.",
     );
   });
 });

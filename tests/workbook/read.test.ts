@@ -52,6 +52,18 @@ describe("readWorkbookGrid", () => {
     expect(result.rejectedRows).toEqual([]);
   });
 
+  it("accepts a bare year and month, which is what the engine's own rule allows", () => {
+    // Cadences resolve to a month, so the engine reads "2026-06" and discards
+    // a day it is given. The reader used to refuse it as "not a date", which
+    // dropped the client out of the report over a value that would have read
+    // correctly one module later.
+    const result = readWorkbookGrid([HEADER, ["CLIENTA", true, false, "2026-06"]], PROFILE);
+
+    expect(result.rejectedRows).toEqual([]);
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]?.effectiveFrom).toBe("2026-06");
+  });
+
   it("produces a record with no effectiveFrom when that cell is blank, which is not a rejection", () => {
     const result = readWorkbookGrid([HEADER, ["CLIENTA", true, false, ""]], PROFILE);
 
