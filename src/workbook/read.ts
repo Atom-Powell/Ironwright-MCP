@@ -21,6 +21,18 @@ export interface ReadResult {
 }
 
 /**
+ * Joins a list into a clause an operator reads as one sentence. A bare
+ * comma-joined list reads as one thing carrying several names, which is the
+ * misreading the duplicate-header message below is written to avoid.
+ */
+function joinWithAnd(parts: string[]): string {
+  if (parts.length < 2) return parts.join("");
+  const rest = parts.slice(0, -1).join(", ");
+  const last = parts.slice(-1).join("");
+  return parts.length === 2 ? `${rest} and ${last}` : `${rest}, and ${last}`;
+}
+
+/**
  * 25569 is the Excel serial for 1970-01-01, so the conversion is anchored on the
  * Unix epoch rather than on Excel's own 1899 epoch. Serials below 61 are refused
  * rather than converted: Excel models a 29 February 1900 that never existed, so
@@ -114,12 +126,20 @@ export function readWorkbookGrid(grid: unknown[][], profile: Profile): ReadResul
   // layer earlier.
   const ambiguous = [...duplicatedHeaders].filter((text) => mappedHeaders.has(text));
   if (ambiguous.length > 0) {
+    // The same agreement rule as the missing-header message above, and one
+    // more besides. Each duplicated heading carries its own "more than one"
+    // rather than sharing a single leading noun over a comma-joined list,
+    // because that list reads as one column answering to both names, which is
+    // a stranger problem than the one the workbook actually has.
     const several = ambiguous.length > 1;
+    const duplicated = ambiguous.map((text, position) =>
+      position === 0 ? `more than one column headed "${text}"` : `more than one headed "${text}"`,
+    );
     throw new WorkbookMappingError(
-      `The workbook has more than one column headed ${ambiguous.map((text) => `"${text}"`).join(", ")} on ` +
-        `row ${profile.workbookMapping.headerRow} of the range that was read. The profile's workbookMapping ` +
-        `names ${several ? "them" : "it"}, and the repeated columns can hold different values, so which ` +
-        `${several ? "of them governs is" : "one governs is"} ambiguous. Rename or remove the duplicate ` +
+      `The workbook has ${joinWithAnd(duplicated)} on row ${profile.workbookMapping.headerRow} of the range ` +
+        `that was read. The profile's workbookMapping names ${several ? "them" : "it"}, and columns that ` +
+        "repeat a header can hold different values, so it is ambiguous which " +
+        `${several ? "columns govern" : "column governs"}. Rename or remove the duplicate ` +
         `${several ? "columns" : "column"}, or point the mapping at a different sheet.`,
     );
   }

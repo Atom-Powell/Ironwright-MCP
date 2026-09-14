@@ -214,4 +214,45 @@ describe("readWorkbookGrid failures", () => {
     );
   });
 
+  it("reads as a whole sentence when exactly one header is duplicated", () => {
+    const call = (): unknown =>
+      readWorkbookGrid(
+        [
+          ["Client", "Monthly Training", "Quarterly Phishing", "Onboarded", "Client"],
+          ["CLIENTA", true, false, 45231, "CLIENTZ"],
+        ],
+        PROFILE,
+      );
+
+    expect(call).toThrow(
+      'The workbook has more than one column headed "Client" on row 1 of the range that was read. ' +
+        "The profile's workbookMapping names it, and columns that repeat a header can hold different " +
+        "values, so it is ambiguous which column governs. Rename or remove the duplicate column, or " +
+        "point the mapping at a different sheet.",
+    );
+  });
+
+  it("reads as a whole sentence when several headers are duplicated", () => {
+    // The message used to put a plural list under a singular leading noun:
+    // "more than one column headed \"Client\", \"Onboarded\"", which reads as
+    // one column answering to both names rather than as two separately
+    // duplicated headings. The whole sentence is asserted, not a fragment,
+    // because every earlier version of it was correct clause by clause.
+    const call = (): unknown =>
+      readWorkbookGrid(
+        [
+          ["Client", "Monthly Training", "Quarterly Phishing", "Onboarded", "Client", "Onboarded"],
+          ["CLIENTA", true, false, 45231, "CLIENTZ", 45232],
+        ],
+        PROFILE,
+      );
+
+    expect(call).toThrow(WorkbookMappingError);
+    expect(call).toThrow(
+      'The workbook has more than one column headed "Client" and more than one headed "Onboarded" on ' +
+        "row 1 of the range that was read. The profile's workbookMapping names them, and columns that " +
+        "repeat a header can hold different values, so it is ambiguous which columns govern. Rename or " +
+        "remove the duplicate columns, or point the mapping at a different sheet.",
+    );
+  });
 });
