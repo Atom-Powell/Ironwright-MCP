@@ -590,9 +590,46 @@ export async function runDeleteServerApp(
   };
 }
 
+export interface DeleteBootstrapArgs {
+  displayName: string;
+  confirm: boolean;
+}
+
 export type DeleteBootstrapOutcome =
-  | { kind: "deleted"; appId: string; objectId: string }
-  | { kind: "already-absent"; displayName: string };
+  | { kind: "already-absent"; displayName: string }
+  | { kind: "planned"; appId: string; objectId: string }
+  | {
+      kind: "deleted";
+      appId: string;
+      objectId: string;
+      /**
+       * Same meaning as runDeleteServerApp's own applicationDeleted: false
+       * when deleteApplication answered 404, meaning the application was
+       * already gone before this run's delete reached it, most likely a
+       * concurrent teardown or a manual removal in the portal between the
+       * lookup and this call. The outcome the operator asked for is still
+       * true, but this run did not perform the delete and must not report
+       * that it did.
+       */
+      applicationDeleted: boolean;
+      /**
+       * Same meaning as runDeleteServerApp's own purgeConfirmed: false when the
+       * purge kept answering 404 through the replication-lag retry, which is
+       * not proof the object is gone. The grant issuer holds the broader of
+       * the two permissions this project isolates, so understating what this
+       * run actually observed here is the worse of the two places to get it
+       * wrong.
+       */
+      purgeConfirmed: boolean;
+      /**
+       * Same meaning as runDeleteServerApp's own purgeRetried: true only when
+       * the ladder actually slept at least once. A 404 that never matched
+       * Request_ResourceNotFound gives up after one attempt with no sleep at
+       * all, and the formatter must not tell the operator lag was ruled out
+       * on a run that never tested for it.
+       */
+      purgeRetried: boolean;
+    };
 
 /**
  * Removes the grant issuer. Deleting it is what actually removes the standing
@@ -600,25 +637,106 @@ export type DeleteBootstrapOutcome =
  * application keeps its admin-consented Sites.FullControl.All assignment and
  * anyone able to add a secret would regain tenant-wide SharePoint access
  * without further consent.
+ *
+ * Confirmed deletion purges the application from the tenant's deleted items
+ * afterward, the same way runDeleteServerApp does for the server application,
+ * and for the same reason: Entra's delete is a soft delete with a 30 day
+ * restore window, so stopping at the delete schedules the removal of a
+ * tenant-wide credential rather than performing it, and the grant issuer
+ * holds the broader of the two permissions this project isolates. It reuses
+ * purgeDeletedApplicationWithRetry unchanged, since the race it retries, a
+ * purge landing before the delete has replicated through the directory, is
+ * identical here.
+ *
+ * Purging is irreversible and, unlike the delete alone, cannot be undone by
+ * recreating the application under the same name: a fresh --create-bootstrap
+ * run mints a new object id and a new secret, not the one just purged. Dry
+ * run is therefore the default here too, matching --delete-server-app: without
+ * --confirm this resolves the application and reports what would be removed,
+ * issuing no destructive call.
+ *
+ * A delete that answers 404 is tolerated, not thrown, and still falls through
+ * to the purge, mirroring runDeleteServerApp's own applicationDeleted
+ * handling. Stopping at a delete-404 would have reproduced this command's own
+ * founding bug (docs/OPEN-ITEMS.md: an already-absent target reported as a
+ * failure) in a narrower window, and would have skipped the purge on exactly
+ * the run most likely to find an unpurged, still credentialed object already
+ * sitting in deleted items.
  */
 export async function runDeleteBootstrap(
   graph: SetupGraph,
-  args: { displayName: string },
+  args: DeleteBootstrapArgs,
   hooks: SetupHooks = {},
 ): Promise<DeleteBootstrapOutcome> {
   const notice = hooks.onNotice ?? ((): void => {});
+  const sleep = hooks.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
   const existing = await graph.findApplicationByDisplayName(args.displayName);
   if (existing === undefined) {
-    // Absent is the outcome the operator asked for, not a failure. Reporting it
-    // as one made a correctly torn-down tenant indistinguishable from a broken
-    // one, so a script enforcing teardown across tenants would retry or alert on
-    // a tenant that was already finished.
+    // Absent is the outcome the operator asked for, not a failure, on either
+    // arm: there is nothing to plan or to delete either way. Reporting it as a
+    // failure made a correctly torn-down tenant indistinguishable from a
+    // broken one, so a script enforcing teardown across tenants would retry or
+    // alert on a tenant that was already finished.
     return { kind: "already-absent", displayName: args.displayName };
   }
 
-  notice(`Deleting application ${existing.appId} (object id ${existing.objectId}).`);
-  await graph.deleteApplication(existing.objectId);
+  if (!args.confirm) {
+    return { kind: "planned", appId: existing.appId, objectId: existing.objectId };
+  }
 
-  return { kind: "deleted", appId: existing.appId, objectId: existing.objectId };
+  notice(`Deleting application ${existing.appId} (object id ${existing.objectId}).`);
+  let applicationDeleted = true;
+  try {
+    await graph.deleteApplication(existing.objectId);
+  } catch (error) {
+    if (statusOf(error) !== 404) throw error;
+    // A 404 here is this command's own founding bug in a narrower window: an
+    // already-absent grant issuer must report the finished state, not a
+    // failure, and a concurrent or manual removal between the lookup above
+    // and this call produces the identical situation. Falling through to the
+    // purge below rather than stopping here matters more than the wording
+    // does: a delete-404 is exactly the case where a soft-deleted, still
+    // credentialed grant issuer is most likely already sitting in deleted
+    // items unpurged, which is the state this whole change exists to end.
+    // Mirrors runDeleteServerApp's own applicationDeleted handling above.
+    applicationDeleted = false;
+  }
+
+  notice(`Purging application ${existing.objectId} from deleted items.`);
+  let purgeConfirmed: boolean;
+  let purgeRetried: boolean;
+  try {
+    const purgeResult = await purgeDeletedApplicationWithRetry(graph, existing.objectId, sleep);
+    purgeConfirmed = purgeResult.purged;
+    purgeRetried = purgeResult.retried;
+  } catch (error) {
+    // Unlike a failed delete above, re-running does not retry this: the
+    // application is now soft-deleted, which findApplicationByDisplayName's
+    // own lookup (GET /applications) does not return, so a re-run reports
+    // already-absent and never calls purgeDeletedApplication again. The fix
+    // is a manual purge, not another run of this command. Mirrors the
+    // equivalent failure in runDeleteServerApp above, with the credential's
+    // own permission named rather than left generic, since it is the broader
+    // of the two this project isolates.
+    throw new Error(
+      `Application ${existing.appId} was deleted, but purging it from deleted items failed, so it is ` +
+        "soft-deleted rather than gone: the object stays in the tenant's deleted items for 30 days and " +
+        "anyone who can restore it gets its Sites.FullControl.All permission back with it. Re-running this " +
+        "command will not retry the purge, because the lookup this command uses to find the application does " +
+        "not return a soft-deleted one, so a re-run reports it already absent. Purge it by hand: " +
+        `DELETE /directory/deletedItems/${existing.objectId}, using the operator's own delegated token. ` +
+        `Underlying failure: ${detail(error)}`,
+      { cause: error },
+    );
+  }
+
+  return {
+    kind: "deleted",
+    appId: existing.appId,
+    objectId: existing.objectId,
+    applicationDeleted,
+    purgeConfirmed,
+    purgeRetried,
+  };
 }

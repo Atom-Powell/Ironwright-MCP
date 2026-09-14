@@ -385,17 +385,33 @@ describe("describeSetupFailure", () => {
     expect(message).toMatch(/^Setup failed:/);
   });
 
-  it("prefixes a --delete-bootstrap failure as a deletion failure, not a setup failure", () => {
+  it("prefixes a --delete-bootstrap failure as a teardown failure, not a setup failure", () => {
     // A teardown refusal reading "Setup failed: No application named ...
     // exists ... so there is nothing to delete" implies a setup attempt was
-    // made and failed, when nothing was being set up: this mode only deletes.
+    // made and failed, when nothing was being set up: this mode only tears
+    // down the grant issuer.
     const message = describeSetupFailure(
       new Error('No application named "Ironwright Grant Issuer" exists in this tenant, so there is nothing to delete.'),
       "delete-bootstrap",
     );
 
-    expect(message).toMatch(/^Bootstrap deletion failed:/);
+    expect(message).toMatch(/^Bootstrap teardown failed:/);
     expect(message).not.toMatch(/^Setup failed:/);
+  });
+
+  it("prefixes a --delete-bootstrap purge failure as a teardown, not a deletion", () => {
+    // This mode now purges after a successful delete, and the purge-failure
+    // message runDeleteBootstrap throws opens "was deleted", the same way
+    // runDeleteServerApp's does. A "deletion failed" prefix contradicted that
+    // opening clause for --delete-server-app, and the same contradiction now
+    // applies here: this test is the one that would catch it recurring.
+    const message = describeSetupFailure(
+      new Error("Application app-1 was deleted, but purging it from deleted items failed."),
+      "delete-bootstrap",
+    );
+
+    expect(message).toMatch(/^Bootstrap teardown failed:/);
+    expect(message).not.toMatch(/deletion failed/i);
   });
 
   it("prefixes a --create-bootstrap failure as a creation failure, not a setup failure", () => {
@@ -484,6 +500,6 @@ describe("describeSetupFailure", () => {
       "delete-bootstrap",
     );
 
-    expect(message).toMatch(/^Bootstrap deletion failed:/);
+    expect(message).toMatch(/^Bootstrap teardown failed:/);
   });
 });

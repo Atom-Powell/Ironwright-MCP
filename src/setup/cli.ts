@@ -273,9 +273,10 @@ export function describeBootstrapSuccess(result: { appId: string; secret: string
 }
 
 /**
- * The full `--delete-bootstrap` success block, printed on stdout. A pure
- * function for the same reason describeBootstrapSuccess above is one: so its
- * wording can be pinned by a test.
+ * The full `--delete-bootstrap` output, printed on stdout, covering all three
+ * outcomes runDeleteBootstrap can return. A pure function for the same reason
+ * describeBootstrapSuccess above is one: so its wording can be pinned by a
+ * test.
  *
  * Deletion, not the secret's own seven-day expiry, is what this command can
  * actually claim removed the standing privilege: deleteApplication succeeding
@@ -284,14 +285,28 @@ export function describeBootstrapSuccess(result: { appId: string; secret: string
  * disables one credential and leaves that assignment, and the application
  * that carries it, in place for anyone able to add a new secret.
  *
- * That claim still needs a caveat DELETE /applications does not remove: Graph
- * soft-deletes an application, holding it in the tenant's deleted items for
- * 30 days where the same Application Administrator rights this command
- * needed can restore it. This paragraph reads as the answer to a client
- * security review, and a 30-day restore window is exactly the kind of thing
- * that review would ask about, so it names the window and the permanent purge
- * available for it, rather than leaving deletion sounding more final than it
- * is in the live directory.
+ * The deleted branch used to stop there and send the operator to purge by
+ * hand if the 30-day restore window mattered. It no longer does: this mode
+ * now purges automatically, the same way --delete-server-app does, so the
+ * message reports what the purge actually observed, the `purged` clause
+ * below, instead of advising a manual step this run already took. Stating
+ * both separately, rather than one sentence claiming the credential is gone,
+ * matters because the purge can answer 404 without confirming anything: that
+ * 404 fires milliseconds after a delete that just succeeded in the same run,
+ * so the likelier reading is replication lag, not proof of a purge nobody
+ * performed. Saying the credential is unrecoverable there would be the
+ * opposite of the truth, which is the same finding that shaped
+ * describeDeleteServerAppOutcome's own purged clause.
+ *
+ * Only the confirmed branch of `purged` may claim the permission is durably
+ * gone, and it is the only place in this function that does. An earlier
+ * version put that claim in `deleted` instead, unconditionally, which put it
+ * one sentence ahead of an unconfirmed `purged` clause saying the object may
+ * still be fully restorable with its credentials: "keeps no access" against
+ * "restorable... with its credentials" in the same paragraph. `deleted` is
+ * bare on purpose now, stating only what this run did to the live
+ * application object, the same way describeDeleteServerAppOutcome's own
+ * `deleted` clause always has been.
  *
  * It also names the one piece of operator cleanup this command cannot do
  * itself: IW_BOOTSTRAP_CLIENT_ID and IW_BOOTSTRAP_CLIENT_SECRET, wherever they
@@ -307,6 +322,19 @@ export function describeBootstrapSuccess(result: { appId: string; secret: string
  * docs/OPEN-ITEMS.md recorded on 2026-09-12: runDeleteBootstrap used to throw
  * here, which printed a failure for a tenant that was already in the state
  * the operator wanted.
+ *
+ * The planned branch is new alongside the purge: adding an irreversible purge
+ * to a command that previously acted immediately is the reason this mode now
+ * gates behind --confirm at all, so its dry run has to state plainly that
+ * nothing happened yet, using no past-tense verb, the same discipline
+ * describeDeleteServerAppOutcome's own planned branch follows.
+ *
+ * The deleted branch's own opening clause is gated on applicationDeleted, the
+ * same way describeDeleteServerAppOutcome's `deleted` clause is gated on its
+ * own field of that name: a delete-404 is tolerated by runDeleteBootstrap
+ * rather than thrown, so the message must not claim this run performed a
+ * deletion it did not observe, even though the purge that follows still runs
+ * and the credential is still gone from the tenant either way.
  */
 export function describeDeleteBootstrapSuccess(result: DeleteBootstrapOutcome): string {
   if (result.kind === "already-absent") {
@@ -319,17 +347,74 @@ export function describeDeleteBootstrapSuccess(result: DeleteBootstrapOutcome): 
     );
   }
 
+  if (result.kind === "planned") {
+    return (
+      `This was a dry run and nothing was changed. Application ${result.appId}, object id ${result.objectId}, ` +
+      // No "then" here: the sibling's planned branch has a revoke clause
+      // before this one for it to chain off of; this branch has nothing
+      // preceding it, so the same word would dangle.
+      "is what would be removed. It would delete the application and purge it from the tenant's deleted items, " +
+      "which is what ends its Sites.FullControl.All permission for good: a delete alone is a soft delete and " +
+      "leaves the credential restorable for 30 days. Re-run with --confirm to carry this out."
+    );
+  }
+
+  // Bare: states only what this run did to the live application object.
+  // Every claim about whether the standing permission is durably gone lives
+  // in `purged` below, and only in its confirmed branch, never here. Review
+  // found this clause claiming the permission was removed for good, one
+  // sentence before an unconfirmed `purged` clause said the object may still
+  // be fully restorable with its credentials, a direct contradiction: "keeps
+  // no access" against "restorable... with its credentials" in the same
+  // paragraph. describeDeleteServerAppOutcome's own `deleted` clause, which
+  // this one otherwise mirrors, has never made this claim; that omission was
+  // structural, not an oversight, and this clause now matches it.
+  const deleted = result.applicationDeleted
+    ? `Deleted application ${result.appId}.`
+    : `Application ${result.appId} was already gone when this run tried to delete it, so this run did not ` +
+      "delete it.";
+
+  // The dangerous half, and the reason this branch cannot collapse into one
+  // sentence: an unconfirmed purge fires milliseconds after the delete
+  // succeeded in the same run, so nobody purged the object in that window.
+  // The likelier reading is that it has not yet surfaced in deleted items,
+  // where it is sitting there restorable with its credentials, while a "not
+  // recoverable" message would say the opposite. The retrying clause is
+  // conditional on purgeRetried, not unconditional, for the same reason it is
+  // in describeDeleteServerAppOutcome: a 404 whose code does not match
+  // Request_ResourceNotFound gives up after one attempt with no sleep at all,
+  // and that run never tested whether replication lag was the cause.
+  //
+  // The secret-versus-deletion distinction ("not just its secret") lives
+  // here, in the confirmed branch only, and nowhere else in this function: it
+  // is true without qualification only once the purge is confirmed. Before
+  // that, whether the permission is durably gone is exactly what this run
+  // could not observe, so the unconfirmed branch below makes no claim about
+  // durability at all.
+  const purged = result.purgeConfirmed
+    ? "It was also purged from the tenant's deleted items, which is what actually removes the standing " +
+      "Sites.FullControl.All permission, not just its secret: a purged application keeps no access, where an " +
+      "expired secret alone would not have. Unlike a delete on its own, which leaves the object restorable " +
+      "with its credentials for 30 days, a purge cannot be undone, so the permission is not recoverable."
+    : `The purge returned not found${
+        result.purgeRetried
+          ? ", even after retrying for the directory replication lag that usually explains that,"
+          : ","
+      } so this run could not confirm the purge. Either it was already purged, or it has not yet appeared in the ` +
+      // "does not list <appId>", not "is empty": that portal view is
+      // tenant-wide and can legitimately hold other deleted objects,
+      // including the server application if its own teardown ran moments
+      // earlier, so the checkable instruction names this application, not
+      // the whole view. Same fix, same wording, as describeDeleteServerAppOutcome's
+      // equivalent clause, since an operator reads both modes' output in one sitting.
+      `tenant's deleted items, where it stays restorable with its credentials for 30 days. Confirm that App ` +
+      `registrations, Deleted applications does not list ${result.appId} before treating this credential as gone.`;
+
   return (
-    `Deleted application ${result.appId}. That removes the standing Sites.FullControl.All permission it held, not ` +
-    "just its secret: a deleted application keeps no access, where an expired secret alone would not have. This " +
-    "delete is a soft delete in the directory: the application is recoverable for 30 days by anyone with the same " +
-    "Application Administrator rights this command needed, so if that recovery window matters, for example ahead " +
-    "of a client security review, purge it permanently from deleted items in the Entra admin portal rather than " +
-    "relying on this deletion alone. Remove IW_BOOTSTRAP_CLIENT_ID and IW_BOOTSTRAP_CLIENT_SECRET from wherever " +
-    "they were stored: they now name an application that no longer exists, and a later run that still reads them " +
-    "will fail with a rejected-credentials message that reads like a wrong secret rather than a deleted " +
-    "application. Onboarding another site later needs a grant issuer again, so run this command with " +
-    "--create-bootstrap first."
+    `${deleted} ${purged} Remove IW_BOOTSTRAP_CLIENT_ID and IW_BOOTSTRAP_CLIENT_SECRET from wherever they were ` +
+    "stored: they now name an application that no longer exists, and a later run that still reads them will " +
+    "fail with a rejected-credentials message that reads like a wrong secret rather than a deleted application. " +
+    "Onboarding another site later needs a grant issuer again, so run this command with --create-bootstrap first."
   );
 }
 
@@ -438,7 +523,12 @@ export function describeDeleteServerAppOutcome(outcome: DeleteServerAppOutcome, 
         outcome.purgeRetried ? ", even after retrying for the directory replication lag that usually explains that," : ","
       } so this run could not confirm the purge. Either it was already purged, or it has not yet appeared in the ` +
       "tenant's deleted items, where an application stays restorable with its credentials for 30 days. Confirm " +
-      "that App registrations, Deleted applications is empty before treating this credential as gone.";
+      // "does not list this application", not "is empty": that portal view is
+      // tenant-wide and can legitimately hold other deleted objects,
+      // including the grant issuer if its own teardown ran moments earlier,
+      // so the checkable instruction names this application, not the view.
+      `that App registrations, Deleted applications does not list ${outcome.appId} before treating this ` +
+      "credential as gone.";
 
   return (
     `${deleted} ${purged} ${revoked}${residue} Onboarding this site again needs a fresh application, so run ` +
@@ -456,7 +546,11 @@ const GRANT_ISSUER_TEARDOWN_TAIL =
   "mean recreating one with --create-bootstrap before that teardown could run. Letting its secret expire disables " +
   "a credential, not the application or the permission it holds; only deleting it removes that standing " +
   "permission. When this site is decommissioned, remove the server application first, then delete the grant " +
-  "issuer with --delete-bootstrap.";
+  // --confirm is named here, not just --delete-bootstrap: that mode now
+  // defaults to a dry run, and telling an operator to run it bare, at the one
+  // moment this note tells them to act, would send them to a command that
+  // previews the deletion rather than performing it.
+  "issuer with --delete-bootstrap --confirm.";
 
 /**
  * The closing note printed after a normal run's four deployment values, on
@@ -729,11 +823,13 @@ function failurePrefix(mode: SetupMode): string {
   switch (mode) {
     case "create-bootstrap":
       return "Bootstrap creation failed";
+    // Teardown, not deletion: this mode now deletes and purges, and a purge
+    // failure it prefixes opens "was deleted", so a "deletion failed" prefix
+    // would contradict the sentence it introduced, the same contradiction
+    // that renamed --delete-server-app's own prefix below for the same
+    // reason.
     case "delete-bootstrap":
-      return "Bootstrap deletion failed";
-    // Teardown, not deletion: this mode revokes, deletes and purges, and the
-    // purge failure it prefixes opens "was deleted", so "deletion failed"
-    // prepended to it contradicted the sentence it introduced.
+      return "Bootstrap teardown failed";
     case "delete-server-app":
       return "Server application teardown failed";
     case "setup":

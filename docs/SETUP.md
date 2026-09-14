@@ -61,8 +61,8 @@ decommissioned, not once the current onboarding finishes; see "Retiring the gran
   above can be the same person, and in practice usually are, since a Global Administrator
   satisfies both.
 - `--delete-bootstrap` needs only Application Administrator or Cloud Application Administrator, and needs it for a narrower reason
-  than the other two modes: deleting an application registration is a directory-object
-  operation, not a consent operation, so no admin consent is involved and Privileged Role
+  than the other two modes: deleting the grant issuer and purging it afterward are directory-object
+  operations, not consent operations, so no admin consent is involved and Privileged Role
   Administrator or Global Administrator is not required. This matters when deciding who can run
   teardown in a customer tenant: it can be delegated to whoever holds either of those roles
   there, without also asking for one of the two more senior roles.
@@ -131,15 +131,25 @@ only means recreating one with `--create-bootstrap` before that revoke can run a
 once, at the end, when no server application it provisioned still needs a permission revoked:
 
 ```bash
-npm run setup -- --tenant=<tenant-id> --delete-bootstrap
+npm run setup -- --tenant=<tenant-id> --delete-bootstrap --confirm
 ```
 
 This takes no `--site`, for the same reason `--create-bootstrap` does not: the grant issuer
-never touches a site itself. It signs you in with a device code, finds the application by the
-display name `--create-bootstrap` used (pass `--name` if you gave it a different one), and
-deletes it. It refuses to run alongside `--create-bootstrap`, and it refuses to guess which
-application to delete if more than one matches that name, rather than removing one of several
-identically named holders of `Sites.FullControl.All`.
+never touches a site itself. Dry run is the default here, the same as every other destructive
+path in this project: omit `--confirm` first to see which application this command found and
+that it would delete and purge it, and pass `--confirm` only once that preview looks right. This
+is a deliberate gate, not the original behavior of this command: purging is irreversible in a way
+a plain delete is not, since recreating a grant issuer under the same name with
+`--create-bootstrap` mints a new object id and a new secret, not the one just purged, so there is
+no undoing a wrong purge the way there is no undoing any other confirmed write in this project.
+
+It signs you in with a device code, finds the application by the display name `--create-bootstrap`
+used (pass `--name` if you gave it a different one), and, once confirmed, deletes it, then purges
+it from the tenant's deleted items, which is what actually ends its `Sites.FullControl.All`
+permission rather than merely scheduling its removal; see the purge paragraph below. It refuses to
+run alongside `--create-bootstrap`, and it refuses to guess which application to delete if more
+than one matches that name, rather than removing one of several identically named holders of
+`Sites.FullControl.All`.
 
 Unlike the normal run, `--delete-bootstrap` needs no `IW_BOOTSTRAP_CLIENT_ID` or
 `IW_BOOTSTRAP_CLIENT_SECRET`. It acts using only the signed-in device-code session, the same
@@ -181,12 +191,23 @@ One caveat to the claim above that deletion ends the standing privilege: Entra's
 application registration is a soft delete, not an immediate purge. The application sits in the
 tenant's deleted items for 30 days, where the same Application Administrator rights this command
 needed can restore it, role assignment and all. That is true of every application deletion in
-Entra, not a gap specific to this command, and `--delete-bootstrap` does not purge automatically,
-unlike `--delete-server-app` below. That is exactly the kind of detail a client security review
-is likely to ask about, since "deleted" and "gone for 30 days, then gone" are different answers.
-If the recovery window itself is a concern, purge the application permanently from deleted items
-in the Entra admin portal after this command finishes, rather than treating this deletion alone
-as final.
+Entra, not a gap specific to this command, which is exactly why a confirmed `--delete-bootstrap`
+run purges the application immediately afterward, the same way `--delete-server-app` below does
+for the server application: stopping at the delete would schedule the removal of a tenant-wide
+credential thirty days out rather than performing it, and the grant issuer holds the broader of
+the two permissions this project isolates, so leaving that gap open here would be worse, not
+better, than leaving it on the server application.
+
+The purge can still fail to confirm anything even when nothing is actually wrong. It runs
+immediately after the delete, in the same directory that has not always finished replicating the
+delete yet, and Graph answers a purge against an object that has not surfaced in deleted items
+with the same 404 it would return for one that is already gone. This command retries that specific
+404 on a short ladder before giving up, and its own output says plainly whether the purge was
+confirmed or not, and, separately, whether the retry ladder actually ran; a run that ends without
+confirming the purge is not necessarily a failure, but it does mean checking App registrations,
+Deleted applications in the Entra admin portal before treating the credential as gone. If a
+confirmed purge is not enough, for example ahead of a client security review that wants
+independent verification, check that portal view regardless of what this command reported.
 
 Once the grant issuer is deleted, remove `IW_BOOTSTRAP_CLIENT_ID` and `IW_BOOTSTRAP_CLIENT_SECRET`
 from wherever you stored them. Left in place, they name an application that no longer exists,
@@ -257,9 +278,9 @@ npm run setup -- --tenant=<tenant-id> --site=https://<tenant>.sharepoint.com/sit
 
 This is the counterpart to the normal run above: it removes the server application that a normal
 run created and the per-site permission it was granted, rather than creating either. It is how a
-site gets decommissioned. Dry run is the default here, the same as every other write path in this
-project: omit `--confirm` first to see what the command found and exactly what it would do, and
-pass `--confirm` only once that preview looks right.
+site gets decommissioned. Dry run is the default here, the same as every other destructive path
+in this project: omit `--confirm` first to see what the command found and exactly what it would
+do, and pass `--confirm` only once that preview looks right.
 
 The order it acts in is forced, not a preference. The per-site permission entry is matched to the
 application by its application id, so revoking it has to happen while that identity still exists;
@@ -269,7 +290,8 @@ application, then purges it from the tenant's deleted items. The purge is not op
 Entra's delete of an application registration is a soft delete, and the object stays restorable,
 with its credentials, in the tenant's deleted items for 30 days. Stopping at the delete schedules
 the credential's removal thirty days out rather than performing it, so this command always purges
-after a delete that succeeds, unlike `--delete-bootstrap` above.
+after a delete that succeeds, the same way a confirmed `--delete-bootstrap` above purges the grant
+issuer.
 
 Revoking the permission entry needs a grant issuer's own app-only token, the same
 `IW_BOOTSTRAP_CLIENT_ID` and `IW_BOOTSTRAP_CLIENT_SECRET` a normal run needs. This is exactly why

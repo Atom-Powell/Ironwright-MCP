@@ -69,35 +69,63 @@ function fakeGraph(found: { objectId: string; appId: string } | undefined): {
 }
 
 describe("runDeleteBootstrap", () => {
-  it("finds the grant issuer by name and deletes it", async () => {
+  it("finds the grant issuer by name, deletes it and purges it when confirmed", async () => {
     const { graph, calls } = fakeGraph({ objectId: "obj-1", appId: "app-1" });
 
-    const result = await runDeleteBootstrap(graph, { displayName: "Ironwright Grant Issuer" });
+    const result = await runDeleteBootstrap(graph, { displayName: "Ironwright Grant Issuer", confirm: true });
 
     expect(calls).toEqual([
       "findApplicationByDisplayName:Ironwright Grant Issuer",
       "deleteApplication:obj-1",
+      "purgeDeletedApplication:obj-1",
     ]);
-    expect(result).toEqual({ kind: "deleted", appId: "app-1", objectId: "obj-1" });
+    expect(result).toEqual({
+      kind: "deleted",
+      appId: "app-1",
+      objectId: "obj-1",
+      applicationDeleted: true,
+      purgeConfirmed: true,
+      // The purge succeeded on its first attempt, so the ladder never slept.
+      purgeRetried: false,
+    });
   });
 
   it("creates nothing and touches no site", async () => {
     const { graph, calls } = fakeGraph({ objectId: "obj-1", appId: "app-1" });
 
-    await runDeleteBootstrap(graph, { displayName: "Ironwright Grant Issuer" });
+    await runDeleteBootstrap(graph, { displayName: "Ironwright Grant Issuer", confirm: true });
 
     expect(calls.some((call) => call.startsWith("createApplication"))).toBe(false);
     expect(calls.some((call) => call.startsWith("resolveSite"))).toBe(false);
     expect(calls.some((call) => call.startsWith("grantSitePermission"))).toBe(false);
   });
 
+  it("plans without deleting or purging anything when confirm is absent", async () => {
+    const { graph, calls } = fakeGraph({ objectId: "obj-1", appId: "app-1" });
+
+    const outcome = await runDeleteBootstrap(graph, { displayName: "Ironwright Grant Issuer", confirm: false });
+
+    expect(outcome).toEqual({ kind: "planned", appId: "app-1", objectId: "obj-1" });
+    // The exact list, not two not.toContain assertions against named strings:
+    // this is the one test that would catch a dry run that mutated anything.
+    expect(calls).toEqual(["findApplicationByDisplayName:Ironwright Grant Issuer"]);
+  });
+
   it("reports an already-absent grant issuer as done, not as a failure", async () => {
     const { graph, calls } = fakeGraph(undefined);
 
-    const outcome = await runDeleteBootstrap(graph, { displayName: "Ironwright Grant Issuer" });
+    const outcome = await runDeleteBootstrap(graph, { displayName: "Ironwright Grant Issuer", confirm: true });
 
     expect(outcome).toEqual({ kind: "already-absent", displayName: "Ironwright Grant Issuer" });
     expect(calls.some((call) => call.startsWith("deleteApplication"))).toBe(false);
+  });
+
+  it("reports an already-absent grant issuer as done even on a dry run, since there is nothing to plan", async () => {
+    const { graph } = fakeGraph(undefined);
+
+    const outcome = await runDeleteBootstrap(graph, { displayName: "Ironwright Grant Issuer", confirm: false });
+
+    expect(outcome).toEqual({ kind: "already-absent", displayName: "Ironwright Grant Issuer" });
   });
 
   it("says nothing was deleted when the grant issuer was already gone, and does not claim a deletion", () => {
@@ -134,5 +162,13 @@ describe("parseArgs delete-bootstrap mode", () => {
     expect(parseArgs([...base, "--delete-bootstrap", "--name=Contoso Grant Issuer"]).displayName).toBe(
       "Contoso Grant Issuer",
     );
+  });
+
+  it("defaults confirm to false, so an invocation with no flag previews rather than acts", () => {
+    expect(parseArgs([...base, "--delete-bootstrap"]).confirm).toBe(false);
+  });
+
+  it("sets confirm when the flag is present", () => {
+    expect(parseArgs([...base, "--delete-bootstrap", "--confirm"]).confirm).toBe(true);
   });
 });

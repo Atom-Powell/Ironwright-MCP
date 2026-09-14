@@ -324,13 +324,14 @@ application-permission-only restriction is real, and the bootstrap approach reso
 Still unexercised: every failure path. Rollback, the propagation retry, the preflight refusal,
 the duplicate-bootstrap guard, and every diagnostic message have been tested only against
 fakes. The `--delete-bootstrap` path added afterward is in the same position: its not-found
-refusal, its ambiguous-match refusal, and its success message are covered by tests against
-fakes, not by a live delete against a real tenant. `--delete-server-app`, added 2026-09-13, is
-the same again and is the larger gap of the two, because it is the mode with the most steps and
-the most destructive ones: the permissions listing and its paging, the revoke, the delete, the
-purge and its replication-lag retry, the dry run, `--force-orphan`, and every message each of
-them prints have all been run only against fakes. No live failure on any of these paths has
-been observed.
+refusal, its ambiguous-match refusal, its dry run, its success message, and, since it gained a
+purge on 2026-09-14, the purge itself, its replication-lag retry ladder, and the delete-404
+path that falls through to the purge, are all covered by tests against fakes, not by a live
+delete against a real tenant. `--delete-server-app`, added 2026-09-13, is the same again and is
+the larger gap of the two, because it is the mode with the most steps and the most destructive
+ones: the permissions listing and its paging, the revoke, the delete, the purge and its
+replication-lag retry, the dry run, `--force-orphan`, and every message each of them prints have
+all been run only against fakes. No live failure on any of these paths has been observed.
 
 ## Deferred from the reconciliation engine's whole-branch review, 2026-09-13
 
@@ -521,32 +522,55 @@ Until those numbers exist, this phase's central claim, that delta plus a persist
 link bounds the Graph request count, is unverified. The numbers belong in this file when they
 exist, not before.
 
-## The server-app teardown mode cannot recover from its own partial failure
+## Neither teardown mode can recover from its own partial purge failure
 
-Found during Task 4 of the server application teardown plan, 2026-09-13.
+Found during Task 4 of the server application teardown plan, 2026-09-13, for
+`runDeleteServerApp`. Confirmed to apply identically to `runDeleteBootstrap` once that mode
+gained its own purge on 2026-09-14: the same comment naming this gap now sits in `run.ts` next
+to both functions' purge-failure handling.
 
-`runDeleteServerApp` deletes the server application, then purges it from the tenant's deleted
-items. If the delete succeeds and the purge that follows it then fails, the application is left
-soft-deleted rather than gone.
+Both `runDeleteServerApp` and `runDeleteBootstrap` delete the application, then purge it from
+the tenant's deleted items. If the delete succeeds and the purge that follows it then fails, the
+application is left soft-deleted rather than gone. For `runDeleteBootstrap` this is arguably the
+worse case of the two: the grant issuer holds `Sites.FullControl.All` tenant-wide, the broader
+of the two permissions this project isolates.
 
-The mode cannot repair this on a re-run. `findApplicationByDisplayName` queries the live
+Neither mode can repair this on a re-run. `findApplicationByDisplayName` queries the live
 `/applications` collection, and Entra excludes soft-deleted objects from it; they are returned
-only by `/directory/deletedItems`. So a re-run's first call finds nothing, `runDeleteServerApp`
-returns `already-absent`, and the purge that never ran is never attempted again. The credential
-stays restorable, with its secret, for the remainder of its 30 day window, and nothing about the
-tool's own state says so beyond the one failure message from the run that hit it.
+only by `/directory/deletedItems`. So a re-run's first call finds nothing, both modes return
+`already-absent`, and the purge that never ran is never attempted again. The credential stays
+restorable, with its secret, for the remainder of its 30 day window, and nothing about either
+mode's own state says so beyond the one failure message from the run that hit it.
 
-That failure message names the fix an operator can make by hand: `DELETE
-/directory/deletedItems/{objectId}`, using their own delegated token. It was written with this
-gap already in mind, so the operator is not left guessing, but the tool itself cannot finish the
-job it started once this failure occurs.
+That failure message, in both modes, names the fix an operator can make by hand: `DELETE
+/directory/deletedItems/{objectId}`, using their own delegated token. Each was written with this
+gap already in mind, so the operator is not left guessing, but neither mode can finish the job it
+started once this failure occurs.
 
-A real fix needs the mode to look up the application by object id, not display name, once it has
+A real fix needs each mode to look up the application by object id, not display name, once it has
 one, so a re-run can find a soft-deleted object and retry the purge against it.
 `findApplicationByDisplayName` is the wrong tool for that half of the job: it exists to find an
-application nobody has an id for yet, which is only true before the delete, not after.
+application nobody has an id for yet, which is only true before the delete, not after. Since the
+gap and its shape are now identical in both modes, a fix should address both together rather than
+repeating this item a third time for whichever mode is touched next.
 
-## The grant issuer's own teardown never purges it
+## CLOSED: the grant issuer's own teardown never purges it
+
+**CLOSED 2026-09-14 by `3e3fb86`, "feat: purge the grant issuer after --delete-bootstrap, gated
+behind --confirm", refined by `afbfd97`.** `runDeleteBootstrap` now purges the grant issuer from
+the tenant's deleted items after a confirmed delete, reusing `purgeDeletedApplicationWithRetry`
+and its replication-lag retry unchanged from `runDeleteServerApp`, exactly as this item's own
+closing paragraph proposed. Because purging is irreversible in a way the delete alone is not,
+`--delete-bootstrap` now also defaults to a dry run and needs `--confirm` to act, matching
+`--delete-server-app`; every operator-facing message that names this command, including the
+normal run's own grant-issuer-teardown note and `docs/SETUP.md`, was updated so it names
+`--confirm` rather than pointing at an invocation that would now only preview. Review caught that
+the first pass left the delete's own 404 unguarded, reporting failure and skipping the purge on
+exactly the run most likely to need it; `afbfd97` fixed that by mirroring
+`runDeleteServerApp`'s own `applicationDeleted` handling. Not verified against a live tenant; see
+this file's live-testing entries above for what has and has not actually been exercised.
+
+Original entry follows.
 
 Noticed during Task 4's review of the server application teardown plan, 2026-09-13.
 
