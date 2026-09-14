@@ -383,7 +383,15 @@ describe("describeDeleteServerAppOutcome", () => {
 
   it("reports a completed teardown and says the credential is no longer recoverable", () => {
     const message = describeDeleteServerAppOutcome(
-      { kind: "torn-down", appId: "app-1", objectId: "obj-1", permissionRevoked: true, orphanedPermission: false },
+      {
+        kind: "torn-down",
+        appId: "app-1",
+        objectId: "obj-1",
+        permissionRevoked: true,
+        orphanedPermission: false,
+        applicationDeleted: true,
+        purgeConfirmed: true,
+      },
       "https://contoso.sharepoint.com/sites/Example",
     );
 
@@ -399,7 +407,15 @@ describe("describeDeleteServerAppOutcome", () => {
 
   it("names the residue exactly when the permission entry was left behind", () => {
     const message = describeDeleteServerAppOutcome(
-      { kind: "torn-down", appId: "app-1", objectId: "obj-1", permissionRevoked: false, orphanedPermission: true },
+      {
+        kind: "torn-down",
+        appId: "app-1",
+        objectId: "obj-1",
+        permissionRevoked: false,
+        orphanedPermission: true,
+        applicationDeleted: true,
+        purgeConfirmed: true,
+      },
       "https://contoso.sharepoint.com/sites/Example",
     );
 

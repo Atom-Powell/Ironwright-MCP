@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SetupGraph } from "../../src/setup/adapter.js";
 import { GraphRequestError } from "../../src/graph/errors.js";
+import { describeDeleteServerAppOutcome } from "../../src/setup/cli.js";
 import { runDeleteServerApp } from "../../src/setup/run.js";
 
 // Implements every SetupGraph method, not just the ones runDeleteServerApp is
@@ -13,6 +14,13 @@ function fakeGraph(options: {
   permissions: Array<{ permissionId: string; appIds: string[] }>;
   deleteApplicationStatus?: number;
   purgeStatus?: number;
+  /**
+   * Graph's machine-readable code in the purge failure's body. The
+   * replication-lag retry matches on this code, not on the status alone, so a
+   * test that wants the retry exercised has to send the code a lagging
+   * deletedItems 404 actually carries.
+   */
+  purgeCode?: string;
 }): { graph: SetupGraph; calls: string[] } {
   const calls: string[] = [];
   const graph: SetupGraph = {
@@ -76,7 +84,7 @@ function fakeGraph(options: {
           method: "DELETE",
           path: `/directory/deletedItems/${objectId}`,
           status: options.purgeStatus,
-          body: "{}",
+          body: options.purgeCode === undefined ? "{}" : JSON.stringify({ error: { code: options.purgeCode } }),
         });
       }
     },
@@ -170,7 +178,7 @@ describe("runDeleteServerApp errors", () => {
     expect(calls).not.toContain("listSitePermissions:site-1");
   });
 
-  it("tolerates a 404 from the delete and still purges", async () => {
+  it("tolerates a 404 from the delete, still purges, and records that it did not delete", async () => {
     const { graph } = fakeGraph({
       app: { objectId: "obj-1", appId: "app-1" },
       permissions: [],
@@ -185,10 +193,35 @@ describe("runDeleteServerApp errors", () => {
       hasGrantIssuer: true,
     });
 
-    expect(outcome).toMatchObject({ kind: "torn-down" });
+    // applicationDeleted is the whole point. A 404 here is a tolerable outcome,
+    // not an observed delete, and the formatter has no other way to tell them
+    // apart.
+    expect(outcome).toMatchObject({ kind: "torn-down", applicationDeleted: false, purgeConfirmed: true });
   });
 
-  it("tolerates a 404 from the purge, since already purged is the outcome asked for", async () => {
+  it("does not claim it deleted an application that was already gone", async () => {
+    const { graph } = fakeGraph({
+      app: { objectId: "obj-1", appId: "app-1" },
+      permissions: [],
+      deleteApplicationStatus: 404,
+    });
+
+    const outcome = await runDeleteServerApp(graph, {
+      siteUrl: "https://contoso.sharepoint.com/sites/Example",
+      displayName: "Ironwright Repository Reconciliation",
+      confirm: true,
+      forceOrphan: false,
+      hasGrantIssuer: true,
+    });
+
+    const message = describeDeleteServerAppOutcome(outcome, "https://contoso.sharepoint.com/sites/Example");
+
+    expect(message).toMatch(/already gone when this run tried to delete it/i);
+    expect(message).toMatch(/this run did not delete it/i);
+    expect(message).not.toMatch(/Deleted application app-1/);
+  });
+
+  it("tolerates a 404 from the purge but records that the purge was not confirmed", async () => {
     const { graph } = fakeGraph({
       app: { objectId: "obj-1", appId: "app-1" },
       permissions: [],
@@ -203,7 +236,97 @@ describe("runDeleteServerApp errors", () => {
         forceOrphan: false,
         hasGrantIssuer: true,
       }),
-    ).resolves.toMatchObject({ kind: "torn-down" });
+    ).resolves.toMatchObject({ kind: "torn-down", applicationDeleted: true, purgeConfirmed: false });
+  });
+
+  it("does not claim the secret is unrecoverable when the purge returned not found", async () => {
+    // The finding this test exists for. This 404 fires milliseconds after the
+    // delete succeeded in the same run, so the likely cause is that the object
+    // has not yet surfaced in deleted items, where it stays restorable with its
+    // credentials for 30 days. Saying the secret is not recoverable there is
+    // the exact opposite of the truth, on the scenario this mode was built for.
+    const { graph } = fakeGraph({
+      app: { objectId: "obj-1", appId: "app-1" },
+      permissions: [],
+      purgeStatus: 404,
+    });
+
+    const outcome = await runDeleteServerApp(graph, {
+      siteUrl: "https://contoso.sharepoint.com/sites/Example",
+      displayName: "Ironwright Repository Reconciliation",
+      confirm: true,
+      forceOrphan: false,
+      hasGrantIssuer: true,
+    });
+
+    const message = describeDeleteServerAppOutcome(outcome, "https://contoso.sharepoint.com/sites/Example");
+
+    expect(message).toMatch(/Deleted application app-1/);
+    expect(message).toMatch(/purge returned not found/i);
+    expect(message).toMatch(/could not confirm the purge/i);
+    expect(message).toMatch(/Deleted applications is empty/);
+    expect(message).not.toMatch(/not recoverable/i);
+  });
+
+  it("retries a purge that answers Request_ResourceNotFound, then gives up cleanly", async () => {
+    const { graph, calls } = fakeGraph({
+      app: { objectId: "obj-1", appId: "app-1" },
+      permissions: [],
+      purgeStatus: 404,
+      purgeCode: "Request_ResourceNotFound",
+    });
+    const slept: number[] = [];
+
+    const outcome = await runDeleteServerApp(
+      graph,
+      {
+        siteUrl: "https://contoso.sharepoint.com/sites/Example",
+        displayName: "Ironwright Repository Reconciliation",
+        confirm: true,
+        forceOrphan: false,
+        hasGrantIssuer: true,
+      },
+      {
+        sleep: async (ms) => {
+          slept.push(ms);
+        },
+      },
+    );
+
+    // Three attempts on the same ladder the service principal race uses, then
+    // an unconfirmed purge rather than a thrown failure: nothing observed says
+    // the object is gone, and nothing observed says the purge failed either.
+    expect(calls.filter((call) => call === "purgeDeletedApplication:obj-1")).toHaveLength(3);
+    expect(slept).toEqual([3000, 6000]);
+    expect(outcome).toMatchObject({ kind: "torn-down", purgeConfirmed: false });
+  });
+
+  it("does not retry a purge 404 that carries no replication-lag code", async () => {
+    const { graph, calls } = fakeGraph({
+      app: { objectId: "obj-1", appId: "app-1" },
+      permissions: [],
+      purgeStatus: 404,
+    });
+    const slept: number[] = [];
+
+    await runDeleteServerApp(
+      graph,
+      {
+        siteUrl: "https://contoso.sharepoint.com/sites/Example",
+        displayName: "Ironwright Repository Reconciliation",
+        confirm: true,
+        forceOrphan: false,
+        hasGrantIssuer: true,
+      },
+      {
+        sleep: async (ms) => {
+          slept.push(ms);
+        },
+      },
+    );
+
+    expect(calls.filter((call) => call === "purgeDeletedApplication:obj-1")).toHaveLength(1);
+    expect(slept).toEqual([]);
   });
 
   it("says the grant is revoked and the application still exists when the delete fails", async () => {

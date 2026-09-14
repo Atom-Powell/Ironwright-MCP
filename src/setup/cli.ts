@@ -339,12 +339,16 @@ export function describeDeleteBootstrapSuccess(result: DeleteBootstrapOutcome): 
  * describeDeleteBootstrapSuccess above is one: so its wording can be pinned by
  * a test.
  *
- * Two things here are load-bearing and must not be softened. The planned
+ * Three things here are load-bearing and must not be softened. The planned
  * branch uses no past-tense verb, because nothing has happened: this is a dry
- * run. And the orphaned branch says a permission entry *may* remain rather
+ * run. The orphaned branch says a permission entry *may* remain rather
  * than that one does: with --force-orphan the site's permissions were never
  * listed, so the code cannot observe whether there was one, and claiming
- * there is would assert something it did not see.
+ * there is would assert something it did not see. And the torn-down branch
+ * states the delete and the purge separately, from applicationDeleted and
+ * purgeConfirmed, because runDeleteServerApp tolerates a 404 from either: a
+ * single sentence covering both told an operator a secret was unrecoverable on
+ * a run that had watched neither step happen.
  */
 export function describeDeleteServerAppOutcome(outcome: DeleteServerAppOutcome, siteUrl: string): string {
   if (outcome.kind === "already-absent") {
@@ -402,11 +406,32 @@ export function describeDeleteServerAppOutcome(outcome: DeleteServerAppOutcome, 
       "created with --create-bootstrap and the entry identified by hand."
     : "";
 
+  // The delete and the purge each get their own clause, because each can end in
+  // a 404 that this command tolerates, and both 404s used to fall through to the
+  // same sentence a real teardown produced. That sentence claimed a credential
+  // was unrecoverable on a run that had observed neither step.
+  const deleted = outcome.applicationDeleted
+    ? `Deleted application ${outcome.appId}.`
+    : `Application ${outcome.appId} was already gone when this run tried to delete it, so this run did not ` +
+      "delete it.";
+
+  // The dangerous half. An unconfirmed purge fires milliseconds after the
+  // delete succeeded in the same run, so nobody purged the object in that
+  // window: the likelier reading is that it has not yet surfaced in deleted
+  // items, which means it is sitting there restorable with its credentials
+  // while a "not recoverable" message would say the opposite.
+  const purged = outcome.purgeConfirmed
+    ? "Purged it from deleted items, so its secret is not recoverable: an application deleted but not purged " +
+      "stays restorable, with its credentials, for 30 days."
+    : "The purge returned not found, even after retrying for the directory replication lag that usually " +
+      "explains that, so this run could not confirm the purge. Either it was already purged, or it has not " +
+      "yet appeared in the tenant's deleted items, where an application stays restorable with its credentials " +
+      "for 30 days. Confirm that App registrations, Deleted applications is empty before treating this " +
+      "credential as gone.";
+
   return (
-    `Deleted application ${outcome.appId} and purged it from deleted items, so its secret is not recoverable: ` +
-    "an application deleted but not purged stays restorable, with its credentials, for 30 days. " +
-    `${revoked}${residue} Onboarding this site again needs a fresh application, so run this command without ` +
-    "--delete-server-app when you do."
+    `${deleted} ${purged} ${revoked}${residue} Onboarding this site again needs a fresh application, so run ` +
+    "this command without --delete-server-app when you do."
   );
 }
 

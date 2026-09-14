@@ -99,10 +99,12 @@ async function rollbackApplication(
 // Three attempts across roughly nine seconds, matching the delays cli.ts uses
 // for the token exchange's own replication-lag retry (AADSTS7000215 /
 // AADSTS700016): both problems are the same directory-replication lag showing
-// up at a different call. Nothing else is retried here, because every other
-// failure from this call is a real configuration or permissions error that
+// up at a different call. Shared by the two calls in this file that race the
+// directory: POST /servicePrincipals right after POST /applications, and the
+// purge right after the delete. Nothing else is retried, because every other
+// failure from either call is a real configuration or permissions error that
 // more attempts cannot fix.
-const SERVICE_PRINCIPAL_RETRY_DELAYS_MS = [3000, 6000] as const;
+const DIRECTORY_REPLICATION_RETRY_DELAYS_MS = [3000, 6000] as const;
 
 // Matched on Graph's own machine-readable code, not on the message text. The
 // message carries the whole response body, so a substring match retries any
@@ -129,7 +131,7 @@ async function createServicePrincipalWithRetry(
     try {
       return await graph.createServicePrincipal(appId);
     } catch (error) {
-      const delay = SERVICE_PRINCIPAL_RETRY_DELAYS_MS[index];
+      const delay = DIRECTORY_REPLICATION_RETRY_DELAYS_MS[index];
       if (delay === undefined || !isDirectoryReplicationLagError(error)) throw error;
       await sleep(delay);
     }
@@ -386,14 +388,61 @@ export type DeleteServerAppOutcome =
       objectId: string;
       permissionRevoked: boolean;
       orphanedPermission: boolean;
+      /**
+       * False when deleteApplication answered 404: the application was already
+       * gone by the time this run tried to remove it, so this run did not
+       * delete it. Without this the formatter cannot tell a real delete from a
+       * tolerated absence, and it said "Deleted application X" for both.
+       */
+      applicationDeleted: boolean;
+      /**
+       * False when the purge kept answering 404 through the replication-lag
+       * retry. That is not proof the object is gone: the likelier reading is
+       * that it has not surfaced in deletedItems yet, which means it is sitting
+       * there restorable with its credentials. Only a purge that actually
+       * succeeded lets the formatter say the secret is unrecoverable.
+       */
+      purgeConfirmed: boolean;
     };
 
 function statusOf(error: unknown): number | undefined {
   return error instanceof GraphRequestError ? error.status : undefined;
 }
 
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+/**
+ * Purges the soft-deleted application, retrying the one 404 that is a race
+ * rather than an answer.
+ *
+ * This call fires milliseconds after deleteApplication succeeded in the same
+ * run, so "somebody already purged it" is not the realistic cause of a 404
+ * here. Directory replication lag is: the object has not yet surfaced in
+ * deletedItems. That is the same lag, carrying the same Request_ResourceNotFound
+ * code, that POST /servicePrincipals hits right after POST /applications, so it
+ * gets the same ladder rather than a second mechanism of its own.
+ *
+ * Resolves true when Graph accepted the purge, false when a 404 outlasted the
+ * ladder, and throws for every other failure, which is a real one the caller
+ * has to report.
+ */
+async function purgeDeletedApplicationWithRetry(
+  graph: SetupGraph,
+  objectId: string,
+  sleep: (ms: number) => Promise<void>,
+): Promise<boolean> {
+  for (let index = 0; ; index += 1) {
+    try {
+      await graph.purgeDeletedApplication(objectId);
+      return true;
+    } catch (error) {
+      if (statusOf(error) !== 404) throw error;
+      const delay = DIRECTORY_REPLICATION_RETRY_DELAYS_MS[index];
+      // A 404 that is not the replication-lag code, or one that has outlasted
+      // the ladder, is reported as an unconfirmed purge rather than thrown: the
+      // object may be gone or may be lagging, and this run cannot tell which.
+      if (delay === undefined || !isDirectoryReplicationLagError(error)) return false;
+      await sleep(delay);
+    }
+  }
 }
 
 /**
@@ -413,6 +462,7 @@ export async function runDeleteServerApp(
   hooks: SetupHooks = {},
 ): Promise<DeleteServerAppOutcome> {
   const notice = hooks.onNotice ?? ((): void => {});
+  const sleep = hooks.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
   const existing = await graph.findApplicationByDisplayName(args.displayName);
   if (existing === undefined) {
@@ -454,12 +504,16 @@ export async function runDeleteServerApp(
 
   let permissionRevoked = false;
   if (permissionId !== undefined) {
-    notice(`Revoking site permission ${permissionId} on ${siteId}.`);
+    // Named by the site URL the operator typed, not by siteId: every other
+    // message in this mode uses the URL, and mixing the two made stderr and
+    // stdout read as though they were about two different sites.
+    notice(`Revoking site permission ${permissionId} on ${args.siteUrl}.`);
     await graph.deleteSitePermission(siteId, permissionId);
     permissionRevoked = true;
   }
 
   notice(`Deleting application ${existing.appId} (object id ${existing.objectId}).`);
+  let applicationDeleted = true;
   try {
     await graph.deleteApplication(existing.objectId);
   } catch (error) {
@@ -469,31 +523,40 @@ export async function runDeleteServerApp(
         : "No site permission was revoked, and the application still exists";
       throw new Error(
         `${state}: deleting ${existing.appId} failed. Re-running is safe and will finish the job. ` +
-          `Underlying failure: ${messageOf(error)}`,
+          `Underlying failure: ${detail(error)}`,
+        // Preserved rather than flattened so describeSetupFailure can still
+        // reach nextStepForGraphFailure's DELETE /applications branch, which is
+        // the remedy for a 403 here and the likeliest way this call fails.
+        { cause: error },
       );
     }
+    // A 404 means the application was gone before this run's delete reached it,
+    // most likely a concurrent teardown between the lookup and this call. The
+    // outcome the operator asked for is still true, but this run did not
+    // perform the delete and must not report that it did.
+    applicationDeleted = false;
   }
 
   notice(`Purging application ${existing.objectId} from deleted items.`);
+  let purgeConfirmed: boolean;
   try {
-    await graph.purgeDeletedApplication(existing.objectId);
+    purgeConfirmed = await purgeDeletedApplicationWithRetry(graph, existing.objectId, sleep);
   } catch (error) {
-    if (statusOf(error) !== 404) {
-      // Unlike the delete failure above, re-running does not retry this: the
-      // application is now soft-deleted, which findApplicationByDisplayName's
-      // own lookup (GET /applications) does not return, so a re-run reports
-      // already-absent and never calls purgeDeletedApplication again. The
-      // fix is a manual purge, not another run of this command.
-      throw new Error(
-        `Application ${existing.appId} was deleted, but purging it from deleted items failed, so it is ` +
-          "soft-deleted rather than gone: the object stays in the tenant's deleted items for 30 days and " +
-          "anyone who can restore it gets its credentials back with it. Re-running this command will not " +
-          "retry the purge, because the lookup this command uses to find the application does not return a " +
-          `soft-deleted one, so a re-run reports it already absent. Purge it by hand: ` +
-          `DELETE /directory/deletedItems/${existing.objectId}, using the operator's own delegated token. ` +
-          `Underlying failure: ${messageOf(error)}`,
-      );
-    }
+    // Unlike the delete failure above, re-running does not retry this: the
+    // application is now soft-deleted, which findApplicationByDisplayName's
+    // own lookup (GET /applications) does not return, so a re-run reports
+    // already-absent and never calls purgeDeletedApplication again. The
+    // fix is a manual purge, not another run of this command.
+    throw new Error(
+      `Application ${existing.appId} was deleted, but purging it from deleted items failed, so it is ` +
+        "soft-deleted rather than gone: the object stays in the tenant's deleted items for 30 days and " +
+        "anyone who can restore it gets its credentials back with it. Re-running this command will not " +
+        "retry the purge, because the lookup this command uses to find the application does not return a " +
+        `soft-deleted one, so a re-run reports it already absent. Purge it by hand: ` +
+        `DELETE /directory/deletedItems/${existing.objectId}, using the operator's own delegated token. ` +
+        `Underlying failure: ${detail(error)}`,
+      { cause: error },
+    );
   }
 
   return {
@@ -502,6 +565,8 @@ export async function runDeleteServerApp(
     objectId: existing.objectId,
     permissionRevoked,
     orphanedPermission: !args.hasGrantIssuer,
+    applicationDeleted,
+    purgeConfirmed,
   };
 }
 

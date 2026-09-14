@@ -106,9 +106,17 @@ describe("runDeleteServerApp", () => {
       permissionId: "perm-1",
       permissionsInspected: true,
     });
-    expect(calls).not.toContain("deleteSitePermission:site-1:perm-1");
-    expect(calls).not.toContain("deleteApplication:obj-1");
-    expect(calls).not.toContain("purgeDeletedApplication:obj-1");
+    // The exact list, not three not.toContain assertions against named
+    // strings. Those three pass for any mutating call nobody thought to name,
+    // and this test is the one that would catch the worst defect this mode can
+    // have. Asserting the whole list also pins what nothing else asserts: that
+    // resolveSite receives siteIdPathFromUrl's hostname-and-server-relative
+    // form rather than the raw site URL, which Graph answers with a 400.
+    expect(calls).toEqual([
+      "findApplicationByDisplayName:Ironwright Repository Reconciliation",
+      "resolveSite:contoso.sharepoint.com:/sites/Example",
+      "listSitePermissions:site-1",
+    ]);
   });
 
   it("marks the listing inspected but unmatched when a grant issuer's dry run finds no permission entry", async () => {
@@ -154,6 +162,8 @@ describe("runDeleteServerApp", () => {
       objectId: "obj-1",
       permissionRevoked: true,
       orphanedPermission: false,
+      applicationDeleted: true,
+      purgeConfirmed: true,
     });
     expect(calls.filter((call) => /deleteSitePermission|deleteApplication|purgeDeletedApplication/.test(call))).toEqual([
       "deleteSitePermission:site-1:perm-1",
