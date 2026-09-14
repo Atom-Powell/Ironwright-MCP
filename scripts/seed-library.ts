@@ -30,7 +30,7 @@
 import { pathToFileURL } from "node:url";
 import { GRAPH_BASE, type GraphClient } from "../src/graph/client.js";
 import { resolveDrive } from "../src/graph/drive.js";
-import { GraphRequestError } from "../src/graph/errors.js";
+import { GraphRequestError, graphErrorCodeFromBody } from "../src/graph/errors.js";
 import { driveItemPath } from "../src/graph/paths.js";
 import { clientCredentialsTokenProvider, type ClientCredentials, type TokenProvider } from "../src/graph/token.js";
 import { readProfile } from "../src/scan/cli.js";
@@ -329,10 +329,14 @@ const RESOLVE_DRIVE_REQUEST_COUNT = 2;
  * Derived from the same tree the execution layer walks, not computed
  * separately: RESOLVE_DRIVE_REQUEST_COUNT aside, this is exactly
  * folderPaths.length POSTs plus filePaths.length PUTs, one request each,
- * because that is what executeSeed below actually issues. It is still an
- * estimate, not a measured cost: it assumes nothing is retried and nothing in
- * the tree already exists. A re-run against a partially built tree costs less,
- * because an existing folder or file is topped up rather than recreated.
+ * because that is what executeSeed below actually issues, unconditionally,
+ * with no existence check before it. It is still an estimate, not a measured
+ * cost, because it assumes nothing is retried. It is not, however, an
+ * estimate a re-run "beats": executeSeed issues the same request for every
+ * tree entry whether or not that entry already exists, so a re-run against a
+ * partially built tree costs the same number of requests as a fresh one.
+ * What changes on a re-run is the side effect at each already-existing path,
+ * not the request count.
  */
 export function estimateGraphRequests(tree: SeedTree): number {
   return RESOLVE_DRIVE_REQUEST_COUNT + tree.folderPaths.length + tree.filePaths.length;
@@ -420,9 +424,10 @@ export function formatDryRunReport(tree: SeedTree, args: SeedArguments): string[
     `Files that would be created: ${tree.filePaths.length}.`,
     `Estimated Graph requests to build this tree: ${estimate}. This is an estimate, not a measured cost: it ` +
       "assumes one request per folder, one per file, and the two requests resolveDrive issues to find the site " +
-      "and the library, with nothing retried and nothing already there. A re-run against a tree this script " +
-      "partly built already will cost less, because an existing folder or file is topped up rather than " +
-      "recreated.",
+      "and the library. A re-run costs the same number of requests, not fewer: executeSeed issues one request " +
+      "per tree entry regardless of whether that item already exists. What a re-run changes is the side effect, " +
+      "not the count: an existing folder is left alone rather than recreated or erroring, and an existing file " +
+      "is overwritten with the same placeholder content it already had.",
   ];
 }
 
@@ -507,24 +512,31 @@ const PLACEHOLDER_FILE_CONTENT =
   "Synthetic file created by scripts/seed-library.ts to size a document library for a Graph request-count " +
   "comparison. Its content is a placeholder; only its existence and path matter.\n";
 
-// Folders carry no content, so Graph's "replace" conflict behavior on a name
-// collision under /children is effectively an upsert for them: it hands back
-// the existing folder rather than deleting and recreating it. That is what
-// lets a re-run top up a partial tree. "fail" (Graph's own default) would
-// 409 on every folder that is already there and stop a re-run cold; "rename"
-// would grow a second, third, and fourth copy of every folder on every
-// re-run instead of topping anything up. This choice follows Graph's
-// documented conflictBehavior semantics and the common "ensure folder
-// exists" pattern built on them; it has not been exercised against a live
-// tenant in this change, because nothing in this change has run against one.
-const FOLDER_CONFLICT_BEHAVIOR = "replace";
+// Folders: "fail", Graph's own default, not "replace". A folder's content is
+// its children, and Graph documents "replace" as overwriting the existing
+// item; for a folder the plausible reading of "overwrite" is delete then
+// recreate, taking everything nested under it along with it. That is exactly
+// the scenario reconciliation testing depends on surviving: an operator adds
+// files by hand under a seeded month folder to produce orphans and
+// duplicates, then re-runs this script to top up a partial tree, and every
+// leaf folder in the default tree is one this run revisits on that re-run.
+// "fail" cannot destroy anything it did not itself just create, because it
+// never touches an item that is already there. The 409 "nameAlreadyExists"
+// it returns for a folder that already exists is tolerated below, by its
+// exact code rather than by status alone, so any other failure still
+// propagates. This has not been exercised against a live tenant in this
+// change, because nothing in this change has run against one.
+const FOLDER_CONFLICT_BEHAVIOR = "fail";
 
-// Files get the same choice, for a narrower reason: every file this script
-// creates carries the same placeholder content (PLACEHOLDER_FILE_CONTENT
-// above), so "replace" overwriting an existing synthetic file with identical
-// content loses nothing. A re-run is idempotent for files the same way it is
-// for folders, just for a different reason: there is nothing here worth
-// keeping over recreating.
+// Files: "replace", and deliberately the opposite of the folder choice above
+// rather than an inconsistency left behind by accident. A file has no
+// children for "replace" to take with it, and every file this script ever
+// writes is the same placeholder content (PLACEHOLDER_FILE_CONTENT below), so
+// overwriting an existing synthetic file with identical content loses
+// nothing. The destructive reading that rules "replace" out for folders does
+// not apply here: there is nothing nested under a file, and nothing this
+// script would ever overwrite with content different from what is already
+// there.
 const FILE_CONFLICT_BEHAVIOR = "replace";
 
 interface RawGraphResponse {
@@ -583,6 +595,16 @@ export function createSeedGraphClient(options: {
         contentType: "application/json",
       });
       if (response.status < 200 || response.status >= 300) {
+        // Tolerated by its exact machine-readable code, not by status alone:
+        // "fail" conflict behavior 409s a folder that already exists with
+        // Graph's own "nameAlreadyExists" code, which is exactly the outcome a
+        // re-run wants -- the folder is there, so there is nothing for this
+        // call to do, and nothing at that path is touched. A 409 carrying any
+        // other code, and every other status, is a real failure and
+        // propagates, the same as any other call this client makes.
+        if (response.status === 409 && graphErrorCodeFromBody(response.body) === "nameAlreadyExists") {
+          return { status: response.status };
+        }
         throw new GraphRequestError({ method: "POST", path, status: response.status, body: response.body });
       }
       return { status: response.status };

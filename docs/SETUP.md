@@ -473,15 +473,22 @@ profile's `taxonomy.segments` and `naming.template`, so the synthetic tree match
 the scan itself expects. By default it builds twelve clients across all twelve months of the
 current year, plus a quarterly deliverable at the end of each quarter, which comes to 157 folders
 and 192 files for a profile shaped like `examples/profiles/example.json`. Pass `--clients
-<count>`, `--year <yyyy>`, or `--no-quarterly` to build something smaller.
+<count>`, `--year <yyyy>`, or `--no-quarterly` to build something smaller. The quarterly
+deliverable is always placed in the last month of each calendar quarter (months 3, 6, 9, and 12);
+that is a hard-coded simplification in the script, not read from the profile's own `periodAnchor`,
+and is close enough for a synthetic sizing tree without matching the reconciliation engine's exact
+placement logic.
 
 Dry run is the default, the same as every other write path in this project: without `--confirm`
 it prints the folder and file counts and an estimate of the Graph requests creating that tree
 would cost, and creates nothing. The estimate is derived from the same list the write path walks,
 one request per folder plus one per file plus the two requests resolving the site and the drive
 costs, so it cannot drift from what a confirmed run actually does; it is still an estimate, not a
-measured cost, since it assumes nothing is retried and nothing in the tree already exists. Pass
-`--confirm` to create it.
+measured cost, since it assumes nothing is retried. It does not assume nothing already exists, and
+it does not get cheaper on a re-run: the execution layer issues one request per folder and one per
+file unconditionally, whether or not that item is already there, so a re-run against a tree this
+script already built costs the same number of Graph requests as building it fresh. What changes on
+a re-run is the side effect at each already-existing path, not the request count.
 
 It authenticates as the grant issuer, using `IW_TENANT_ID`, `IW_BOOTSTRAP_CLIENT_ID`, and
 `IW_BOOTSTRAP_CLIENT_SECRET`, the same credentials `--create-bootstrap` above prints. That
@@ -490,10 +497,17 @@ keeps the server's own application read-only for the request count this script e
 operator measure: a production scan never writes, so measuring it with a credential that can
 would be the wrong yardstick.
 
-Folder and file creation both use Graph's `replace` conflict behavior, so a folder or file that
-already exists is topped up rather than causing the run to fail: re-running this command against
-a tree it partly built already is expected to work, and will cost fewer Graph requests than the
-estimate for the parts that already exist.
+Folder creation uses Graph's `fail` conflict behavior, Graph's own default, not `replace`. A
+folder's content is its children, and Graph documents `replace` as overwriting the existing item;
+for a folder the plausible reading of "overwrite" is delete-then-recreate, taking everything
+nested under it along with it. That is exactly the scenario reconciliation testing depends on
+surviving: adding files by hand under a seeded month folder to produce orphans and duplicates,
+then re-running this script to top up a partial tree, revisits every one of those folders. `fail`
+cannot destroy anything it did not itself just create; the script tolerates the 409
+`nameAlreadyExists` a folder that is already there returns, by its exact error code, and lets
+every other failure propagate. File creation still uses `replace`: a file has no children for
+`replace` to take with it, and every file this script writes is the same placeholder content, so
+overwriting an existing synthetic file with identical content loses nothing.
 
 This has not been run against a tenant as of this writing. The first real run is how the
 project's own founding performance claim gets checked for the first time.

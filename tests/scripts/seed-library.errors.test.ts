@@ -149,6 +149,22 @@ describe("createSeedGraphClient failures", () => {
     });
   });
 
+  it("throws a GraphRequestError for a 409 that is not nameAlreadyExists, rather than tolerating every 409", async () => {
+    const client = createSeedGraphClient({
+      tokenProvider: TOKEN,
+      fetchImpl: (async () =>
+        new Response(JSON.stringify({ error: { code: "resourceLocked", message: "locked" } }), {
+          status: 409,
+        })) as typeof fetch,
+    });
+
+    await expect(client.createFolder("drive-1", "2026", "Client01")).rejects.toMatchObject({
+      name: "GraphRequestError",
+      status: 409,
+      code: "resourceLocked",
+    });
+  });
+
   it("throws a GraphRequestError when file creation is refused", async () => {
     const client = createSeedGraphClient({
       tokenProvider: TOKEN,

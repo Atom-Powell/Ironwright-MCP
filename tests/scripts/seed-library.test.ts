@@ -304,7 +304,7 @@ describe("runSeed", () => {
 describe("createSeedGraphClient", () => {
   const TOKEN = { getToken: async () => "token-1" };
 
-  it("creates a folder with the chosen conflict behavior and counts the request", async () => {
+  it("creates a folder with fail conflict behavior, which cannot silently overwrite what is already there", async () => {
     const seen: Request[] = [];
     const client = createSeedGraphClient({
       tokenProvider: TOKEN,
@@ -320,7 +320,22 @@ describe("createSeedGraphClient", () => {
     expect(request?.url).toBe("https://graph.microsoft.com/v1.0/drives/drive-1/root:/2026:/children");
     expect(request?.method).toBe("POST");
     const body = JSON.parse(await request!.text()) as Record<string, unknown>;
-    expect(body["@microsoft.graph.conflictBehavior"]).toBe("replace");
+    expect(body["@microsoft.graph.conflictBehavior"]).toBe("fail");
+    expect(client.requests()).toBe(1);
+  });
+
+  it("tolerates a 409 nameAlreadyExists on folder creation, which is what a re-run against an existing folder returns", async () => {
+    const client = createSeedGraphClient({
+      tokenProvider: TOKEN,
+      fetchImpl: (async () =>
+        new Response(JSON.stringify({ error: { code: "nameAlreadyExists", message: "already there" } }), {
+          status: 409,
+        })) as typeof fetch,
+    });
+
+    await expect(client.createFolder("drive-1", "2026", "Client01")).resolves.toEqual({ status: 409 });
+    // Still counted: the request was issued either way, which is what keeps
+    // the dry-run estimate honest about a re-run costing the same requests.
     expect(client.requests()).toBe(1);
   });
 
