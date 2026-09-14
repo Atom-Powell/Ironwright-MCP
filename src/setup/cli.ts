@@ -632,19 +632,24 @@ function nextStepForGraphFailure(error: GraphRequestError): string {
   return "This does not match a known cause, so report it with the response body above.";
 }
 
-/** Which of the three modes main.ts was running when a failure reached the top level. */
-export type SetupMode = "setup" | "create-bootstrap" | "delete-bootstrap";
+/** Which of the four modes main.ts was running when a failure reached the top level. */
+export type SetupMode = "setup" | "create-bootstrap" | "delete-bootstrap" | "delete-server-app";
 
-// One command with three modes, and only one of them is actually "setup": a
+// One command with four modes, and only one of them is actually "setup": a
 // teardown refusal prefixed "Setup failed" reads as though the normal run
 // failed, when nothing was being set up at all. --create-bootstrap creates
 // rather than tears down, so it gets its own prefix for the same reason.
+// --delete-server-app tears down a different application than
+// --delete-bootstrap does, so conflating their prefixes would send an operator
+// to recover the wrong one.
 function failurePrefix(mode: SetupMode): string {
   switch (mode) {
     case "create-bootstrap":
       return "Bootstrap creation failed";
     case "delete-bootstrap":
       return "Bootstrap deletion failed";
+    case "delete-server-app":
+      return "Server application deletion failed";
     case "setup":
       return "Setup failed";
   }
