@@ -278,9 +278,9 @@ npm run setup -- --tenant=<tenant-id> --site=https://<tenant>.sharepoint.com/sit
 
 This is the counterpart to the normal run above: it removes the server application that a normal
 run created and the per-site permission it was granted, rather than creating either. It is how a
-site gets decommissioned. Dry run is the default here, the same as every other write path in this
-project: omit `--confirm` first to see what the command found and exactly what it would do, and
-pass `--confirm` only once that preview looks right.
+site gets decommissioned. Dry run is the default here, the same as every other destructive path
+in this project: omit `--confirm` first to see what the command found and exactly what it would
+do, and pass `--confirm` only once that preview looks right.
 
 The order it acts in is forced, not a preference. The per-site permission entry is matched to the
 application by its application id, so revoking it has to happen while that identity still exists;

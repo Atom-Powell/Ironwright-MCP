@@ -298,6 +298,16 @@ export function describeBootstrapSuccess(result: { appId: string; secret: string
  * opposite of the truth, which is the same finding that shaped
  * describeDeleteServerAppOutcome's own purged clause.
  *
+ * Only the confirmed branch of `purged` may claim the permission is durably
+ * gone, and it is the only place in this function that does. An earlier
+ * version put that claim in `deleted` instead, unconditionally, which put it
+ * one sentence ahead of an unconfirmed `purged` clause saying the object may
+ * still be fully restorable with its credentials: "keeps no access" against
+ * "restorable... with its credentials" in the same paragraph. `deleted` is
+ * bare on purpose now, stating only what this run did to the live
+ * application object, the same way describeDeleteServerAppOutcome's own
+ * `deleted` clause always has been.
+ *
  * It also names the one piece of operator cleanup this command cannot do
  * itself: IW_BOOTSTRAP_CLIENT_ID and IW_BOOTSTRAP_CLIENT_SECRET, wherever they
  * were stored, now name an application that no longer exists. Left in place,
@@ -349,16 +359,20 @@ export function describeDeleteBootstrapSuccess(result: DeleteBootstrapOutcome): 
     );
   }
 
-  // Gated the same way describeDeleteServerAppOutcome's own `deleted` clause
-  // is: a 404 from deleteApplication is tolerated, not thrown, and the
-  // message must not claim this run performed a deletion it did not observe.
+  // Bare: states only what this run did to the live application object.
+  // Every claim about whether the standing permission is durably gone lives
+  // in `purged` below, and only in its confirmed branch, never here. Review
+  // found this clause claiming the permission was removed for good, one
+  // sentence before an unconfirmed `purged` clause said the object may still
+  // be fully restorable with its credentials, a direct contradiction: "keeps
+  // no access" against "restorable... with its credentials" in the same
+  // paragraph. describeDeleteServerAppOutcome's own `deleted` clause, which
+  // this one otherwise mirrors, has never made this claim; that omission was
+  // structural, not an oversight, and this clause now matches it.
   const deleted = result.applicationDeleted
-    ? `Deleted application ${result.appId}. That removes the standing Sites.FullControl.All permission it held, ` +
-      "not just its secret: a deleted application keeps no access, where an expired secret alone would not have."
+    ? `Deleted application ${result.appId}.`
     : `Application ${result.appId} was already gone when this run tried to delete it, so this run did not ` +
-      "delete it. It is gone from the tenant either way, which is what actually removes its standing " +
-      "Sites.FullControl.All permission, not just its secret: a deleted application keeps no access, where an " +
-      "expired secret alone would not have.";
+      "delete it.";
 
   // The dangerous half, and the reason this branch cannot collapse into one
   // sentence: an unconfirmed purge fires milliseconds after the delete
@@ -370,9 +384,18 @@ export function describeDeleteBootstrapSuccess(result: DeleteBootstrapOutcome): 
   // in describeDeleteServerAppOutcome: a 404 whose code does not match
   // Request_ResourceNotFound gives up after one attempt with no sleep at all,
   // and that run never tested whether replication lag was the cause.
+  //
+  // The secret-versus-deletion distinction ("not just its secret") lives
+  // here, in the confirmed branch only, and nowhere else in this function: it
+  // is true without qualification only once the purge is confirmed. Before
+  // that, whether the permission is durably gone is exactly what this run
+  // could not observe, so the unconfirmed branch below makes no claim about
+  // durability at all.
   const purged = result.purgeConfirmed
-    ? "It was also purged from the tenant's deleted items, so its Sites.FullControl.All permission is not " +
-      "recoverable: a deleted application that is not purged stays restorable, with its credentials, for 30 days."
+    ? "It was also purged from the tenant's deleted items, which is what actually removes the standing " +
+      "Sites.FullControl.All permission, not just its secret: a purged application keeps no access, where an " +
+      "expired secret alone would not have. Unlike a delete on its own, which leaves the object restorable " +
+      "with its credentials for 30 days, a purge cannot be undone, so the permission is not recoverable."
     : `The purge returned not found${
         result.purgeRetried
           ? ", even after retrying for the directory replication lag that usually explains that,"

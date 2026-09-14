@@ -238,6 +238,34 @@ describe("describeDeleteBootstrapSuccess (deleted branch)", () => {
     expect(message).not.toMatch(/is empty/i);
   });
 
+  it.each([true, false])(
+    "does not claim the permission is durably gone anywhere in the message when the purge could not be confirmed (applicationDeleted=%s)",
+    (applicationDeleted) => {
+      // The contradiction review found: the deleted clause used to claim the
+      // permission was removed for good regardless of purge status, one
+      // sentence before an unconfirmed purged clause said the object may
+      // still be fully restorable with its credentials. "keeps no access"
+      // against "restorable... with its credentials" in the same paragraph.
+      // Read as one assembled string, not clause by clause, which is the
+      // only way this class of defect is actually visible.
+      const message = describeDeleteBootstrapSuccess({
+        kind: "deleted",
+        appId: "app-1",
+        objectId: "obj-1",
+        applicationDeleted,
+        purgeConfirmed: false,
+        purgeRetried: false,
+      });
+
+      expect(message).not.toMatch(/removes the standing/i);
+      expect(message).not.toMatch(/keeps no access/i);
+      expect(message).not.toMatch(/not recoverable/i);
+      // The unconfirmed purged clause itself must still be present and still
+      // say the opposite: restorable, not gone.
+      expect(message).toMatch(/restorable with its credentials/i);
+    },
+  );
+
   it("names the replication-lag retry only when the ladder actually ran", () => {
     const retried = describeDeleteBootstrapSuccess({
       kind: "deleted",
