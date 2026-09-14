@@ -104,8 +104,15 @@ Five layers. Each is usable and testable without the layer above it.
 mode, with ID addressing only as a cached fallback. ETag capture and `If-Match` application.
 A `$batch` builder respecting the 20-request and 4 MB caps, supporting `dependsOn`, and
 auto-splitting larger batches. A delta client that persists `deltaLink`s. An Excel session
-manager using `persistChanges: true`, a single-flight queue per workbook, and automatic
-recreation when an expired session returns 404. A `Retry-After`-aware backoff wrapper on
+manager using a non-persistent session, and automatic recreation when an expired session
+returns 404. Amended 2026-09-14: the session is non-persistent, not `persistChanges: true`,
+because `persistChanges` is what makes a session write-capable and this server only reads a
+document the spec calls the customer's live operational authority; a non-persistent session
+gives the same speed and the same consistent view across calls and cannot commit a change,
+which makes the read-only guarantee structural. The single-flight queue per workbook this
+paragraph previously described is deferred, not adopted: it assumes a long-lived process
+holding sessions across calls, and this server builds a fresh `McpServer` per request,
+statelessly, so there is nothing to serialize. A `Retry-After`-aware backoff wrapper on
 every call. A `conflictBehavior` helper. Every call goes through plain `fetch`; see
 `2026-09-13-graph-repository-snapshot-design.md` for why the Graph JS SDK was declined.
 Auth arrives through a token-provider interface so tests inject a fake.
@@ -346,9 +353,14 @@ copy of production.
 2. **Graph layer and store.** Split in two on 2026-09-13, because the original entry was seven
    units and contained work with no caller until phase 6. **2a:** token provider, backoff, path
    addressing, ETag capture, delta, both `StateStore` implementations, and a scripted `scan`
-   command that produces a persisted `RepositorySnapshot`. **2b:** `$batch`, the Microsoft Search
-   cross-check, Excel sessions, and the `WorkbookSnapshot`. `conflictBehavior` moves to phase 6,
-   where a write tool first reads it.
+   command that produces a persisted `RepositorySnapshot`. **2b** split further on 2026-09-14,
+   because it bundled three pieces of work with three different consumers and three different
+   states of readiness. **2b** is now the workbook snapshot alone: Excel sessions and the
+   `WorkbookSnapshot`. **2c** is the Microsoft Search cross-check, its own slice with its own
+   spec still to write. `$batch` moves to phase 6, alongside `conflictBehavior`, because the
+   write tools are its first real caller: renaming two hundred files is two hundred requests
+   without it and ten with it, and building it now would pin its split boundaries and
+   partial-failure semantics against guesses about a consumer that does not exist.
 3. **Domain engine.** Expected-state derivation, renderers, matcher, diff. Pure and
    fixture-tested. Has no dependency on phase 2 and can be built in parallel with it.
 4. **Read tools.** `inventory_tree`, `describe_workbook`,

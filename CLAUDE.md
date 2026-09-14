@@ -56,9 +56,18 @@ persisted `deltaLink`. Microsoft Search as the cross-check for files outside the
 taxonomy. ETags with `If-Match` on every write. `$batch` and the Microsoft Search cross-check
 are built in phase 2b, with the callers that exercise them, rather than ahead of any consumer.
 
-**Excel as a database.** Persistent workbook sessions, the session header on every call,
-explicit detection and recreation of expired sessions, and a sequential single-flight queue per
-workbook.
+**Excel as a database.** Non-persistent workbook sessions, the session header on every call, and
+explicit detection and recreation of expired sessions. Amended 2026-09-14. Sessions are
+non-persistent because `persistChanges` is the flag that makes a session write-capable, and this
+server only reads a document the spec calls the customer's live operational authority; a
+non-persistent session gives the same speed and the same consistent view across calls and cannot
+commit a change, so the read-only guarantee is structural rather than a matter of nobody calling
+the wrong method. The sequential single-flight queue per workbook is deferred, not adopted: it
+assumes a long-lived process holding sessions across calls, and this server builds a fresh
+`McpServer` per request, statelessly, which is itself a locked decision, so two concurrent
+requests cannot share a session and there is nothing to serialize. This is not a YAGNI deferral
+of something that would work; the mechanism does not fit the architecture. If a later phase adds
+a shared session cache, the queue returns with it and that phase owns the decision.
 
 **State store.** Azure Table Storage for per-drive `deltaLink`s, inventory snapshots, plans, and
 reversal logs.
