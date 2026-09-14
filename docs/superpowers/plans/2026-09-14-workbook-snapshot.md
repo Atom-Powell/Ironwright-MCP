@@ -602,13 +602,24 @@ export function readWorkbookGrid(grid: unknown[][], profile: Profile): ReadResul
     // one failed run per renamed column, and a mapping usually goes stale in
     // batches when someone tidies a spreadsheet.
     throw new WorkbookMappingError(
-      `The workbook has no column headed ${missing.map((text) => `"${text}"`).join(", ")} on row ` +
+      `The workbook has no ${missing.length === 1 ? "column" : "columns"} headed ` +
+        `${missing.map((text) => `"${text}"`).join(", ")} on row ` +
         `${profile.workbookMapping.headerRow}. The profile's workbookMapping names ${missing.length === 1 ? "it" : "them"}, ` +
         "so either a column was renamed in the workbook or the mapping was written against a different sheet.",
     );
   }
 
-  const clientIndex = columnIndexByField.get("client") as number;
+  // Defending an invariant owned by two other places: the profile schema
+  // requires a `client` column, and the missing-header throw above runs first.
+  // A cast here would stay silent if either of those moved, because an
+  // undefined index reads as undefined rather than throwing, and the whole
+  // workbook would then read as blank.
+  const clientIndex = columnIndexByField.get("client");
+  if (clientIndex === undefined) {
+    throw new WorkbookMappingError(
+      "The profile's workbookMapping has no `client` column, which every mapping must name.",
+    );
+  }
   const rows: ClientRecord[] = [];
   const rejectedRows: RejectedWorkbookRow[] = [];
 
@@ -618,10 +629,26 @@ export function readWorkbookGrid(grid: unknown[][], profile: Profile): ReadResul
     if (cells === undefined) continue;
 
     const clientCell = cells[clientIndex];
-    const client = typeof clientCell === "string" ? clientCell.trim() : "";
-    // A blank client cell is a trailing empty row, which every spreadsheet has.
-    // It is not an error and must not be reported as one, or a workbook with
-    // whitespace below its table would report dozens of rejections.
+
+    // Three cases, and collapsing any two of them loses a row silently.
+    // Absent, null, or blank after trimming is a trailing empty row, which
+    // every spreadsheet has below its table; skipped, not rejected, or a
+    // workbook with whitespace under its data would report dozens of failures.
+    // Anything else present but not a readable string is rejected: Excel hands
+    // back a numeric client code such as 4021 as a number, and coercing it to
+    // "4021" would guess at whether it matches the repository's folder names.
+    // This project refuses to guess in the reconciliation path, so the operator
+    // is shown the cell and decides.
+    if (clientCell === undefined || clientCell === null) continue;
+    if (typeof clientCell !== "string") {
+      rejectedRows.push({
+        row: sheetRow,
+        reason: `the client cell was not text: ${JSON.stringify(clientCell)}`,
+      });
+      continue;
+    }
+
+    const client = clientCell.trim();
     if (client.length === 0) continue;
 
     const fields: Record<string, string | number | boolean | null> = {};
