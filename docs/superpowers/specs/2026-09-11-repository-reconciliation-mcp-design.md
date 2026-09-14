@@ -28,9 +28,9 @@ TypeScript with the official MCP SDK, and plain `fetch` for Microsoft Graph rath
 Graph JS SDK (amended 2026-09-13; see the graph-lib paragraph below);
 `StreamableHTTPServerTransport` in stateless mode with a new `McpServer` per request;
 path-based driveItem addressing over ID addressing, `$batch`, delta query with persisted
-`deltaLink`s, and Microsoft Search as the out-of-taxonomy cross-check; Excel persistent
-sessions with a single-flight queue per workbook; Azure Table Storage for state; Azure
-Container Apps for hosting; Entra confidential client scoped via `Sites.Selected`;
+`deltaLink`s, and Microsoft Search as the out-of-taxonomy cross-check; non-persistent Excel
+sessions with deferred single-flight queueing; Azure Table Storage for state; Azure Container
+Apps for hosting; Entra confidential client scoped via `Sites.Selected`;
 plan-then-execute for every mutating operation with dry run as the default.
 
 Decided in this session:
