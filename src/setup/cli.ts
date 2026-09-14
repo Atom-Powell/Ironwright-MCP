@@ -5,6 +5,7 @@
 
 import { SetupFailedError } from "./errors.js";
 import { GraphRequestError } from "../graph/errors.js";
+import type { DeleteBootstrapOutcome } from "./run.js";
 import { BOOTSTRAP_SECRET_LIFETIME_DAYS } from "./steps.js";
 
 export interface ParsedArgs {
@@ -285,8 +286,26 @@ export function describeBootstrapSuccess(result: { appId: string; secret: string
  * a later normal run picks them up and fails at its preflight with a
  * rejected-credentials message that reads like a wrong secret, not a deleted
  * application, which sends whoever hits it after the wrong cause entirely.
+ *
+ * The already-absent branch is a distinct outcome, not a smaller version of
+ * the deleted one: nothing was found, so nothing was deleted, and the message
+ * says so plainly rather than reusing language ("deleted", "removed") that
+ * would claim an action this run never took. This is the case
+ * docs/OPEN-ITEMS.md recorded on 2026-09-12: runDeleteBootstrap used to throw
+ * here, which printed a failure for a tenant that was already in the state
+ * the operator wanted.
  */
-export function describeDeleteBootstrapSuccess(result: { appId: string }): string {
+export function describeDeleteBootstrapSuccess(result: DeleteBootstrapOutcome): string {
+  if (result.kind === "already-absent") {
+    return (
+      `No application named "${result.displayName}" exists in this tenant, so there was nothing to do and ` +
+      "nothing was deleted. If the grant issuer was created under a different name, re-run with the same --name " +
+      "it was created with. If it was removed by hand or by an earlier run, this is the finished state: a grant " +
+      "issuer that does not exist holds no standing permission. Onboarding another site later needs one again, " +
+      "so run this command with --create-bootstrap first."
+    );
+  }
+
   return (
     `Deleted application ${result.appId}. That removes the standing Sites.FullControl.All permission it held, not ` +
     "just its secret: a deleted application keeps no access, where an expired secret alone would not have. This " +

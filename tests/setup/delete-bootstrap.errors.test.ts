@@ -25,26 +25,18 @@ function fakeGraph(overrides: Partial<SetupGraph> = {}): SetupGraph {
 }
 
 describe("runDeleteBootstrap not found", () => {
-  it("names the display name and points at --name", async () => {
+  // Was a throw before this task: an already-absent grant issuer is the
+  // outcome a teardown wants, not a failure, so the lookup finding nothing
+  // now returns a distinct outcome instead of rejecting. The display-name and
+  // --name framing formerly asserted on the thrown message now lives in
+  // describeDeleteBootstrapSuccess's already-absent branch, covered in
+  // delete-bootstrap.test.ts.
+  it("reports the missing application as already-absent rather than throwing", async () => {
     const graph = fakeGraph({ findApplicationByDisplayName: async () => undefined });
 
-    await expect(runDeleteBootstrap(graph, { displayName: "Ironwright Grant Issuer" })).rejects.toThrow(
-      /"Ironwright Grant Issuer"/,
-    );
-    await expect(runDeleteBootstrap(graph, { displayName: "Ironwright Grant Issuer" })).rejects.toThrow(/--name/);
-  });
-
-  // The secret's seven-day expiry disables the credential, not the standing
-  // Sites.FullControl.All assignment on the application itself. A message
-  // here that read as "it is already gone" either way would blur that
-  // distinction; this one only fires when the application genuinely does not
-  // exist.
-  it("does not imply that a lapsed secret is the same thing as a deleted application", async () => {
-    const graph = fakeGraph({ findApplicationByDisplayName: async () => undefined });
-
-    await expect(runDeleteBootstrap(graph, { displayName: "Ironwright Grant Issuer" })).rejects.toThrow(
-      /nothing to delete/,
-    );
+    await expect(
+      runDeleteBootstrap(graph, { displayName: "Ironwright Grant Issuer" }),
+    ).resolves.toEqual({ kind: "already-absent", displayName: "Ironwright Grant Issuer" });
   });
 });
 

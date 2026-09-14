@@ -357,6 +357,10 @@ export async function runCreateBootstrap(
   }
 }
 
+export type DeleteBootstrapOutcome =
+  | { kind: "deleted"; appId: string; objectId: string }
+  | { kind: "already-absent"; displayName: string };
+
 /**
  * Removes the grant issuer. Deleting it is what actually removes the standing
  * privilege: the secret's expiry only disables one credential, while the
@@ -368,21 +372,20 @@ export async function runDeleteBootstrap(
   graph: SetupGraph,
   args: { displayName: string },
   hooks: SetupHooks = {},
-): Promise<{ appId: string; objectId: string }> {
+): Promise<DeleteBootstrapOutcome> {
   const notice = hooks.onNotice ?? ((): void => {});
 
   const existing = await graph.findApplicationByDisplayName(args.displayName);
   if (existing === undefined) {
-    throw new Error(
-      `No application named "${args.displayName}" exists in this tenant, so there is nothing to delete. ` +
-        "If the grant issuer was created with a different name, pass the same --name it was created with. " +
-        "If it was already deleted, no action is needed: deleting it is what removes the standing permission, " +
-        "and a deleted application keeps no access.",
-    );
+    // Absent is the outcome the operator asked for, not a failure. Reporting it
+    // as one made a correctly torn-down tenant indistinguishable from a broken
+    // one, so a script enforcing teardown across tenants would retry or alert on
+    // a tenant that was already finished.
+    return { kind: "already-absent", displayName: args.displayName };
   }
 
   notice(`Deleting application ${existing.appId} (object id ${existing.objectId}).`);
   await graph.deleteApplication(existing.objectId);
 
-  return { appId: existing.appId, objectId: existing.objectId };
+  return { kind: "deleted", appId: existing.appId, objectId: existing.objectId };
 }

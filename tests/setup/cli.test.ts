@@ -106,15 +106,20 @@ describe("describeBootstrapSuccess", () => {
   });
 });
 
-describe("describeDeleteBootstrapSuccess", () => {
+// Covers the "deleted" branch only. The "already-absent" branch's own tests
+// live in delete-bootstrap.test.ts, next to runDeleteBootstrap's own
+// already-absent outcome test, so the outcome and both of its renderings
+// stay together; see task-1-report.md for why that split was chosen over
+// duplicating cases here.
+describe("describeDeleteBootstrapSuccess (deleted branch)", () => {
   it("names the application that was deleted", () => {
-    const message = describeDeleteBootstrapSuccess({ appId: "app-1" });
+    const message = describeDeleteBootstrapSuccess({ kind: "deleted", appId: "app-1", objectId: "obj-1" });
 
     expect(message).toContain("app-1");
   });
 
   it("states the standing permission is what deletion removed", () => {
-    const message = describeDeleteBootstrapSuccess({ appId: "app-1" });
+    const message = describeDeleteBootstrapSuccess({ kind: "deleted", appId: "app-1", objectId: "obj-1" });
 
     expect(message).toMatch(/standing/i);
     expect(message).toMatch(/Sites\.FullControl\.All/);
@@ -125,7 +130,7 @@ describe("describeDeleteBootstrapSuccess", () => {
     // application keeps its admin-consented role assignment until it is
     // actually deleted. A message that did not draw this line would let an
     // operator believe waiting out the week did the same job.
-    const message = describeDeleteBootstrapSuccess({ appId: "app-1" });
+    const message = describeDeleteBootstrapSuccess({ kind: "deleted", appId: "app-1", objectId: "obj-1" });
 
     expect(message).toMatch(/not just its secret/i);
     expect(message).toMatch(/expired secret/i);
@@ -137,7 +142,7 @@ describe("describeDeleteBootstrapSuccess", () => {
     // itself needed. This paragraph is framed as the answer to a client
     // security review, and a restore window is exactly what that review
     // would ask about, so overstating deletion as final here is the risk.
-    const message = describeDeleteBootstrapSuccess({ appId: "app-1" });
+    const message = describeDeleteBootstrapSuccess({ kind: "deleted", appId: "app-1", objectId: "obj-1" });
 
     expect(message).toMatch(/30.day/i);
     expect(message).toMatch(/recoverable|restore/i);
@@ -150,7 +155,7 @@ describe("describeDeleteBootstrapSuccess", () => {
     // normal run that still reads them fails at its preflight with a
     // rejected-credentials message that reads like a wrong secret, not a
     // deleted application, which is the opposite of the real cause.
-    const message = describeDeleteBootstrapSuccess({ appId: "app-1" });
+    const message = describeDeleteBootstrapSuccess({ kind: "deleted", appId: "app-1", objectId: "obj-1" });
 
     expect(message).toContain("IW_BOOTSTRAP_CLIENT_ID");
     expect(message).toContain("IW_BOOTSTRAP_CLIENT_SECRET");
@@ -292,7 +297,7 @@ describe("grant issuer teardown note is confined to the normal run's success bui
   });
 
   it("is absent from the delete-bootstrap success message", () => {
-    const message = describeDeleteBootstrapSuccess({ appId: "app-1" });
+    const message = describeDeleteBootstrapSuccess({ kind: "deleted", appId: "app-1", objectId: "obj-1" });
 
     expect(message).not.toMatch(/not needed for this site/i);
   });
