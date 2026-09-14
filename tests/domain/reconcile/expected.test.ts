@@ -104,7 +104,7 @@ function buildProfile(windowOverrides: Partial<Profile["window"]> = {}): Profile
 }
 
 function buildWorkbook(rows: ClientRecord[]): WorkbookSnapshot {
-  return { rows, source: "test-fixture" };
+  return { rows, source: "test-fixture", rejectedRows: [] };
 }
 
 describe("deriveExpected", () => {

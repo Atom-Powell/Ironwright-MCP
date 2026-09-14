@@ -16,5 +16,6 @@
       "effectiveFrom": "2024-01-01"
     }
   ],
-  "source": "/Trackers/Deliverable Tracker.xlsx#ClientRoster"
+  "source": "/Trackers/Deliverable Tracker.xlsx#ClientRoster",
+  "rejectedRows": []
 }

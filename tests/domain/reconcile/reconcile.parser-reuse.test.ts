@@ -101,6 +101,7 @@ const FILE_PATHS = [
 const workbook: WorkbookSnapshot = {
   rows: [{ client: "CLIENTA", fields: { monthlyTraining: "Yes" } }],
   source: "/Trackers/Tracker.xlsx#ClientRoster",
+  rejectedRows: [],
 };
 
 const repository: RepositorySnapshot = {

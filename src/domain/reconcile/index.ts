@@ -224,5 +224,6 @@ export function reconcile(
     orphans,
     emptyFolders: findEmptyFolders(repository),
     clients: rollUpByClient(workbook, artifacts),
+    rejectedWorkbookRows: workbook.rejectedRows,
   };
 }

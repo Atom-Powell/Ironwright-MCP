@@ -20,6 +20,16 @@ export interface ClientRecord {
   effectiveFrom?: string;
 }
 
+/** A workbook row the reader could not turn into a `ClientRecord`. */
+export interface RejectedWorkbookRow {
+  /** 1-based row number in the sheet, so it matches what the operator sees. */
+  row: number;
+  /** The client the row named, when that cell was readable. */
+  client?: string;
+  /** Why it was refused, in terms an operator can act on. */
+  reason: string;
+}
+
 export interface WorkbookSnapshot {
   /**
    * One row per client. The engine enforces this rather than trusting it: two
@@ -30,6 +40,8 @@ export interface WorkbookSnapshot {
   rows: ClientRecord[];
   /** Where the rows came from, for the report's provenance. */
   source: string;
+  /** Rows the workbook reader refused rather than turning into a `ClientRecord`. */
+  rejectedRows: RejectedWorkbookRow[];
 }
 
 export interface RepositoryFile {
@@ -132,6 +144,13 @@ export interface ReconciliationReport {
   orphans: OrphanFinding[];
   emptyFolders: string[];
   clients: ClientSummary[];
+  /**
+   * Rows the workbook reader could not turn into records. They live on the
+   * report because a client silently missing from a compliance report is the
+   * quiet incompleteness this engine exists to prevent, and a rejection that
+   * reaches only a log is exactly that.
+   */
+  rejectedWorkbookRows: RejectedWorkbookRow[];
 }
 
 export interface ParsedFileUnrecognized {
