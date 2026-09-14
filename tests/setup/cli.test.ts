@@ -442,6 +442,11 @@ describe("describeDeleteServerAppOutcome", () => {
 
     expect(message).toMatch(/nothing to do/i);
     expect(message).not.toMatch(/Deleted application/);
+    // Same residue and the same command as the orphaned torn-down branch, so
+    // the advice has to name the grant issuer too. This branch used to name
+    // only the manual identification, leaving the harder half to be discovered.
+    expect(message).toMatch(/--create-bootstrap/);
+    expect(message).toMatch(/identified by hand/);
   });
 });
 

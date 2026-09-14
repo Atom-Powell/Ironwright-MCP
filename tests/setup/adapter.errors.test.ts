@@ -107,6 +107,33 @@ describe("findApplicationByDisplayName ambiguous match", () => {
     );
   });
 
+  it("refuses a permissions listing whose continuation link sends it back to a page it already read", async () => {
+    // The other half of what src/graph/delta.ts refuses: an enumeration that
+    // either never terminates or terminates silently incomplete. Quietly
+    // looping here would hang the teardown before it touched anything.
+    stubFetch({
+      status: 200,
+      body: JSON.stringify({
+        value: [{ id: "perm-1" }],
+        "@odata.nextLink": "https://graph.microsoft.com/v1.0/sites/site-1/permissions?$skiptoken=same",
+      }),
+    });
+
+    await expect(graph().listSitePermissions("site-1")).rejects.toThrow(/already requested/i);
+  });
+
+  it("refuses a permissions page whose continuation link is not a URL", async () => {
+    // Coercing it would stop the listing on a response this code cannot read
+    // and report a partial set as the whole one, which is the absence the
+    // teardown must never assert.
+    stubFetch({
+      status: 200,
+      body: JSON.stringify({ value: [{ id: "perm-1" }], "@odata.nextLink": 42 }),
+    });
+
+    await expect(graph().listSitePermissions("site-1")).rejects.toThrow(/not a URL/i);
+  });
+
   it("tells the operator how to disambiguate with the remedy that is actually executable", async () => {
     // --name selects by display name; it cannot rename either of two
     // applications that already share one. The only working remedy is to

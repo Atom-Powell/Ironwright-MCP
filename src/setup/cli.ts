@@ -357,7 +357,12 @@ export function describeDeleteServerAppOutcome(outcome: DeleteServerAppOutcome, 
       "nothing was deleted. If it was created under a different name, re-run with the same --name it was " +
       "created with. If it was already removed, this is the finished state. A permission entry granted to it " +
       `may still sit on ${siteUrl}, and this command cannot find it once the application it named is gone: ` +
-      "clearing that needs the entry identified by hand in the site's permissions."
+      // Same residue and the same command as the torn-down branch's
+      // orphaned clause below, so the advice has to match it. This branch used
+      // to name only the manual identification and omit the grant issuer, which
+      // left an operator to discover the harder half on their own.
+      "clearing that needs a grant issuer created with --create-bootstrap and the entry identified by hand " +
+      "in the site's permissions."
     );
   }
 
@@ -683,8 +688,11 @@ function failurePrefix(mode: SetupMode): string {
       return "Bootstrap creation failed";
     case "delete-bootstrap":
       return "Bootstrap deletion failed";
+    // Teardown, not deletion: this mode revokes, deletes and purges, and the
+    // purge failure it prefixes opens "was deleted", so "deletion failed"
+    // prepended to it contradicted the sentence it introduced.
     case "delete-server-app":
-      return "Server application deletion failed";
+      return "Server application teardown failed";
     case "setup":
       return "Setup failed";
   }
@@ -716,6 +724,19 @@ export function describeSetupFailure(error: unknown, mode: SetupMode = "setup"):
       `${prefix}: Graph ${error.method} ${error.path} returned ${error.status}${code}. ` +
       `${nextStepForGraphFailure(error)} Response body: ${error.body}`
     );
+  }
+
+  // The two teardown failures runDeleteServerApp raises wrap their
+  // GraphRequestError in a plain Error, because the partial state the operator
+  // is left in is the more useful headline than the Graph call that produced
+  // it. Without this the wrapped error takes the generic tail below and loses
+  // nextStepForGraphFailure's DELETE /applications branch, which exists
+  // precisely because the generic 403 message named the wrong verb, and a 403
+  // is the likeliest way that delete fails. The wrapped message already carries
+  // the status and the response body, so only the remedy sentence is missing.
+  const cause = error instanceof Error ? error.cause : undefined;
+  if (cause instanceof GraphRequestError) {
+    return `${prefix}: ${error instanceof Error ? error.message : String(error)} ${nextStepForGraphFailure(cause)}`;
   }
 
   return `${prefix}: ${error instanceof Error ? error.message : String(error)}`;

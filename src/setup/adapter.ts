@@ -43,13 +43,19 @@ interface GraphResponse {
   value: unknown;
 }
 
+/**
+ * `path` is a Graph-relative path, or an absolute Graph URL when it came from
+ * an `@odata.nextLink`, which Graph returns fully qualified. The path is still
+ * what a GraphRequestError reports, so an operator reading a failed page sees
+ * the same shape of label either way.
+ */
 async function graphRequest(
   token: string,
   method: string,
   path: string,
   body?: unknown,
 ): Promise<GraphResponse> {
-  const response = await fetch(`${GRAPH}${path}`, {
+  const response = await fetch(path.startsWith("https://") ? path : `${GRAPH}${path}`, {
     method,
     headers: {
       authorization: `Bearer ${token}`,
@@ -262,25 +268,74 @@ export function createFetchSetupGraph(options: FetchSetupGraphOptions): SetupGra
       // Same endpoint family as the grant and its rollback delete, so this
       // read needs the bootstrap application's token too: Graph refuses a
       // delegated token on /sites/{id}/permissions regardless of the caller's
-      // directory roles.
+      // directory roles. Minted once for the whole listing rather than per
+      // page: a page loop here lasts seconds and a token lasts an hour.
       const bootstrapToken = await acquireBootstrapToken();
-      const response = await graphRequest(bootstrapToken, "GET", `/sites/${siteId}/permissions`);
-      const body = typeof response.value === "object" && response.value !== null ? response.value : {};
-      const entries = (body as { value?: unknown }).value;
-      const list = Array.isArray(entries) ? entries : [];
 
-      // An entry this cannot make sense of is skipped rather than refused,
-      // unlike the scan layer, which refuses loudly on an item it cannot read
-      // because that item might be a file the reconciliation would otherwise
-      // silently lose track of. A permission entry we cannot parse here is not
-      // that: it is metadata about who a grant was extended to, and skipping
-      // it means the entry contributes no application id rather than a bogus
-      // one, not that the whole listing is thrown away.
-      return list.flatMap((raw) => {
-        const entry = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
-        if (typeof entry.id !== "string") return [];
-        return [{ permissionId: entry.id, appIds: applicationIdsFromGrant(entry) }];
-      });
+      // Paged rather than read from the first response alone. The one consumer
+      // of this listing, --delete-server-app, treats a missing match as "no
+      // permission entry is granted to this application" and then deletes and
+      // purges. A match sitting on a second page would make that an asserted
+      // absence nothing established, and would produce exactly the orphaned
+      // entry the mode exists to prevent while reporting a clean teardown.
+      // Following @odata.nextLink is the treatment src/graph/delta.ts gives the
+      // same field; the difference is that a collection GET has no terminal
+      // marker of its own, so the absence of a nextLink is the end of the
+      // listing rather than the ambiguity delta.ts refuses on.
+      const results: Array<{ permissionId: string; appIds: string[] }> = [];
+      const requested = new Set<string>();
+      let next: string | undefined = `/sites/${siteId}/permissions`;
+
+      while (next !== undefined) {
+        // A link that repeats one already followed cannot end, and quietly
+        // looping on it is the other half of what delta.ts refuses: an
+        // enumeration that either never terminates or terminates silently
+        // incomplete.
+        if (requested.has(next)) {
+          throw new Error(
+            `Listing the permissions on site ${siteId} was sent back to a page it had already requested, so ` +
+              "the listing cannot be completed without looping. The permission entries on this site cannot be " +
+              "read, so the teardown cannot tell whether one is granted to this application.",
+          );
+        }
+        requested.add(next);
+
+        const response: GraphResponse = await graphRequest(bootstrapToken, "GET", next);
+        const body = typeof response.value === "object" && response.value !== null ? response.value : {};
+        const entries = (body as { value?: unknown }).value;
+        const list = Array.isArray(entries) ? entries : [];
+
+        // An entry this cannot make sense of is skipped rather than refused,
+        // unlike the scan layer, which refuses loudly on an item it cannot read
+        // because that item might be a file the reconciliation would otherwise
+        // silently lose track of. A permission entry we cannot parse here is not
+        // that: it is metadata about who a grant was extended to, and skipping
+        // it means the entry contributes no application id rather than a bogus
+        // one, not that the whole listing is thrown away.
+        for (const raw of list) {
+          const entry = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+          if (typeof entry.id !== "string") continue;
+          results.push({ permissionId: entry.id, appIds: applicationIdsFromGrant(entry) });
+        }
+
+        // A continuation link of any other type is refused rather than
+        // coerced: a non-string there means the response is not the shape this
+        // code reads, and stopping on it would report a partial listing as a
+        // complete one.
+        const link: unknown = (body as Record<string, unknown>)["@odata.nextLink"];
+        if (link === undefined) {
+          next = undefined;
+        } else if (typeof link === "string") {
+          next = link;
+        } else {
+          throw new Error(
+            `A permissions page for site ${siteId} carried an @odata.nextLink that is not a URL, so the rest of ` +
+              "the listing cannot be fetched and the entries read so far are not the whole set.",
+          );
+        }
+      }
+
+      return results;
     },
 
     async verifyAppAccess({ appId, secret, siteId }) {

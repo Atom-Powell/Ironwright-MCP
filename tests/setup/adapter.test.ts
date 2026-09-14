@@ -275,6 +275,38 @@ describe("createFetchSetupGraph", () => {
     expect(calls[0]?.authorization).toBe("Bearer bootstrap-token");
   });
 
+  it("follows @odata.nextLink so a match on a later page is not read as an absence", async () => {
+    // The consumer of this listing, --delete-server-app, treats no match as
+    // "no permission entry is granted to this application" and then deletes
+    // and purges. A first page read in isolation would make that an asserted
+    // absence, and leave the orphaned entry the mode exists to prevent.
+    const calls = stubFetch([
+      {
+        status: 200,
+        body: JSON.stringify({
+          value: [{ id: "perm-1", grantedToIdentitiesV2: [{ application: { id: "app-a", displayName: "A" } }] }],
+          "@odata.nextLink": "https://graph.microsoft.com/v1.0/sites/site-1/permissions?$skiptoken=abc",
+        }),
+      },
+      {
+        status: 200,
+        body: JSON.stringify({
+          value: [{ id: "perm-2", grantedToIdentitiesV2: [{ application: { id: "app-b", displayName: "B" } }] }],
+        }),
+      },
+    ]);
+
+    await expect(graph().listSitePermissions("site-1")).resolves.toEqual([
+      { permissionId: "perm-1", appIds: ["app-a"] },
+      { permissionId: "perm-2", appIds: ["app-b"] },
+    ]);
+    expect(calls.map((call) => call.url)).toEqual([
+      "https://graph.microsoft.com/v1.0/sites/site-1/permissions",
+      "https://graph.microsoft.com/v1.0/sites/site-1/permissions?$skiptoken=abc",
+    ]);
+    expect(calls[1]?.authorization).toBe("Bearer bootstrap-token");
+  });
+
   it("reads an entry that carries no granted identities as granting to nobody", async () => {
     stubFetch([{ status: 200, body: JSON.stringify({ value: [{ id: "perm-1" }] }) }]);
 

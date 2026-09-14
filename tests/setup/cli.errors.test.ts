@@ -370,6 +370,46 @@ describe("describeSetupFailure", () => {
     expect(message).not.toMatch(/^Setup failed:/);
   });
 
+  it("prefixes a --delete-server-app failure as a teardown, not a deletion", () => {
+    // The purge-failure body this prefix introduces opens "was deleted", so
+    // "Server application deletion failed: Application app-1 was deleted, but
+    // purging it ... failed" had the prefix contradicting its own first clause.
+    const message = describeSetupFailure(
+      new Error("Application app-1 was deleted, but purging it from deleted items failed."),
+      "delete-server-app",
+    );
+
+    expect(message).toMatch(/^Server application teardown failed:/);
+    expect(message).not.toMatch(/deletion failed/);
+  });
+
+  it("keeps the Graph remedy when a teardown failure wraps the GraphRequestError that caused it", () => {
+    // runDeleteServerApp wraps its Graph failures in a plain Error so the
+    // partial state leads the message. Without reading the cause, the wrapped
+    // error takes the generic tail and loses the DELETE /applications branch,
+    // which is the remedy for a 403 here and the likeliest way that delete
+    // fails.
+    const message = describeSetupFailure(
+      new Error("No site permission was revoked, and the application still exists: deleting app-1 failed.", {
+        cause: new GraphRequestError({
+          method: "DELETE",
+          path: "/applications/object-1",
+          status: 403,
+          body: '{"error":{"code":"Authorization_RequestDenied"}}',
+        }),
+      }),
+      "delete-server-app",
+    );
+
+    expect(message).toMatch(/^Server application teardown failed:/);
+    expect(message).toMatch(/application still exists/);
+    expect(message).toMatch(/Application Administrator or Cloud Application Administrator/);
+    expect(message).toMatch(/no admin consent is involved in deleting/);
+    // The branch that would otherwise have fired: the generic 403 tail names
+    // creating an app registration, which is the wrong verb on this path.
+    expect(message).not.toMatch(/Creating the app registration/);
+  });
+
   it("applies the mode-specific prefix to a GraphRequestError too, not just a plain Error", () => {
     const message = describeSetupFailure(
       new GraphRequestError({

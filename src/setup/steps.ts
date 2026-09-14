@@ -229,7 +229,7 @@ export function assertBootstrapToken(token: string): void {
   }
   if (!roles.includes(SITES_FULL_CONTROL_ROLE_CLAIM)) {
     throw new Error(
-      `The bootstrap application's token does not carry ${SITES_FULL_CONTROL_ROLE_CLAIM}, so it cannot issue a per-site grant. Its application permission exists on the registration but has not been admin-consented in this tenant. A Privileged Role Administrator or Global Administrator must consent it, or re-run this command with --create-bootstrap to create a correctly configured application.`,
+      `The bootstrap application's token does not carry ${SITES_FULL_CONTROL_ROLE_CLAIM}, so it cannot issue or revoke a per-site grant. Its application permission exists on the registration but has not been admin-consented in this tenant. A Privileged Role Administrator or Global Administrator must consent it, or re-run this command with --create-bootstrap to create a correctly configured application.`,
     );
   }
 }
