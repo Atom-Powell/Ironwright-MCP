@@ -289,7 +289,9 @@ to fall back to it.
 
 If no application with the run's display name exists in the tenant, the command reports that as
 the finished state rather than as a failure, and exits zero: the outcome you asked for is already
-true.
+true. A permission entry granted to it may still sit on the site even so, because this command
+cannot find one once the application it named is gone; clearing that needs the entry identified
+by hand in the site's permissions.
 
 If the delete succeeds but the purge that follows it fails, re-running this command will not
 retry the purge: the application is now soft-deleted, and the lookup this command uses to find it

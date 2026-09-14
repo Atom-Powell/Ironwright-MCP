@@ -437,21 +437,28 @@ const GRANT_ISSUER_TEARDOWN_TAIL =
  * deletion removes the standing privilege. Collapsing that distinction here
  * is a mistake this module has made before.
  *
- * The `confirmed` flag matters because only two of the opening sentence's
- * three claims are actually observed at this point in the run: that the
- * grant issuer still exists, and that it still holds Sites.FullControl.All,
- * both established by this same execution's own preflight. Whether it is "no
- * longer needed for this site" is not observed on the unconfirmed arm, since
- * that arm exists precisely because the run could not prove the new
- * application can reach the site. Asserting it anyway told an operator to
- * destroy the one credential able to reissue the per-site grant, in the same
- * breath as a message four lines above saying that credential might still be
- * needed.
+ * The `confirmed` flag still picks a different opening clause per arm, but an
+ * earlier version of the confirmed clause claimed the grant issuer was "not
+ * needed for this site any longer." That was true in isolation, the same way
+ * every clause GRANT_ISSUER_TEARDOWN_TAIL's rewrite touched was true in
+ * isolation, and false as the sentence an operator actually reads next to it:
+ * the tail says keep it because this site will need it again at
+ * decommissioning, so a claim that it is no longer needed for this site read
+ * as the message arguing with itself. The confirmed clause now states only
+ * what is true and unambiguous at this point: the grant issuer has finished
+ * the one thing this run needed from it, issuing the per-site permission,
+ * which succeeds before verification runs on either arm, so it is true here
+ * regardless of what verification later finds. The unconfirmed clause still
+ * differs, but for a nearer-term reason than the tail's long-term retention
+ * advice: this site's access itself has not been confirmed, so the grant
+ * issuer may be needed again immediately, to reissue or diagnose the very
+ * grant it just made, well before "until this site is decommissioned" is
+ * even the operative question.
  */
 export function describeGrantIssuerTeardownNote(confirmed: boolean): string {
   const openingClause = confirmed
-    ? "The grant issuer application is not needed for this site any longer, but it still exists and still holds " +
-      "Sites.FullControl.All across every site in this tenant."
+    ? "The grant issuer application has finished the work this run needed it for, and it still exists and still " +
+      "holds Sites.FullControl.All across every site in this tenant."
     : "This site's access has not been confirmed yet, and the grant issuer is the only credential that can " +
       "reissue the per-site grant, so deleting it should wait until this application's own access is confirmed. " +
       "It still exists and still holds Sites.FullControl.All across every site in this tenant.";

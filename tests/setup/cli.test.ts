@@ -195,12 +195,24 @@ describe("describeDeleteBootstrapSuccess (deleted branch)", () => {
 });
 
 describe("describeGrantIssuerTeardownNote", () => {
-  it("states the grant issuer is not needed for this site only when access is confirmed", () => {
+  it("states the grant issuer has finished this run's work only when access is confirmed", () => {
     // The unconfirmed arm cannot make this claim: that arm exists precisely
     // because the run could not prove the new application can reach the
-    // site, so "not needed for this site any longer" is not yet observed.
-    expect(describeGrantIssuerTeardownNote(true)).toMatch(/not needed for this site/i);
-    expect(describeGrantIssuerTeardownNote(false)).not.toMatch(/not needed for this site/i);
+    // site. Its own opening clause names a nearer-term reason to keep the
+    // grant issuer instead (it may be needed again immediately to reissue or
+    // diagnose the grant), not this one.
+    expect(describeGrantIssuerTeardownNote(true)).toMatch(/finished the work this run needed it for/i);
+    expect(describeGrantIssuerTeardownNote(false)).not.toMatch(/finished the work this run needed it for/i);
+  });
+
+  it("does not let the opening clause contradict the tail's keep-it-until-decommissioned advice", () => {
+    // The two halves of this message disagreed once: the opening said the grant
+    // issuer was no longer needed for this site, and the tail said to keep it
+    // because this site would need it. Pinned as an assembled string for that
+    // reason.
+    const note = describeGrantIssuerTeardownNote(true);
+    expect(note).not.toMatch(/not needed for this site any longer/i);
+    expect(note).toMatch(/keep it until this site is decommissioned/i);
   });
 
   it("tells the unconfirmed arm to wait for confirmation before deleting", () => {
@@ -306,8 +318,8 @@ describe("describeSetupSuccess", () => {
       verificationMessage: "not confirmed yet",
     });
 
-    expect(confirmedMessage).toMatch(/not needed for this site any longer/i);
-    expect(unconfirmedMessage).not.toMatch(/not needed for this site any longer/i);
+    expect(confirmedMessage).toMatch(/finished the work this run needed it for/i);
+    expect(unconfirmedMessage).not.toMatch(/finished the work this run needed it for/i);
     expect(unconfirmedMessage).toMatch(/wait until/i);
   });
 });
