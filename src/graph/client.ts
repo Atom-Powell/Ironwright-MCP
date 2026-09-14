@@ -64,12 +64,22 @@ export function createGraphClient(options: GraphClientOptions): GraphClient {
     const token = await options.tokenProvider.getToken();
     requests += 1;
     const hasBody = requestOptions.body !== undefined;
+    // Per-call headers are spread first and the always-set ones overwrite them,
+    // because object spread gives the later key precedence. A caller passing
+    // `authorization` therefore cannot strip the bearer token, which would fail
+    // as a 401 naming no cause and would look like an expired credential rather
+    // than a wrong argument. The cost is deliberate: a caller that genuinely
+    // needs a different `accept`, or a different `content-type` on a request
+    // that carries a body, changes this function, where the change is reviewed,
+    // instead of passing a header that quietly wins. A `content-type` sent on a
+    // bodyless request survives, because there is none set here to take
+    // precedence over it, and one on a request Graph will read no body from
+    // changes nothing.
     const headers: Record<string, string> = {
+      ...requestOptions.headers,
       authorization: `Bearer ${token}`,
       accept: "application/json",
       ...(hasBody ? { "content-type": "application/json" } : {}),
-      // Merged last so a per-call header cannot shadow the bearer token above.
-      ...requestOptions.headers,
     };
     const response = await fetchImpl(url, {
       method: requestOptions.method,

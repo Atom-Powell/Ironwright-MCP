@@ -171,4 +171,23 @@ describe("createGraphClient failures", () => {
 
     expect(client.requests()).toBe(2);
   });
+
+  it("refuses to let a per-call header shadow the bearer token", async () => {
+    const seen: Request[] = [];
+    const client = createGraphClient({
+      tokenProvider: TOKEN,
+      fetchImpl: (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+        seen.push(new Request(input as string, init));
+        return new Response("{}", { status: 200 });
+      }) as typeof fetch,
+    });
+
+    await client.get("/drives/d1", { authorization: "Bearer attacker", accept: "text/html" });
+
+    // The failure this pins is silent: a shadowed bearer token surfaces as a
+    // 401 that names no cause, and reads as an expired credential rather than
+    // as a caller passing the wrong header.
+    expect(seen[0]?.headers.get("authorization")).toBe("Bearer token-1");
+    expect(seen[0]?.headers.get("accept")).toBe("application/json");
+  });
 });
