@@ -415,9 +415,12 @@ export function describeDeleteServerAppOutcome(outcome: DeleteServerAppOutcome, 
 // two; every claim after it is true regardless of whether verification could
 // confirm access, so there is no reason for it to read differently.
 const GRANT_ISSUER_TEARDOWN_TAIL =
-  "Only deleting it removes that standing permission: letting its secret expire disables a credential, not the " +
-  "application or the permission it holds. Run this command with --delete-bootstrap to delete it. Onboarding " +
-  "another site later needs a grant issuer again, so recreate it first with --create-bootstrap.";
+  "Keep it until this site is decommissioned: tearing down the server application then still needs a grant " +
+  "issuer's app-only token to revoke its permission entry on the site, and deleting the grant issuer now would " +
+  "mean recreating one with --create-bootstrap before that teardown could run. Letting its secret expire disables " +
+  "a credential, not the application or the permission it holds; only deleting it removes that standing " +
+  "permission. When this site is decommissioned, remove the server application first, then delete the grant " +
+  "issuer with --delete-bootstrap.";
 
 /**
  * The closing note printed after a normal run's four deployment values, on

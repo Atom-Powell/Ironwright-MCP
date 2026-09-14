@@ -1,14 +1,17 @@
 # Setup
 
-One server instance serves one customer tenant. Setup has three modes rather than one command.
+One server instance serves one customer tenant. Setup has four modes rather than one command.
 `--create-bootstrap` runs once per tenant and creates a small application whose only job is
-issuing site permission grants. The normal run creates the server's own application and grants
-it access to one SharePoint site, using the bootstrap application's credentials for the one
-call that a signed-in person's token cannot make. `--delete-bootstrap` removes the bootstrap
-application again once it is no longer needed. Read this whole document before running any of
-them: the bootstrap application holds a permission broad enough that you should decide you are
-comfortable with the design before you create it, not after, and it is meant to be deleted
-again once setup is done.
+issuing and revoking site permission grants. The normal run creates the server's own application
+and grants it access to one SharePoint site, using the bootstrap application's credentials for the
+one call that a signed-in person's token cannot make. `--delete-server-app` removes that server
+application and the site permission it was granted, in the order that keeps the permission entry
+revocable while its identity still exists, and is how a site gets decommissioned.
+`--delete-bootstrap` removes the bootstrap application itself; it is meant to be kept, not deleted
+right after onboarding, because `--delete-server-app` needs it for as long as any site it helped
+onboard is still live. Read this whole document before running any of them: the bootstrap
+application holds a permission broad enough that you should decide you are comfortable with the
+design before you create it, not after.
 
 ## Why bootstrapping is a separate step
 
@@ -40,9 +43,9 @@ server's own identity. Isolating the privilege this way costs a second applicati
 but it means the server's own application never holds more than `Sites.Selected`, including
 transiently, and the one credential that can touch every site in the tenant is small, named for
 what it does, and easy to audit or revoke on its own. `--create-bootstrap` creates that
-application. Its secret is issued with a seven-day expiry and the application itself is meant
-to be deleted once setup is done, so the broad privilege exists during onboarding rather than
-forever; see "Retiring the grant issuer after setup" below.
+application. Its secret is issued with a seven-day expiry and rotated with each recreation, and
+the application itself is meant to be deleted once every site it onboarded has in turn been
+decommissioned, not once the current onboarding finishes; see "Retiring the grant issuer" below.
 
 ## What you need
 
@@ -63,7 +66,14 @@ forever; see "Retiring the grant issuer after setup" below.
   Administrator or Global Administrator is not required. This matters when deciding who can run
   teardown in a customer tenant: it can be delegated to whoever holds either of those roles
   there, without also asking for one of the two more senior roles.
-- Site owner rights are not required for any of the three modes. The per-site grant is issued by
+- `--delete-server-app` needs the same Application Administrator or Cloud Application
+  Administrator rights as `--delete-bootstrap`, for the same reason: deleting the server
+  application and purging it afterward are directory-object operations, not consent operations.
+  It also needs `IW_BOOTSTRAP_CLIENT_ID` and `IW_BOOTSTRAP_CLIENT_SECRET`, the grant issuer's own
+  credentials, to revoke the per-site permission entry before deleting the application it was
+  granted to. `--force-orphan` is the only way to run it without them, and it leaves that entry
+  behind on the site.
+- Site owner rights are not required for any of the four modes. The per-site grant is issued by
   the bootstrap application's own token, not by the signed-in operator's, so nobody running these
   commands needs any standing permission on the SharePoint site itself.
 - Node 22 or later.
@@ -110,10 +120,15 @@ exists too, but only as a fallback for a caller that already manages secrets som
 flag puts a credential for an application holding tenant-wide site control into shell history,
 which the environment variables do not.
 
-## Retiring the grant issuer after setup
+## Retiring the grant issuer
 
-The recommended posture is to delete the grant-issuing application once setup is done, and to
-recreate it with `--create-bootstrap` when the next site is onboarded:
+The recommended posture is to keep the grant-issuing application until every site it helped
+onboard has itself been decommissioned, not to delete it once the current onboarding finishes.
+`--delete-server-app`, covered below, is how a site gets decommissioned, and its first step,
+revoking the per-site permission entry the grant issuer originally issued, needs that same
+grant issuer's own app-only token. Deleting the grant issuer early does not save anything: it
+only means recreating one with `--create-bootstrap` before that revoke can run at all. Delete it
+once, at the end, when no server application it provisioned still needs a permission revoked:
 
 ```bash
 npm run setup -- --tenant=<tenant-id> --delete-bootstrap
@@ -130,11 +145,11 @@ Unlike the normal run, `--delete-bootstrap` needs no `IW_BOOTSTRAP_CLIENT_ID` or
 `IW_BOOTSTRAP_CLIENT_SECRET`. It acts using only the signed-in device-code session, the same
 one every mode uses to create the app registration in the first place, because deleting an
 application registration needs Application Administrator rights over the directory object
-itself, not the bootstrap application's own credentials. That is deliberate: this mode exists
-for a grant issuer whose secret was never recorded or has already expired, and requiring that
-exact secret here would make it unusable in precisely the situation it is for. If you have lost
-or outlived the bootstrap secret, you do not need to recreate the grant issuer just to remove
-it; run this command as it is.
+itself, not the bootstrap application's own credentials. That is deliberate: this mode also
+covers a grant issuer whose secret was never recorded or has already expired, and requiring
+that exact secret here would make it unusable in precisely the situation it is for. If you have
+lost or outlived the bootstrap secret, you do not need to recreate the grant issuer just to
+remove it; run this command as it is.
 
 The secret's seven-day expiry and deletion are not the same thing, and treating them as
 interchangeable is the mistake this section exists to prevent. The expiry disables one
@@ -146,37 +161,42 @@ as the application still exists. Deletion removes the application object itself,
 role assignment it held. Only deletion ends the standing privilege; expiry only ends one way of
 using it.
 
-This matters more in a customer tenant than in a developer one. Leaving the grant issuer in
-place there means the product retains an application with full control over every SharePoint
-site the customer owns, indefinitely, whether or not its current secret still works. Deleting it
-after each onboarding means that access existed for the length of one setup run. Those are two
-different answers to a client's security review, and only one of them is true if the grant
-issuer was left in place because its secret happened to expire rather than because someone
-deleted it.
+This matters more in a customer tenant than in a developer one. The grant issuer holds full
+control over every SharePoint site the customer owns for as long as it exists, so a client
+security review will ask how long that is. Under the posture above, the honest answer is: for
+the life of every site it onboarded, because a live server application may still need its
+permission revoked at any point up to that site's decommissioning. That is a real, standing
+privilege for that whole span, not a one-time bootstrap cost, so the answer a security review
+needs is not "it is deleted quickly" but "it is tracked, its secret is rotated on a seven-day
+cycle, and it is deleted once nothing it provisioned still depends on it."
 
-Deleting the grant issuer does not affect the deployed server. The server's own application
-holds `Sites.Selected` and its own per-site grant, both issued during the normal run, and
-neither depends on the grant issuer continuing to exist. The deployed server keeps working after
-`--delete-bootstrap` succeeds.
+Deleting the grant issuer does not affect an already-deployed server. The server's own
+application holds `Sites.Selected` and its own per-site grant, both issued during the normal
+run, and neither depends on the grant issuer continuing to exist. The deployed server keeps
+working after `--delete-bootstrap` succeeds; what stops working is any later attempt to revoke
+that server's own permission entry through `--delete-server-app`, which is exactly why this
+section recommends deleting the grant issuer last, not first.
 
 One caveat to the claim above that deletion ends the standing privilege: Entra's delete of an
 application registration is a soft delete, not an immediate purge. The application sits in the
 tenant's deleted items for 30 days, where the same Application Administrator rights this command
 needed can restore it, role assignment and all. That is true of every application deletion in
-Entra, not a gap specific to this command, but it is exactly the kind of detail a client security
-review is likely to ask about, since "deleted" and "gone for 30 days, then gone" are different
-answers. If the recovery window itself is a concern, purge the application permanently from
-deleted items in the Entra admin portal after this command finishes, rather than treating this
-deletion alone as final.
+Entra, not a gap specific to this command, and `--delete-bootstrap` does not purge automatically,
+unlike `--delete-server-app` below. That is exactly the kind of detail a client security review
+is likely to ask about, since "deleted" and "gone for 30 days, then gone" are different answers.
+If the recovery window itself is a concern, purge the application permanently from deleted items
+in the Entra admin portal after this command finishes, rather than treating this deletion alone
+as final.
 
 Once the grant issuer is deleted, remove `IW_BOOTSTRAP_CLIENT_ID` and `IW_BOOTSTRAP_CLIENT_SECRET`
 from wherever you stored them. Left in place, they name an application that no longer exists,
 and the next normal run that reads them fails at its preflight with a rejected-credentials
 message that reads like a wrong secret rather than a deleted application.
 
-Keep the grant issuer only if you are onboarding sites often enough that recreating it each time
-is real friction, and if you do, treat it as a privileged credential with an expiry date rather
-than as permanent infrastructure.
+Treat the grant issuer, for its entire lifetime, as a privileged credential with a tracked owner
+and an expiry date, not as permanent infrastructure and not as disposable bootstrap scaffolding
+either. It is neither: it is a standing credential that this product's own teardown path depends
+on for as long as any site it provisioned is still live.
 
 ## Running the normal setup
 
@@ -229,10 +249,63 @@ bulk write credentials, so it is a development dependency along with the TypeScr
 command is launched with. A production install made with `--omit=dev` runs the server and not
 this command.
 
+## Running `--delete-server-app`
+
+```bash
+npm run setup -- --tenant=<tenant-id> --site=https://<tenant>.sharepoint.com/sites/<SiteName> --delete-server-app --confirm
+```
+
+This is the counterpart to the normal run above: it removes the server application that a normal
+run created and the per-site permission it was granted, rather than creating either. It is how a
+site gets decommissioned. Dry run is the default here, the same as every other write path in this
+project: omit `--confirm` first to see what the command found and exactly what it would do, and
+pass `--confirm` only once that preview looks right.
+
+The order it acts in is forced, not a preference. The per-site permission entry is matched to the
+application by its application id, so revoking it has to happen while that identity still exists;
+deleting the application first would leave an entry naming an id nothing can look up again. So
+this command lists the site's permissions and revokes the matching entry, then deletes the
+application, then purges it from the tenant's deleted items. The purge is not optional cleanup:
+Entra's delete of an application registration is a soft delete, and the object stays restorable,
+with its credentials, in the tenant's deleted items for 30 days. Stopping at the delete schedules
+the credential's removal thirty days out rather than performing it, so this command always purges
+after a delete that succeeds, unlike `--delete-bootstrap` above.
+
+Revoking the permission entry needs a grant issuer's own app-only token, the same
+`IW_BOOTSTRAP_CLIENT_ID` and `IW_BOOTSTRAP_CLIENT_SECRET` a normal run needs. This is exactly why
+"Retiring the grant issuer" above recommends keeping the grant issuer around rather than deleting
+it right after onboarding: without it, this command cannot even look up the permission entry it
+is trying to remove, let alone revoke it.
+
+If the grant issuer is genuinely gone, pass `--force-orphan` to delete and purge the server
+application anyway. It skips the permission listing entirely rather than guessing at what it
+would have found, and says so plainly in its output: any permission entry this application held
+may still remain on the site afterward, naming an identity that no longer exists and granting
+access to nothing. Removing that residue later needs a grant issuer created with
+`--create-bootstrap` and the entry identified by hand in the site's permissions. `--force-orphan`
+is a deliberate escape hatch for a grant issuer that is already gone, not a routine option; the
+posture in "Retiring the grant issuer" exists so that revoking a site's permission entry never has
+to fall back to it.
+
+If no application with the run's display name exists in the tenant, the command reports that as
+the finished state rather than as a failure, and exits zero: the outcome you asked for is already
+true.
+
+If the delete succeeds but the purge that follows it fails, re-running this command will not
+retry the purge: the application is now soft-deleted, and the lookup this command uses to find it
+does not return a soft-deleted one, so a re-run reports it already absent instead. The failure
+message names the manual purge call to make by hand. This is a known limitation, recorded in
+`docs/OPEN-ITEMS.md`.
+
+Deleting the server application invalidates the deployment's credentials immediately:
+`AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET` from the normal run now name an application that no
+longer exists. Onboarding this site again needs a fresh application, which is what a plain normal
+run, without `--delete-server-app`, produces.
+
 ## The device code sign-in and its client id
 
 Signing in with a device code requires an Entra application to sign into, the same way any
-interactive sign-in does, and all three modes use it. By default this command signs in as
+interactive sign-in does, and all four modes use it. By default this command signs in as
 `14d82eec-204b-4c2f-b7e8-296a70dab67e`, which is Microsoft's Graph Command Line Tools
 application, the public client that Microsoft Graph PowerShell and the Graph CLI sign in as. It
 exists in every tenant, so nobody has to register a public-client sign-in application of their

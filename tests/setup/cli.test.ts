@@ -211,12 +211,12 @@ describe("describeGrantIssuerTeardownNote", () => {
     expect(message).toMatch(/only credential that can reissue the per-site grant/i);
   });
 
-  it("names the delete command on both arms", () => {
+  it("names the delete command for eventual decommissioning, on both arms", () => {
     expect(describeGrantIssuerTeardownNote(true)).toContain("--delete-bootstrap");
     expect(describeGrantIssuerTeardownNote(false)).toContain("--delete-bootstrap");
   });
 
-  it("names the recreate command for onboarding another site later, on both arms", () => {
+  it("names the recreate command needed if the grant issuer is deleted too early, on both arms", () => {
     expect(describeGrantIssuerTeardownNote(true)).toContain("--create-bootstrap");
     expect(describeGrantIssuerTeardownNote(false)).toContain("--create-bootstrap");
   });
@@ -246,7 +246,7 @@ describe("describeGrantIssuerTeardownNote", () => {
     // (that the application still exists and still holds Sites.FullControl.All,
     // and the delete/recreate instructions) is true regardless of confirmation
     // and must read identically either way.
-    const sharedTail = "Only deleting it removes that standing permission";
+    const sharedTail = "Keep it until this site is decommissioned";
     const confirmedMessage = describeGrantIssuerTeardownNote(true);
     const unconfirmedMessage = describeGrantIssuerTeardownNote(false);
 

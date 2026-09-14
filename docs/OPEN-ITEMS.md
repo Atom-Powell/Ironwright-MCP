@@ -220,7 +220,29 @@ a reconciliation that silently omits a client is exactly the kind of quiet incom
 rest of the design refuses. Whatever is chosen, the omission has to be visible in the report
 rather than only in a log.
 
-## Teardown has a hole for the server application
+## CLOSED: the server application teardown mode now exists
+
+**CLOSED 2026-09-13, by `--delete-server-app` (`fd79768` through `b688722`).** The mode this item
+called for now exists. It lists the site's permissions and revokes the entry matching the
+application while that application's identity still exists, then deletes the application, then
+purges it from the tenant's deleted items, which is the forced order this item named: revoke
+first because the entry is matched by application id, purge last because a delete alone is only
+a soft delete with a 30 day restore window. Dry run is the default and `--confirm` is required to
+act. `--force-orphan` covers the case this item raised directly, a grant issuer that is already
+gone: it deletes and purges the server application anyway and leaves any permission entry behind,
+reporting that it may still be there rather than guessing.
+
+The root cause this item named, not a missing feature so much as the advice that produced the
+ordering problem, was corrected in the same work. `docs/SETUP.md` and the setup command's own
+success message no longer tell an operator to delete the grant issuer once onboarding is done;
+both now say to keep it until every site it onboarded has itself been decommissioned, because
+`--delete-server-app`'s revoke step needs that same grant issuer's app-only token.
+
+One gap survives, recorded separately below: if the delete succeeds and the purge that follows it
+fails, the mode cannot recover on a re-run, because the lookup it uses to find the application
+does not see a soft-deleted one.
+
+Original entry follows.
 
 Found while cleaning up after the live run, 2026-09-12.
 
@@ -246,7 +268,16 @@ retain the grant issuer when it can see that a server application still holds a 
 later need to revoke. The second is the more interesting question, because the current advice to
 delete the grant issuer immediately is what creates the ordering problem.
 
-## Found by using the tool, 2026-09-12
+## CLOSED: an already-absent grant issuer reports success, not failure
+
+**CLOSED by Task 1 of the server application teardown plan, commit `0a50aed`, "fix: treat an
+already-absent grant issuer as done, not as a failure".** `runDeleteBootstrap` now returns a
+distinct `already-absent` outcome instead of throwing when no application matches the display
+name, and its own message says so: nothing existed, so nothing was deleted, and that is the
+finished state, not a failure. `--delete-bootstrap` against a tenant whose grant issuer is
+already gone now prints that message and exits zero.
+
+Original entry follows.
 
 `--delete-bootstrap` was run against a tenant whose grant issuer had already been removed by
 hand. The lookup correctly found nothing and the message correctly said no action was needed.
@@ -468,3 +499,49 @@ operator.
 Until those numbers exist, this phase's central claim, that delta plus a persisted continuation
 link bounds the Graph request count, is unverified. The numbers belong in this file when they
 exist, not before.
+
+## The server-app teardown mode cannot recover from its own partial failure
+
+Found during Task 4 of the server application teardown plan, 2026-09-13.
+
+`runDeleteServerApp` deletes the server application, then purges it from the tenant's deleted
+items. If the delete succeeds and the purge that follows it then fails, the application is left
+soft-deleted rather than gone.
+
+The mode cannot repair this on a re-run. `findApplicationByDisplayName` queries the live
+`/applications` collection, and Entra excludes soft-deleted objects from it; they are returned
+only by `/directory/deletedItems`. So a re-run's first call finds nothing, `runDeleteServerApp`
+returns `already-absent`, and the purge that never ran is never attempted again. The credential
+stays restorable, with its secret, for the remainder of its 30 day window, and nothing about the
+tool's own state says so beyond the one failure message from the run that hit it.
+
+That failure message names the fix an operator can make by hand: `DELETE
+/directory/deletedItems/{objectId}`, using their own delegated token. It was written with this
+gap already in mind, so the operator is not left guessing, but the tool itself cannot finish the
+job it started once this failure occurs.
+
+A real fix needs the mode to look up the application by object id, not display name, once it has
+one, so a re-run can find a soft-deleted object and retry the purge against it.
+`findApplicationByDisplayName` is the wrong tool for that half of the job: it exists to find an
+application nobody has an id for yet, which is only true before the delete, not after.
+
+## The grant issuer's own teardown never purges it
+
+Noticed during Task 4's review of the server application teardown plan, 2026-09-13.
+
+`runDeleteBootstrap` deletes the grant issuer and returns. It never calls
+`purgeDeletedApplication`. The grant issuer holds `Sites.FullControl.All` tenant-wide, the
+broader of the two permissions this plan concerned itself with, so the same reasoning
+`runDeleteServerApp` applies to the server application applies here at least as strongly,
+arguably more: a delete alone is a soft delete, and the application, with its credentials, stays
+restorable by anyone holding Application Administrator rights for 30 days afterward.
+`docs/SETUP.md` already tells an operator to purge it by hand in the portal if that window is a
+concern, which is honest, but it is manual, easy to skip, and not what the mode itself does.
+
+Not fixed here. `--delete-bootstrap` is a different mode from the one this plan built, and this
+is exactly the kind of unplanned addition the working agreement asks to route through its own
+design step rather than folding into whatever change happens to be nearby. The fix, when it is
+taken up, is small: `purgeDeletedApplication` already exists on `SetupGraph`
+(`src/setup/adapter.ts`), built for `runDeleteServerApp`'s own teardown, so `runDeleteBootstrap`
+would only need to call it after `deleteApplication` succeeds, the same way `runDeleteServerApp`
+already does.
