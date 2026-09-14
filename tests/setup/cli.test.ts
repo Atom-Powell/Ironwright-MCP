@@ -378,6 +378,11 @@ describe("describeDeleteServerAppOutcome", () => {
     expect(message).toMatch(/revoked/i);
     expect(message).toMatch(/purged/i);
     expect(message).toMatch(/not recoverable/i);
+    // Pins the specific revoked-clause wording, not just the loose /revoked/i
+    // match above, so a regression that swapped in the orphaned branch's
+    // "Nothing was revoked" wording on a non-orphaned outcome would fail here.
+    expect(message).toMatch(/Revoked its permission entry/);
+    expect(message).not.toMatch(/Nothing was revoked/i);
   });
 
   it("names the residue exactly when the permission entry was left behind", () => {
@@ -393,6 +398,12 @@ describe("describeDeleteServerAppOutcome", () => {
     expect(message).toMatch(/grants access to nothing/i);
     expect(message).toMatch(/--create-bootstrap/);
     expect(message).not.toMatch(/entry remains on/i);
+    // Pins the gated revoked clause itself, not just the residue clause: an
+    // orphaned outcome must say nobody looked, not that nothing was granted.
+    expect(message).toMatch(/nothing was revoked/i);
+    // The clause this test exists to guard: an uninspected site must not be
+    // reported as an empty one, in this sentence or any other.
+    expect(message).not.toMatch(/no permission entry on .* was granted to it/i);
   });
 
   it("says nothing was deleted when the application was already gone", () => {

@@ -379,15 +379,27 @@ export function describeDeleteServerAppOutcome(outcome: DeleteServerAppOutcome, 
     );
   }
 
-  const revoked = outcome.permissionRevoked
-    ? `Revoked its permission entry on ${siteUrl}.`
-    : `No permission entry on ${siteUrl} was granted to it, so none was revoked.`;
+  // Gated on orphanedPermission first, the same way the planned branch gates on
+  // permissionsInspected: permissionRevoked can only be true when a grant
+  // issuer was configured, and orphanedPermission is set from the absence of
+  // one, so the two clauses below and the residue clause after them would
+  // otherwise both fire on every --force-orphan teardown, one asserting no
+  // permission was granted and the other saying nobody looked. Only one of
+  // those is ever actually observed.
+  const revoked = outcome.orphanedPermission
+    ? `Nothing was revoked: the site's permissions on ${siteUrl} were never inspected, because --force-orphan ` +
+      "ran this teardown without a grant issuer."
+    : outcome.permissionRevoked
+      ? `Revoked its permission entry on ${siteUrl}.`
+      : `No permission entry on ${siteUrl} was granted to it, so none was revoked.`;
 
+  // The reason nothing was revoked already sits in the revoked clause above, so
+  // this only adds what that clause does not: what the entry means if one
+  // remains, and what removing it needs.
   const residue = outcome.orphanedPermission
-    ? ` A permission entry for this application may still remain on ${siteUrl}, because --force-orphan ran this ` +
-      "teardown without a grant issuer and the site's permissions were never inspected. If one remains it now " +
-      "names an identity that no longer exists, so it grants access to nothing, and removing it needs a grant " +
-      "issuer created with --create-bootstrap and the entry identified by hand."
+    ? ` A permission entry for this application may still remain on ${siteUrl}. If one remains it now names an ` +
+      "identity that no longer exists, so it grants access to nothing, and removing it needs a grant issuer " +
+      "created with --create-bootstrap and the entry identified by hand."
     : "";
 
   return (
