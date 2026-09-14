@@ -357,6 +357,119 @@ export async function runCreateBootstrap(
   }
 }
 
+export interface DeleteServerAppArgs {
+  siteUrl: string;
+  displayName: string;
+  confirm: boolean;
+  forceOrphan: boolean;
+  hasGrantIssuer: boolean;
+}
+
+export type DeleteServerAppOutcome =
+  | { kind: "already-absent"; displayName: string }
+  | {
+      kind: "planned";
+      appId: string;
+      objectId: string;
+      permissionId: string | undefined;
+    }
+  | {
+      kind: "torn-down";
+      appId: string;
+      objectId: string;
+      permissionRevoked: boolean;
+      orphanedPermission: boolean;
+    };
+
+function statusOf(error: unknown): number | undefined {
+  return error instanceof GraphRequestError ? error.status : undefined;
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Removes a server application and the per-site permission it was granted.
+ *
+ * The order is forced rather than chosen. The permission entry is matched to
+ * the application by app id, so the revoke has to happen while that identity
+ * still exists; deleting first leaves an entry naming an identity that is gone,
+ * which is the residue this mode exists to stop producing. The purge is what
+ * actually ends the credential's life: Entra's delete is a soft delete with a
+ * 30 day restore window, so stopping at the delete schedules the removal rather
+ * than performing it.
+ */
+export async function runDeleteServerApp(
+  graph: SetupGraph,
+  args: DeleteServerAppArgs,
+  hooks: SetupHooks = {},
+): Promise<DeleteServerAppOutcome> {
+  const notice = hooks.onNotice ?? ((): void => {});
+
+  const existing = await graph.findApplicationByDisplayName(args.displayName);
+  if (existing === undefined) {
+    // The outcome the operator asked for is already true. Nothing else in this
+    // function can run without an app id to match a permission entry against.
+    return { kind: "already-absent", displayName: args.displayName };
+  }
+
+  // resolveSite takes the hostname-and-server-relative form, not the URL as
+  // typed. runSetup builds it the same way; passing the raw URL yields a 400.
+  const { siteId } = await graph.resolveSite(siteIdPathFromUrl(args.siteUrl));
+
+  let permissionId: string | undefined;
+  if (args.hasGrantIssuer) {
+    const permissions = await graph.listSitePermissions(siteId);
+    permissionId = permissions.find((entry) => entry.appIds.includes(existing.appId))?.permissionId;
+  } else if (!args.forceOrphan) {
+    throw new Error(
+      `Revoking the site permission needs a grant issuer's app-only token, and none was configured, so nothing ` +
+        `was touched: application ${existing.appId} still exists and still holds its grant on ${args.siteUrl}. ` +
+        "Create one with --create-bootstrap and re-run, or pass --force-orphan to delete and purge the " +
+        "application anyway and leave the permission entry behind.",
+    );
+  }
+
+  if (!args.confirm) {
+    return { kind: "planned", appId: existing.appId, objectId: existing.objectId, permissionId };
+  }
+
+  let permissionRevoked = false;
+  if (permissionId !== undefined) {
+    notice(`Revoking site permission ${permissionId} on ${siteId}.`);
+    await graph.deleteSitePermission(siteId, permissionId);
+    permissionRevoked = true;
+  }
+
+  notice(`Deleting application ${existing.appId} (object id ${existing.objectId}).`);
+  try {
+    await graph.deleteApplication(existing.objectId);
+  } catch (error) {
+    if (statusOf(error) !== 404) {
+      throw new Error(
+        `The site permission was revoked, and the application still exists: deleting ${existing.appId} failed. ` +
+          `Re-running is safe and will finish the job. Underlying failure: ${messageOf(error)}`,
+      );
+    }
+  }
+
+  notice(`Purging application ${existing.objectId} from deleted items.`);
+  try {
+    await graph.purgeDeletedApplication(existing.objectId);
+  } catch (error) {
+    if (statusOf(error) !== 404) throw error;
+  }
+
+  return {
+    kind: "torn-down",
+    appId: existing.appId,
+    objectId: existing.objectId,
+    permissionRevoked,
+    orphanedPermission: !args.hasGrantIssuer,
+  };
+}
+
 export type DeleteBootstrapOutcome =
   | { kind: "deleted"; appId: string; objectId: string }
   | { kind: "already-absent"; displayName: string };
