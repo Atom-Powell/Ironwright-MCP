@@ -919,7 +919,7 @@ Two of those four are now wrong. Rewrite it to say sessions are non-persistent, 
 
 - [ ] **Step 2: Amend the parent spec**
 
-In the `graph-lib` paragraph, correct the same two claims the same way.
+Correct the same two claims the same way in the `graph-lib` paragraph, AND in the top-level Decisions summary near the head of the file, which carries the same two claims in one clause. Correcting only the paragraph leaves the document contradicting itself, and a summary is the part most likely to be read alone, so a reader would still come away with the wrong picture.
 
 In the phase list, split phase 2b: the workbook snapshot is this work, the Microsoft Search cross-check is its own slice, and `$batch` moves to phase 6 where the write tools are its first caller.
 
