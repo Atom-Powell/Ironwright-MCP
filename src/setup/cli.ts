@@ -562,15 +562,24 @@ export function describeSetupSuccess(details: SetupSuccessDetails): string {
  * family is never about the signed-in operator's directory roles or about
  * site ownership, because the operator's token never reaches this endpoint.
  */
+// The trailing (\?.*)? is what a followed @odata.nextLink carries: Graph
+// paginates this listing with a query string ($skiptoken=...), and listSitePermissions
+// follows that link with the very same bootstrap token as the first page. Without
+// tolerating a query string here, a failure on page two matches nothing and falls
+// through to the generic remedies below, including the 401 one that tells the
+// operator to sign in again on a call that never used their sign-in at all.
 function isSitePermissionsPath(path: string): boolean {
-  return /^\/sites\/[^/]+\/permissions(\/[^/]+)?$/.test(path);
+  return /^\/sites\/[^/]+\/permissions(\/[^/]+)?(\?.*)?$/.test(path);
 }
 
 // Matches DELETE /applications/{id} (deleteApplication) but not POST
 // /applications (createApplication, no id segment) or
 // /applications/{id}/addPassword (an extra segment). Method is checked by the
 // caller, not here, because the same path shape never arises for any other
-// verb this command issues.
+// verb this command issues. Not widened for a query string the way
+// isSitePermissionsPath below is: deleteApplication is a single DELETE, never
+// a paged listing, so no @odata.nextLink and no query string can ever reach
+// this matcher. Widening it would tolerate an input this call cannot produce.
 function isApplicationObjectPath(path: string): boolean {
   return /^\/applications\/[^/]+$/.test(path);
 }
@@ -580,7 +589,10 @@ function isApplicationObjectPath(path: string): boolean {
 // path segment with /applications/{id}, so isApplicationObjectPath cannot
 // match it, and a 403 here used to fall through to the generic tail below,
 // which names creating an application, the wrong operation entirely for a
-// call issued only once an application has already been deleted.
+// call issued only once an application has already been deleted. Same
+// reasoning as isApplicationObjectPath above for not tolerating a query
+// string: purgeDeletedApplication is a single DELETE, not a listing, so this
+// path never carries one either.
 function isDeletedItemsPath(path: string): boolean {
   return /^\/directory\/deletedItems\/[^/]+$/.test(path);
 }

@@ -48,9 +48,12 @@ interface GraphResponse {
  * what a GraphRequestError reports is a relative label, sliced from
  * GRAPH_BASE the same way src/graph/client.ts's own `get` does: an absolute
  * URL that does not start with GRAPH_BASE is reported whole rather than having
- * its first characters cut off by a blind slice, but a followed nextLink page
- * is reported exactly like a first-page request, so isSitePermissionsPath and
- * the other path matchers in cli.ts recognize a failure on it.
+ * its first characters cut off by a blind slice. This only produces the same
+ * shape of label a first-page request gets; it does not by itself make any
+ * particular matcher in cli.ts recognize that label. isSitePermissionsPath is
+ * the one this listing's own paging can actually reach, and it is widened to
+ * tolerate the query string a followed nextLink carries for exactly that
+ * reason.
  */
 async function graphRequest(
   token: string,

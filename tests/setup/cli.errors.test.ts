@@ -255,6 +255,44 @@ describe("describeSetupFailure", () => {
     expect(message).toContain("Sites.FullControl.All");
   });
 
+  it("recognizes the site-permissions remedy on a followed nextLink page, not just the first page", () => {
+    // listSitePermissions follows @odata.nextLink to page through the
+    // listing, on the same bootstrap token as the first page. GraphRequestError
+    // reports that page's path with the query string intact (adapter.ts slices
+    // only the GRAPH_BASE prefix off), so isSitePermissionsPath has to tolerate
+    // it or a failure here falls through to the generic 403 tail below, which
+    // blames the wrong application entirely.
+    const message = describeSetupFailure(
+      new GraphRequestError({
+        method: "GET",
+        path: "/sites/site-1/permissions?$skiptoken=abc",
+        status: 403,
+        body: '{"error":{"code":"accessDenied"}}',
+      }),
+    );
+
+    expect(message).toContain("This call runs on the bootstrap application's own token");
+    expect(message).not.toContain("Creating the app registration");
+  });
+
+  it("does not tell the operator to sign in again for a 401 on a followed nextLink page", () => {
+    // The precise defect this matcher exists to prevent: a 401 on this
+    // endpoint is never about the signed-in operator, because their token
+    // never reaches it. Falling through to the generic 401 branch here would
+    // send the operator to fix a sign-in that was never involved.
+    const message = describeSetupFailure(
+      new GraphRequestError({
+        method: "GET",
+        path: "/sites/site-1/permissions?$skiptoken=abc",
+        status: 401,
+        body: '{"error":{"code":"InvalidAuthenticationToken"}}',
+      }),
+    );
+
+    expect(message).toContain("The bootstrap application's token was rejected");
+    expect(message).not.toContain("Sign in again.");
+  });
+
   it("does not call a refused application deletion a refused creation", () => {
     // DELETE /applications/{id} is issued by --delete-bootstrap and by every
     // rollback, never by a create step, so the generic 403 branch's "Creating
