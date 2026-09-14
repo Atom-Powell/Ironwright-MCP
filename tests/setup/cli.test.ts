@@ -145,7 +145,14 @@ describe("describeBootstrapSuccess", () => {
 // describe block below, next to describeDeleteServerAppOutcome's planned
 // coverage, since both dry-run renderings make the same claims.
 describe("describeDeleteBootstrapSuccess (deleted branch)", () => {
-  const confirmedPurge = { kind: "deleted", appId: "app-1", objectId: "obj-1", purgeConfirmed: true, purgeRetried: false } as const;
+  const confirmedPurge = {
+    kind: "deleted",
+    appId: "app-1",
+    objectId: "obj-1",
+    applicationDeleted: true,
+    purgeConfirmed: true,
+    purgeRetried: false,
+  } as const;
 
   it("names the application that was deleted", () => {
     const message = describeDeleteBootstrapSuccess(confirmedPurge);
@@ -203,6 +210,7 @@ describe("describeDeleteBootstrapSuccess (deleted branch)", () => {
       kind: "deleted",
       appId: "app-1",
       objectId: "obj-1",
+      applicationDeleted: true,
       purgeConfirmed: false,
       purgeRetried: false,
     });
@@ -213,11 +221,29 @@ describe("describeDeleteBootstrapSuccess (deleted branch)", () => {
     expect(message).not.toMatch(/even after retrying/i);
   });
 
+  it("names the application to check for in deleted items, not just the whole view", () => {
+    // That portal view is tenant-wide and can legitimately hold other
+    // deleted objects, including the sibling mode's own application. "is
+    // empty" would send an operator after the wrong evidence.
+    const message = describeDeleteBootstrapSuccess({
+      kind: "deleted",
+      appId: "app-1",
+      objectId: "obj-1",
+      applicationDeleted: true,
+      purgeConfirmed: false,
+      purgeRetried: false,
+    });
+
+    expect(message).toMatch(/does not list app-1/i);
+    expect(message).not.toMatch(/is empty/i);
+  });
+
   it("names the replication-lag retry only when the ladder actually ran", () => {
     const retried = describeDeleteBootstrapSuccess({
       kind: "deleted",
       appId: "app-1",
       objectId: "obj-1",
+      applicationDeleted: true,
       purgeConfirmed: false,
       purgeRetried: true,
     });
@@ -225,12 +251,38 @@ describe("describeDeleteBootstrapSuccess (deleted branch)", () => {
       kind: "deleted",
       appId: "app-1",
       objectId: "obj-1",
+      applicationDeleted: true,
       purgeConfirmed: false,
       purgeRetried: false,
     });
 
     expect(retried).toMatch(/even after retrying for the directory replication lag/i);
     expect(notRetried).not.toMatch(/even after retrying/i);
+  });
+
+  it("does not claim this run deleted an application that was already gone", () => {
+    // Mirrors describeDeleteServerAppOutcome's own applicationDeleted clause:
+    // a delete-404 is tolerated by runDeleteBootstrap, not thrown, so the
+    // message must not say "Deleted application X" for a run that observed
+    // no such thing, even though the application is in fact gone and the
+    // purge that follows still ran.
+    const message = describeDeleteBootstrapSuccess({
+      kind: "deleted",
+      appId: "app-1",
+      objectId: "obj-1",
+      applicationDeleted: false,
+      purgeConfirmed: true,
+      purgeRetried: false,
+    });
+
+    expect(message).toMatch(/already gone when this run tried to delete it/i);
+    expect(message).toMatch(/this run did not delete it/i);
+    expect(message).not.toMatch(/^Deleted application app-1/);
+    // The standing-permission claim still holds: the application is gone
+    // from the tenant either way, which is what actually ends the
+    // permission, regardless of which run performed the delete.
+    expect(message).toMatch(/Sites\.FullControl\.All/);
+    expect(message).toMatch(/not recoverable/i);
   });
 
   it("tells the operator to remove the now-dead bootstrap credentials from wherever they were stored", () => {
@@ -262,6 +314,15 @@ describe("describeDeleteBootstrapSuccess (planned branch)", () => {
 
     expect(message).toMatch(/purge/i);
     expect(message).toMatch(/30.day/i);
+  });
+
+  it("does not carry a dangling 'then' with nothing before it to chain off of", () => {
+    // "It would then delete..." was lifted from describeDeleteServerAppOutcome's
+    // planned branch, where a revoke clause sits before it. This branch has
+    // nothing preceding it, so the same word dangled.
+    const message = describeDeleteBootstrapSuccess({ kind: "planned", appId: "app-1", objectId: "obj-1" });
+
+    expect(message).not.toMatch(/would then/i);
   });
 });
 
@@ -423,6 +484,7 @@ describe("grant issuer teardown note is confined to the normal run's success bui
       kind: "deleted",
       appId: "app-1",
       objectId: "obj-1",
+      applicationDeleted: true,
       purgeConfirmed: true,
       purgeRetried: false,
     });

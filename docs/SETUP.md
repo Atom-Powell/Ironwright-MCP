@@ -135,21 +135,21 @@ npm run setup -- --tenant=<tenant-id> --delete-bootstrap --confirm
 ```
 
 This takes no `--site`, for the same reason `--create-bootstrap` does not: the grant issuer
-never touches a site itself. It signs you in with a device code, finds the application by the
-display name `--create-bootstrap` used (pass `--name` if you gave it a different one), deletes
-it, then purges it from the tenant's deleted items, which is what actually ends its
-`Sites.FullControl.All` permission rather than merely scheduling its removal; see the purge
-paragraph below. It refuses to run alongside `--create-bootstrap`, and it refuses to guess which
-application to delete if more than one matches that name, rather than removing one of several
-identically named holders of `Sites.FullControl.All`.
+never touches a site itself. Dry run is the default here, the same as every other destructive
+path in this project: omit `--confirm` first to see which application this command found and
+that it would delete and purge it, and pass `--confirm` only once that preview looks right. This
+is a deliberate gate, not the original behavior of this command: purging is irreversible in a way
+a plain delete is not, since recreating a grant issuer under the same name with
+`--create-bootstrap` mints a new object id and a new secret, not the one just purged, so there is
+no undoing a wrong purge the way there is no undoing any other confirmed write in this project.
 
-Dry run is the default here, the same as every other write path in this project: omit `--confirm`
-first to see which application this command found and that it would delete and purge it, and pass
-`--confirm` only once that preview looks right. This is a deliberate gate, not the original
-behavior of this command: purging is irreversible in a way a plain delete is not, since recreating
-a grant issuer under the same name with `--create-bootstrap` mints a new object id and a new
-secret, not the one just purged, so there is no undoing a wrong purge the way there is no undoing
-any other confirmed write in this project.
+It signs you in with a device code, finds the application by the display name `--create-bootstrap`
+used (pass `--name` if you gave it a different one), and, once confirmed, deletes it, then purges
+it from the tenant's deleted items, which is what actually ends its `Sites.FullControl.All`
+permission rather than merely scheduling its removal; see the purge paragraph below. It refuses to
+run alongside `--create-bootstrap`, and it refuses to guess which application to delete if more
+than one matches that name, rather than removing one of several identically named holders of
+`Sites.FullControl.All`.
 
 Unlike the normal run, `--delete-bootstrap` needs no `IW_BOOTSTRAP_CLIENT_ID` or
 `IW_BOOTSTRAP_CLIENT_SECRET`. It acts using only the signed-in device-code session, the same
@@ -203,11 +203,11 @@ immediately after the delete, in the same directory that has not always finished
 delete yet, and Graph answers a purge against an object that has not surfaced in deleted items
 with the same 404 it would return for one that is already gone. This command retries that specific
 404 on a short ladder before giving up, and its own output says plainly whether the purge was
-confirmed, was retried, or could not be confirmed at all; a run that ends without confirming the
-purge is not necessarily a failure, but it does mean checking App registrations, Deleted
-applications in the Entra admin portal before treating the credential as gone. If a confirmed
-purge is not enough, for example ahead of a client security review that wants independent
-verification, check that portal view regardless of what this command reported.
+confirmed or not, and, separately, whether the retry ladder actually ran; a run that ends without
+confirming the purge is not necessarily a failure, but it does mean checking App registrations,
+Deleted applications in the Entra admin portal before treating the credential as gone. If a
+confirmed purge is not enough, for example ahead of a client security review that wants
+independent verification, check that portal view regardless of what this command reported.
 
 Once the grant issuer is deleted, remove `IW_BOOTSTRAP_CLIENT_ID` and `IW_BOOTSTRAP_CLIENT_SECRET`
 from wherever you stored them. Left in place, they name an application that no longer exists,

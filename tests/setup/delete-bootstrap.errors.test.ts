@@ -74,6 +74,71 @@ describe("runDeleteBootstrap delete failure", () => {
   });
 });
 
+// Mirrors delete-server-app.errors.test.ts's own coverage of a 404 from the
+// delete: findApplicationByDisplayName can find an application that is gone
+// by the time deleteApplication actually reaches it, a concurrent teardown
+// or a manual removal in the portal, and this is this command's own founding
+// bug (docs/OPEN-ITEMS.md) in a narrower window if it is reported as a
+// failure instead of tolerated.
+describe("runDeleteBootstrap delete-404", () => {
+  it("does not throw when the delete returns 404", async () => {
+    const graph = fakeGraph({
+      findApplicationByDisplayName: async () => ({ objectId: "obj-1", appId: "app-1" }),
+      deleteApplication: async () => {
+        throw new GraphRequestError({ method: "DELETE", path: "/applications/obj-1", status: 404, body: "{}" });
+      },
+    });
+
+    await expect(
+      runDeleteBootstrap(graph, { displayName: "Ironwright Grant Issuer", confirm: true }),
+    ).resolves.toMatchObject({ kind: "deleted", applicationDeleted: false });
+  });
+
+  it("still purges when the delete returns 404, since the object may already be sitting in deleted items unpurged", async () => {
+    const calls: string[] = [];
+    const graph = fakeGraph({
+      findApplicationByDisplayName: async () => ({ objectId: "obj-1", appId: "app-1" }),
+      deleteApplication: async () => {
+        calls.push("deleteApplication:obj-1");
+        throw new GraphRequestError({ method: "DELETE", path: "/applications/obj-1", status: 404, body: "{}" });
+      },
+      purgeDeletedApplication: async () => {
+        calls.push("purgeDeletedApplication:obj-1");
+      },
+    });
+
+    const outcome = await runDeleteBootstrap(graph, { displayName: "Ironwright Grant Issuer", confirm: true });
+
+    expect(calls).toEqual(["deleteApplication:obj-1", "purgeDeletedApplication:obj-1"]);
+    expect(outcome).toEqual({
+      kind: "deleted",
+      appId: "app-1",
+      objectId: "obj-1",
+      applicationDeleted: false,
+      purgeConfirmed: true,
+      purgeRetried: false,
+    });
+  });
+
+  it("rethrows a delete failure that is not a 404", async () => {
+    const graph = fakeGraph({
+      findApplicationByDisplayName: async () => ({ objectId: "obj-1", appId: "app-1" }),
+      deleteApplication: async () => {
+        throw new GraphRequestError({
+          method: "DELETE",
+          path: "/applications/obj-1",
+          status: 403,
+          body: '{"error":{"code":"Authorization_RequestDenied"}}',
+        });
+      },
+    });
+
+    await expect(
+      runDeleteBootstrap(graph, { displayName: "Ironwright Grant Issuer", confirm: true }),
+    ).rejects.toThrow(GraphRequestError);
+  });
+});
+
 describe("runDeleteBootstrap ambiguous match", () => {
   // findApplicationByDisplayName itself refuses an ambiguous match (see
   // adapter.errors.test.ts); this confirms runDeleteBootstrap does not catch
@@ -119,6 +184,7 @@ describe("runDeleteBootstrap purge failure", () => {
       kind: "deleted",
       appId: "app-1",
       objectId: "obj-1",
+      applicationDeleted: true,
       purgeConfirmed: false,
       purgeRetried: false,
     });
@@ -157,6 +223,7 @@ describe("runDeleteBootstrap purge failure", () => {
       kind: "deleted",
       appId: "app-1",
       objectId: "obj-1",
+      applicationDeleted: true,
       purgeConfirmed: false,
       purgeRetried: true,
     });

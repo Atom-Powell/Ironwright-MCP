@@ -603,6 +603,16 @@ export type DeleteBootstrapOutcome =
       appId: string;
       objectId: string;
       /**
+       * Same meaning as runDeleteServerApp's own applicationDeleted: false
+       * when deleteApplication answered 404, meaning the application was
+       * already gone before this run's delete reached it, most likely a
+       * concurrent teardown or a manual removal in the portal between the
+       * lookup and this call. The outcome the operator asked for is still
+       * true, but this run did not perform the delete and must not report
+       * that it did.
+       */
+      applicationDeleted: boolean;
+      /**
        * Same meaning as runDeleteServerApp's own purgeConfirmed: false when the
        * purge kept answering 404 through the replication-lag retry, which is
        * not proof the object is gone. The grant issuer holds the broader of
@@ -644,6 +654,14 @@ export type DeleteBootstrapOutcome =
  * run is therefore the default here too, matching --delete-server-app: without
  * --confirm this resolves the application and reports what would be removed,
  * issuing no destructive call.
+ *
+ * A delete that answers 404 is tolerated, not thrown, and still falls through
+ * to the purge, mirroring runDeleteServerApp's own applicationDeleted
+ * handling. Stopping at a delete-404 would have reproduced this command's own
+ * founding bug (docs/OPEN-ITEMS.md: an already-absent target reported as a
+ * failure) in a narrower window, and would have skipped the purge on exactly
+ * the run most likely to find an unpurged, still credentialed object already
+ * sitting in deleted items.
  */
 export async function runDeleteBootstrap(
   graph: SetupGraph,
@@ -668,7 +686,22 @@ export async function runDeleteBootstrap(
   }
 
   notice(`Deleting application ${existing.appId} (object id ${existing.objectId}).`);
-  await graph.deleteApplication(existing.objectId);
+  let applicationDeleted = true;
+  try {
+    await graph.deleteApplication(existing.objectId);
+  } catch (error) {
+    if (statusOf(error) !== 404) throw error;
+    // A 404 here is this command's own founding bug in a narrower window: an
+    // already-absent grant issuer must report the finished state, not a
+    // failure, and a concurrent or manual removal between the lookup above
+    // and this call produces the identical situation. Falling through to the
+    // purge below rather than stopping here matters more than the wording
+    // does: a delete-404 is exactly the case where a soft-deleted, still
+    // credentialed grant issuer is most likely already sitting in deleted
+    // items unpurged, which is the state this whole change exists to end.
+    // Mirrors runDeleteServerApp's own applicationDeleted handling above.
+    applicationDeleted = false;
+  }
 
   notice(`Purging application ${existing.objectId} from deleted items.`);
   let purgeConfirmed: boolean;
@@ -698,5 +731,12 @@ export async function runDeleteBootstrap(
     );
   }
 
-  return { kind: "deleted", appId: existing.appId, objectId: existing.objectId, purgeConfirmed, purgeRetried };
+  return {
+    kind: "deleted",
+    appId: existing.appId,
+    objectId: existing.objectId,
+    applicationDeleted,
+    purgeConfirmed,
+    purgeRetried,
+  };
 }

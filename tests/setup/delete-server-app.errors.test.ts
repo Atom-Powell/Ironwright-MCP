@@ -264,7 +264,10 @@ describe("runDeleteServerApp errors", () => {
     expect(message).toMatch(/Deleted application app-1/);
     expect(message).toMatch(/purge returned not found/i);
     expect(message).toMatch(/could not confirm the purge/i);
-    expect(message).toMatch(/Deleted applications is empty/);
+    // "does not list app-1", not "is empty": that portal view is tenant-wide
+    // and can legitimately hold other deleted objects, so the checkable
+    // instruction names this application, not the whole view.
+    expect(message).toMatch(/Deleted applications does not list app-1/);
     expect(message).not.toMatch(/not recoverable/i);
     // This 404 carries no code at all (isDirectoryReplicationLagError is false
     // on the very first attempt), so purgeDeletedApplicationWithRetry gives up

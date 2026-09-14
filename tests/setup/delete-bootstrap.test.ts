@@ -83,6 +83,7 @@ describe("runDeleteBootstrap", () => {
       kind: "deleted",
       appId: "app-1",
       objectId: "obj-1",
+      applicationDeleted: true,
       purgeConfirmed: true,
       // The purge succeeded on its first attempt, so the ladder never slept.
       purgeRetried: false,
