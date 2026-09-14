@@ -24,6 +24,15 @@ import type {
 // for.
 export type * from "./types.js";
 
+// The one exception, and it exists to serve the same rule rather than to bend
+// it. A caller that builds a WorkbookSnapshot has to decide which cells the
+// engine can read before it hands them over, and the only alternative to
+// exporting that test is for the caller to write its own copy of it. The
+// workbook reader did exactly that, and the two copies disagreed in both
+// directions. This export answers one question with one implementation; it
+// computes no part of the compliance answer.
+export { isIsoEffectiveFrom } from "./expected.js";
+
 /**
  * Ordinary code-unit comparison rather than `localeCompare`. Sort order here
  * is part of the report's contract, compared against a golden file and diffed
@@ -224,5 +233,6 @@ export function reconcile(
     orphans,
     emptyFolders: findEmptyFolders(repository),
     clients: rollUpByClient(workbook, artifacts),
+    rejectedWorkbookRows: workbook.rejectedRows,
   };
 }

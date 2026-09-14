@@ -196,7 +196,20 @@ own token exchange still rolls back an otherwise-correct application when it exh
 retries on a propagation error, which is the same destroy-correct-work-over-timing shape that
 was deliberately rejected for the verification path.
 
-## Should one bad workbook row abort the whole reconciliation?
+## CLOSED: one bad workbook row does not abort the whole reconciliation
+
+**CLOSED 2026-09-14 by `8015edf`, "feat: carry rejected workbook rows into the reconciliation
+report", built on the reader's own rejection handling in `6482fa9` and `7b43b46`.** It does not
+abort. An unreadable client cell, or any other row the reader cannot parse, is rejected rather
+than thrown partway through the loop: `WorkbookSnapshot` carries a `rejectedRows` field, and
+`ReconciliationReport` carries a matching `rejectedWorkbookRows` field, both required rather than
+optional so a caller cannot forget to populate them. The engine copies the list through
+unchanged; it never saw the raw row and does not interpret the rejection, only carries it. The
+rest of the workbook still reconciles, and the omission is visible where an operator reads
+results, in the report itself, not only in a log, which is the tension the original entry below
+named as unresolved.
+
+Original entry follows.
 
 Raised 2026-09-13 during the reconciliation engine's second task.
 
@@ -521,6 +534,34 @@ operator.
 Until those numbers exist, this phase's central claim, that delta plus a persisted continuation
 link bounds the Graph request count, is unverified. The numbers belong in this file when they
 exist, not before.
+
+## Phase 2b-1: covered only by fakes, 2026-09-14
+
+Phase 2b-1, the workbook snapshot, has not been run against a real tenant. No Excel call has been
+made by this code, against a real workbook or otherwise. Everything below is verified against
+fake Graph transports, and nothing more should be read into it than that.
+
+**What is covered.** The Excel session layer in `src/graph/excel.ts`: opening a non-persistent
+session, reading a table's range or a worksheet's used range, closing the session, retrying once
+on a fresh session when a read 404s as an expired session, and propagating a second failure
+without letting a failed close mask the read that already succeeded. The workbook reader in
+`src/workbook/read.ts`: turning a grid of cells into records and rejections, rejecting rather
+than skipping an unreadable client cell, and the missing-header message. `readWorkbookSnapshot`
+in `src/scan/workbook.ts`, the composition root that resolves a drive and calls the range and
+grid readers to produce a `WorkbookSnapshot`. All of it against fakes, all of it green, none of
+it against a real Excel workbook or Microsoft Graph.
+
+**Why the live run has not happened.** No session in this implementing session could open a real
+Excel workbook through Graph; the fakes exist because a live workbook was never available to
+read against. The live verification this phase needs is a synthetic tracking workbook, placed in
+the site by hand alongside the synthetic library the phase 2a seeder builds, with a table whose
+headers match the example profile's workbook mapping. Reading that table through a real,
+non-persistent Excel session is the first thing that would check the session layer's retry and
+close behavior against Graph's actual responses rather than a fake's.
+
+Until that run happens, this phase's session-layer behavior, its rejection handling, and the
+snapshot assembly are known from reading the code and from tests against fakes only. None of it
+has been proven by use.
 
 ## Neither teardown mode can recover from its own partial purge failure
 

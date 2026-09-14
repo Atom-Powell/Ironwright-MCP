@@ -224,5 +224,6 @@
       },
       "compliant": true
     }
-  ]
+  ],
+  "rejectedWorkbookRows": []
 }

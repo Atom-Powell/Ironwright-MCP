@@ -21,7 +21,8 @@ function isRetriableTransportError(error: unknown): boolean {
 export const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 
 export interface GraphClient {
-  get<T>(pathOrUrl: string): Promise<T>;
+  get<T>(pathOrUrl: string, headers?: Record<string, string>): Promise<T>;
+  post<T>(pathOrUrl: string, body?: unknown, headers?: Record<string, string>): Promise<T>;
   /** Requests issued since creation, retries included. This is the number the scan reports. */
   requests(): number;
 }
@@ -38,19 +39,52 @@ interface RawResponse {
   body: string;
 }
 
+interface RequestOptions {
+  method: "GET" | "POST";
+  body?: unknown;
+  headers?: Record<string, string>;
+  /**
+   * A transport rejection means the request may or may not have reached the
+   * server. Replaying a GET costs a duplicate read; replaying a POST can apply
+   * a second mutation. So the thrown-error retry is offered to reads only, and
+   * a POST that rejects surfaces immediately. Returned statuses are different:
+   * a 429 or a 503 is the server declining to act, so both methods retry those.
+   */
+  retryTransportErrors: boolean;
+}
+
 export function createGraphClient(options: GraphClientOptions): GraphClient {
   const fetchImpl = options.fetchImpl ?? fetch;
   const retry = options.retry ?? defaultRetryPolicy();
   let requests = 0;
 
-  async function send(url: string): Promise<RawResponse> {
+  async function send(url: string, requestOptions: RequestOptions): Promise<RawResponse> {
     // Fetched per attempt rather than per call: a retry that spans a token's
     // expiry would otherwise replay a dead bearer and turn a throttle into a 401.
     const token = await options.tokenProvider.getToken();
     requests += 1;
+    const hasBody = requestOptions.body !== undefined;
+    // Per-call headers are spread first and the always-set ones overwrite them,
+    // because object spread gives the later key precedence. A caller passing
+    // `authorization` therefore cannot strip the bearer token, which would fail
+    // as a 401 naming no cause and would look like an expired credential rather
+    // than a wrong argument. The cost is deliberate: a caller that genuinely
+    // needs a different `accept`, or a different `content-type` on a request
+    // that carries a body, changes this function, where the change is reviewed,
+    // instead of passing a header that quietly wins. A `content-type` sent on a
+    // bodyless request survives, because there is none set here to take
+    // precedence over it, and one on a request Graph will read no body from
+    // changes nothing.
+    const headers: Record<string, string> = {
+      ...requestOptions.headers,
+      authorization: `Bearer ${token}`,
+      accept: "application/json",
+      ...(hasBody ? { "content-type": "application/json" } : {}),
+    };
     const response = await fetchImpl(url, {
-      method: "GET",
-      headers: { authorization: `Bearer ${token}`, accept: "application/json" },
+      method: requestOptions.method,
+      headers,
+      ...(hasBody ? { body: JSON.stringify(requestOptions.body) } : {}),
     });
     return {
       status: response.status,
@@ -59,37 +93,50 @@ export function createGraphClient(options: GraphClientOptions): GraphClient {
     };
   }
 
+  async function request<T>(pathOrUrl: string, requestOptions: RequestOptions): Promise<T> {
+    const url = pathOrUrl.startsWith("https://") ? pathOrUrl : `${GRAPH_BASE}${pathOrUrl}`;
+    // Sliced only when the prefix is genuinely there. A blind slice of the
+    // base's length turns an absolute URL from anywhere else into a fragment
+    // that names no request, and that fragment is what the operator reads.
+    const label = url.startsWith(GRAPH_BASE) ? url.slice(GRAPH_BASE.length) : url;
+
+    const result = await withRetry(
+      retry,
+      () => send(url, requestOptions),
+      (value) => ({ retriable: isRetriableStatus(value.status), retryAfter: value.retryAfter }),
+      requestOptions.retryTransportErrors ? isRetriableTransportError : () => false,
+    );
+
+    if (result.status < 200 || result.status >= 300) {
+      throw new GraphRequestError({ method: requestOptions.method, path: label, status: result.status, body: result.body });
+    }
+
+    if (result.body.length === 0) return undefined as T;
+
+    try {
+      return JSON.parse(result.body) as T;
+    } catch {
+      throw new Error(
+        `Graph ${requestOptions.method} ${label} returned ${result.status} with a body that is not JSON. ` +
+          "Something other than Graph answered this request, most often a proxy.",
+      );
+    }
+  }
+
   return {
     requests: () => requests,
 
-    async get<T>(pathOrUrl: string): Promise<T> {
-      const url = pathOrUrl.startsWith("https://") ? pathOrUrl : `${GRAPH_BASE}${pathOrUrl}`;
-      // Sliced only when the prefix is genuinely there. A blind slice of the
-      // base's length turns an absolute URL from anywhere else into a fragment
-      // that names no request, and that fragment is what the operator reads.
-      const label = url.startsWith(GRAPH_BASE) ? url.slice(GRAPH_BASE.length) : url;
+    async get<T>(pathOrUrl: string, headers?: Record<string, string>): Promise<T> {
+      return request<T>(pathOrUrl, { method: "GET", retryTransportErrors: true, ...(headers === undefined ? {} : { headers }) });
+    },
 
-      const result = await withRetry(
-        retry,
-        () => send(url),
-        (value) => ({ retriable: isRetriableStatus(value.status), retryAfter: value.retryAfter }),
-        isRetriableTransportError,
-      );
-
-      if (result.status < 200 || result.status >= 300) {
-        throw new GraphRequestError({ method: "GET", path: label, status: result.status, body: result.body });
-      }
-
-      if (result.body.length === 0) return undefined as T;
-
-      try {
-        return JSON.parse(result.body) as T;
-      } catch {
-        throw new Error(
-          `Graph GET ${label} returned ${result.status} with a body that is not JSON. ` +
-            "Something other than Graph answered this request, most often a proxy.",
-        );
-      }
+    async post<T>(pathOrUrl: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
+      return request<T>(pathOrUrl, {
+        method: "POST",
+        retryTransportErrors: false,
+        ...(body === undefined ? {} : { body }),
+        ...(headers === undefined ? {} : { headers }),
+      });
     },
   };
 }

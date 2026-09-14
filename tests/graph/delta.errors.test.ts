@@ -4,7 +4,11 @@ import type { GraphClient } from "../../src/graph/client.js";
 import { GraphRequestError } from "../../src/graph/errors.js";
 
 function throwingClient(error: unknown): GraphClient {
-  return { requests: () => 1, get: async () => { throw error; } };
+  return {
+    requests: () => 1,
+    get: async () => { throw error; },
+    post: async () => { throw error; },
+  };
 }
 
 const RESYNC = new GraphRequestError({
@@ -26,7 +30,11 @@ describe("deltaPages failures", () => {
   });
 
   it("refuses a page carrying neither a nextLink nor a deltaLink, rather than looping or stopping silently", async () => {
-    const client: GraphClient = { requests: () => 1, get: async () => ({ value: [] }) as never };
+    const client: GraphClient = {
+      requests: () => 1,
+      get: async () => ({ value: [] }) as never,
+      post: async () => { throw new Error("this fake does not implement post"); },
+    };
     const iterator = deltaPages(client, "d1");
     await expect(iterator.next()).rejects.toThrow(/neither @odata.nextLink nor @odata.deltaLink/);
   });

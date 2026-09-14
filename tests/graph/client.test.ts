@@ -54,4 +54,58 @@ describe("createGraphClient", () => {
 
     expect(client.requests()).toBe(2);
   });
+
+  it("sends a POST with a JSON body and the bearer token", async () => {
+    const seen: Request[] = [];
+    const client = createGraphClient({
+      tokenProvider: TOKEN,
+      fetchImpl: (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+        seen.push(new Request(input as string, init));
+        return new Response(JSON.stringify({ id: "session-1" }), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    const value = await client.post<{ id: string }>("/drives/d1/items/i1/workbook/createSession", {
+      persistChanges: false,
+    });
+
+    expect(value.id).toBe("session-1");
+    expect(seen[0]?.method).toBe("POST");
+    expect(seen[0]?.headers.get("authorization")).toBe("Bearer token-1");
+    expect(seen[0]?.headers.get("content-type")).toBe("application/json");
+    await expect(seen[0]?.text()).resolves.toBe(JSON.stringify({ persistChanges: false }));
+  });
+
+  it("sends per-call headers alongside the ones it always sets", async () => {
+    const seen: Request[] = [];
+    const client = createGraphClient({
+      tokenProvider: TOKEN,
+      fetchImpl: (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+        seen.push(new Request(input as string, init));
+        return new Response("{}", { status: 200 });
+      }) as typeof fetch,
+    });
+
+    await client.get("/drives/d1/items/i1/workbook/tables/T/range", { "workbook-session-id": "s-1" });
+
+    expect(seen[0]?.headers.get("workbook-session-id")).toBe("s-1");
+    expect(seen[0]?.headers.get("authorization")).toBe("Bearer token-1");
+  });
+
+  it("omits a body and its content type when a POST has none", async () => {
+    const seen: Request[] = [];
+    const client = createGraphClient({
+      tokenProvider: TOKEN,
+      fetchImpl: (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+        seen.push(new Request(input as string, init));
+        // A 204 is a null-body status: the Fetch spec throws a TypeError if the
+        // Response constructor is given a non-null body (even "") alongside it.
+        return new Response(null, { status: 204 });
+      }) as typeof fetch,
+    });
+
+    await client.post("/drives/d1/items/i1/workbook/closeSession", undefined, { "workbook-session-id": "s-1" });
+
+    expect(seen[0]?.headers.get("content-type")).toBeNull();
+  });
 });

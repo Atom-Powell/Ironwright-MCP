@@ -81,6 +81,7 @@ function buildWorkbook(): WorkbookSnapshot {
   return {
     rows: [row("CLIENTB", "Yes", "No"), row("CLIENTC", "No", "No"), row("CLIENTA", "Yes", "Yes")],
     source: "/Trackers/Tracker.xlsx#ClientRoster",
+    rejectedRows: [],
   };
 }
 
@@ -278,6 +279,7 @@ describe("reconcile: the assembled report", () => {
         },
         { client: "CLIENTC", counts: { ...EMPTY_COUNTS }, compliant: true },
       ],
+      rejectedWorkbookRows: [],
     });
   });
 
@@ -301,6 +303,22 @@ describe("reconcile: the assembled report", () => {
     const report = reconcile(profile, workbook, buildRepository({ searchCrossCheckIncluded: false }), asOf);
 
     expect(report.provenance.searchCrossCheckIncluded).toBe(false);
+  });
+});
+
+describe("reconcile: rejected workbook rows", () => {
+  it("carries the workbook's rejected rows into the report, so an omission is visible where results are read", () => {
+    const workbookWithRejections: WorkbookSnapshot = {
+      rows: [row("CLIENTA", "Yes", "No")],
+      source: workbook.source,
+      rejectedRows: [{ row: 7, client: "CLIENTB", reason: 'effectiveFrom was not a date: "15/08/2026"' }],
+    };
+
+    const report = reconcile(profile, workbookWithRejections, buildRepository(), asOf);
+
+    expect(report.rejectedWorkbookRows).toEqual([
+      { row: 7, client: "CLIENTB", reason: 'effectiveFrom was not a date: "15/08/2026"' },
+    ]);
   });
 });
 
@@ -409,7 +427,11 @@ describe("reconcile: the per-client rollup", () => {
   });
 
   it("marks a client compliant only when every one of its artifacts is compliant", () => {
-    const compliantOnly: WorkbookSnapshot = { rows: [row("CLIENTA", "Yes", "No")], source: workbook.source };
+    const compliantOnly: WorkbookSnapshot = {
+      rows: [row("CLIENTA", "Yes", "No")],
+      source: workbook.source,
+      rejectedRows: [],
+    };
     const files = [
       repoFile("2026/CLIENTA/04-April/2026-04_CLIENTA_Training.xlsx", "2026-05-02T00:00:00Z", "etag-a04"),
       repoFile("2026/CLIENTA/05-May/2026-05_CLIENTA_Training.xlsx", "2026-06-02T00:00:00Z", "etag-a05"),
@@ -437,7 +459,11 @@ describe("reconcile: the per-client rollup", () => {
     // exactly one artifact and the flag can only be reading that artifact.
     function reportForSingleFile(files: RepositoryFile[]): ReturnType<typeof reconcile> {
       const oneMonth: Profile = { ...buildProfile(), window: { mode: "rolling", months: 1, respectEffectiveFrom: false } };
-      const oneClient: WorkbookSnapshot = { rows: [row("CLIENTA", "Yes", "No")], source: workbook.source };
+      const oneClient: WorkbookSnapshot = {
+        rows: [row("CLIENTA", "Yes", "No")],
+        source: workbook.source,
+        rejectedRows: [],
+      };
 
       return reconcile(oneMonth, oneClient, buildRepository({ files, folderPaths: [] }), asOf);
     }

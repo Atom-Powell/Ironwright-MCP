@@ -38,6 +38,7 @@ function buildWorkbook(effectiveFrom: string): WorkbookSnapshot {
   return {
     rows: [{ client: "CLIENTX", fields: { monthlyTraining: "Yes" }, effectiveFrom }],
     source: "test-fixture",
+    rejectedRows: [],
   };
 }
 

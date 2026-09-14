@@ -53,7 +53,7 @@ function row(client: string): ClientRecord {
 }
 
 function workbookOf(...rows: ClientRecord[]): WorkbookSnapshot {
-  return { rows, source: "/Trackers/Tracker.xlsx#ClientRoster" };
+  return { rows, source: "/Trackers/Tracker.xlsx#ClientRoster", rejectedRows: [] };
 }
 
 const emptyRepository: RepositorySnapshot = {

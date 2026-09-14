@@ -48,6 +48,7 @@ function buildProfile(): Profile {
 const workbook: WorkbookSnapshot = {
   rows: [{ client: "CLIENTA", fields: { monthlySafety: "Yes" } }],
   source: "/Trackers/Tracker.xlsx#ClientRoster",
+  rejectedRows: [],
 };
 
 const repository: RepositorySnapshot = {

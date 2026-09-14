@@ -501,11 +501,13 @@ export async function executeSeed(
 
 // ---------------------------------------------------------------------------
 // The Graph client this script needs, beyond what src/graph/client.ts's
-// createGraphClient offers: that client only ever GETs. Folder and file
-// creation are POST and PUT, so this is a small, separate client rather than
-// an extension of that one, sharing its token provider and its GRAPH_BASE
-// constant, and its own request counter so the dry-run estimate and the
-// executed count are comparing the same kind of number.
+// createGraphClient offers: that client has no PUT, and it sends every body as
+// JSON. Creating a folder is a POST it could make, but uploading a file is a
+// PUT carrying the file's own bytes and content type, so this is a small,
+// separate client rather than an extension of that one, sharing its token
+// provider and its GRAPH_BASE constant, and its own request counter so the
+// dry-run estimate and the executed count are comparing the same kind of
+// number.
 // ---------------------------------------------------------------------------
 
 const PLACEHOLDER_FILE_CONTENT =
@@ -572,7 +574,15 @@ export function createSeedGraphClient(options: {
     // relative path: unlike a scan, this script never follows an
     // @odata.nextLink or a deltaLink, so unlike src/graph/client.ts's own
     // get, there is no absolute-URL branch to carry here.
-    async get<T>(path: string): Promise<T> {
+    //
+    // `_headers` is accepted and dropped, and named rather than omitted so the
+    // omission is visible at the signature. GraphClient's get takes per-call
+    // headers, and handing this client to readWorkbookRange would silently
+    // strip every workbook-session-id: Graph answers those calls anyway, in
+    // non-session mode, so the read would succeed while the session it was
+    // supposed to run inside did nothing. Nothing passes headers today. Send
+    // them through send() before anything does.
+    async get<T>(path: string, _headers?: Record<string, string>): Promise<T> {
       const response = await send(path, "GET");
       if (response.status < 200 || response.status >= 300) {
         throw new GraphRequestError({ method: "GET", path, status: response.status, body: response.body });
@@ -583,6 +593,32 @@ export function createSeedGraphClient(options: {
       } catch {
         throw new Error(
           `Graph GET ${path} returned ${response.status} with a body that is not JSON. Something other than ` +
+            "Graph answered this request.",
+        );
+      }
+    },
+
+    // Not called by executeSeed today -- folder and file creation both go
+    // through send() directly below, not through this generic entry point.
+    // Implemented for real, rather than stubbed, because SeedGraphClient
+    // extends GraphClient and a stub that throws would be a client claiming a
+    // capability it silently refuses; the pattern matches get's above,
+    // including the dropped `_headers` and the reason it is named.
+    async post<T>(path: string, body?: unknown, _headers?: Record<string, string>): Promise<T> {
+      const response = await send(
+        path,
+        "POST",
+        body === undefined ? undefined : { text: JSON.stringify(body), contentType: "application/json" },
+      );
+      if (response.status < 200 || response.status >= 300) {
+        throw new GraphRequestError({ method: "POST", path, status: response.status, body: response.body });
+      }
+      if (response.body.length === 0) return undefined as T;
+      try {
+        return JSON.parse(response.body) as T;
+      } catch {
+        throw new Error(
+          `Graph POST ${path} returned ${response.status} with a body that is not JSON. Something other than ` +
             "Graph answered this request.",
         );
       }
