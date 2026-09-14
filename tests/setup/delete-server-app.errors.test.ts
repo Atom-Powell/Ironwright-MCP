@@ -105,6 +105,27 @@ describe("runDeleteServerApp errors", () => {
     expect(calls).not.toContain("purgeDeletedApplication:obj-1");
   });
 
+  it("without a grant issuer, says whether the grant still exists was not checked rather than asserting it holds one", async () => {
+    // This branch is reached only when the listing never ran, so it cannot
+    // know whether a grant exists. Pins the corrected wording and the absence
+    // of the earlier, unobserved claim.
+    const { graph } = fakeGraph({
+      app: { objectId: "obj-1", appId: "app-1" },
+      permissions: [{ permissionId: "perm-1", appIds: ["app-1"] }],
+    });
+
+    const failure = runDeleteServerApp(graph, {
+      siteUrl: "https://contoso.sharepoint.com/sites/Example",
+      displayName: "Ironwright Repository Reconciliation",
+      confirm: true,
+      forceOrphan: false,
+      hasGrantIssuer: false,
+    });
+
+    await expect(failure).rejects.toThrow(/was not checked/i);
+    await expect(failure).rejects.not.toThrow(/still holds its grant/i);
+  });
+
   it("with --force-orphan, deletes and purges without a grant issuer and reports the residue", async () => {
     const { graph, calls } = fakeGraph({
       app: { objectId: "obj-1", appId: "app-1" },

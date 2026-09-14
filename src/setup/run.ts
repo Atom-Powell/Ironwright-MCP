@@ -430,11 +430,15 @@ export async function runDeleteServerApp(
     const permissions = await graph.listSitePermissions(siteId);
     permissionId = permissions.find((entry) => entry.appIds.includes(existing.appId))?.permissionId;
   } else if (!args.forceOrphan) {
+    // Reached only when no grant issuer is configured, which is exactly when
+    // the listing above did not run. So this branch cannot know whether a grant
+    // exists, and saying it does would assert something nobody looked for.
     throw new Error(
-      `Revoking the site permission needs a grant issuer's app-only token, and none was configured, so nothing ` +
-        `was touched: application ${existing.appId} still exists and still holds its grant on ${args.siteUrl}. ` +
+      `Revoking a site permission needs a grant issuer's app-only token, and none was configured, so nothing ` +
+        `was touched: application ${existing.appId} still exists, and whether it still holds a permission on ` +
+        `${args.siteUrl} was not checked, because checking needs the grant issuer this run does not have. ` +
         "Create one with --create-bootstrap and re-run, or pass --force-orphan to delete and purge the " +
-        "application anyway and leave the permission entry behind.",
+        "application anyway and leave any permission entry behind.",
     );
   }
 
