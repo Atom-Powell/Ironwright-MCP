@@ -27,6 +27,11 @@ export async function readWorkbookSnapshot(client: GraphClient, profile: Profile
   return {
     rows: result.rows,
     rejectedRows: result.rejectedRows,
-    source: `${profile.identity.workbookPath} in ${profile.identity.library}`,
+    // "path#range in library", the convention the engine's golden fixture
+    // already uses. The range is the half that settles an argument: a report
+    // that disagrees with the workbook is most often a mapping pointed at the
+    // wrong table, and a provenance line naming only the file cannot tell that
+    // apart from a file that is genuinely wrong.
+    source: `${profile.identity.workbookPath}#${profile.workbookMapping.source.name} in ${profile.identity.library}`,
   };
 }

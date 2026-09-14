@@ -115,6 +115,53 @@ describe("readWorkbookRange failures", () => {
     expect(closeCalls[0]).toContain(":s-1");
   });
 
+  /**
+   * The three shapes a range read can come back in that are not a grid. Each
+   * one used to travel: an empty body became a bare TypeError with no mention
+   * of the request, and a non-array `values` reached the workbook reader and
+   * came back out as "the range came back empty", which describes the workbook
+   * rather than the response that was actually received.
+   */
+  function clientReturning(body: unknown): GraphClient {
+    let requests = 0;
+    return {
+      requests: () => requests,
+      get: async <T,>(): Promise<T> => {
+        requests += 1;
+        return body as T;
+      },
+      post: async <T,>(path: string): Promise<T> => {
+        requests += 1;
+        if (path === CREATE_PATH) return { id: "s-1" } as T;
+        if (path === CLOSE_PATH) return undefined as T;
+        throw new Error(`unexpected post ${path}`);
+      },
+    };
+  }
+
+  const READ_ARGS = {
+    driveId: "d1",
+    workbookPath: "/Trackers/Tracker.xlsx",
+    source: { kind: "table", name: "ClientRoster" },
+  } as const;
+
+  it("refuses an empty response body rather than dereferencing through it", async () => {
+    await expect(readWorkbookRange(clientReturning(undefined), READ_ARGS)).rejects.toThrow(/empty body/);
+  });
+
+  it("refuses a response with no values field, and says so", async () => {
+    await expect(readWorkbookRange(clientReturning({ address: "Sheet1!A1:D9" }), READ_ARGS)).rejects.toThrow(
+      /no values field/,
+    );
+  });
+
+  it("refuses a values field that is not an array, rather than calling the range empty", async () => {
+    const call = readWorkbookRange(clientReturning({ values: "A1:D9" }), READ_ARGS);
+
+    await expect(call).rejects.toThrow(/not an array/);
+    await expect(call).rejects.toThrow(/"A1:D9"/);
+  });
+
   it("does not fail the read when closing the session fails", async () => {
     const calls: string[] = [];
 

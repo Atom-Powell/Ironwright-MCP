@@ -112,6 +112,57 @@ describe("readWorkbookRange", () => {
     expect(closeCall).toContain(":s-1");
   });
 
+  it("encodes a table name that would otherwise truncate the URL", async () => {
+    // The same hazard paths.test.ts pins for driveItemPath: a "#" starts a
+    // fragment and a "?" starts a query string, so an unencoded name addresses
+    // a shorter URL than the one intended and Graph answers about something
+    // else. Every other name in these tests is alphanumeric, where the encoded
+    // and unencoded forms are identical and the encoding proves nothing.
+    const calls: string[] = [];
+    const encoded = "/drives/d1/root:/Trackers/Tracker.xlsx:/workbook/tables/Q1%20%232%3Fdraft/range";
+    const client = fakeClient(calls, {
+      post: {
+        "/drives/d1/root:/Trackers/Tracker.xlsx:/workbook/createSession": { id: "s-1" },
+        "/drives/d1/root:/Trackers/Tracker.xlsx:/workbook/closeSession": undefined,
+      },
+      get: { [encoded]: { values: [["Client"]] } },
+    });
+
+    const values = await readWorkbookRange(client, {
+      driveId: "d1",
+      workbookPath: "/Trackers/Tracker.xlsx",
+      source: { kind: "table", name: "Q1 #2?draft" },
+    });
+
+    expect(values).toEqual([["Client"]]);
+    const readCall = calls.find((call) => call.startsWith("get:"));
+    expect(readCall).toBeDefined();
+    expect(readCall).toContain(encoded);
+  });
+
+  it("encodes a worksheet name that would otherwise truncate the URL", async () => {
+    const calls: string[] = [];
+    const encoded = "/drives/d1/root:/Trackers/Tracker.xlsx:/workbook/worksheets/Q1%20%232%3Fdraft/usedRange";
+    const client = fakeClient(calls, {
+      post: {
+        "/drives/d1/root:/Trackers/Tracker.xlsx:/workbook/createSession": { id: "s-1" },
+        "/drives/d1/root:/Trackers/Tracker.xlsx:/workbook/closeSession": undefined,
+      },
+      get: { [encoded]: { values: [["A1"]] } },
+    });
+
+    const values = await readWorkbookRange(client, {
+      driveId: "d1",
+      workbookPath: "/Trackers/Tracker.xlsx",
+      source: { kind: "worksheet", name: "Q1 #2?draft" },
+    });
+
+    expect(values).toEqual([["A1"]]);
+    const readCall = calls.find((call) => call.startsWith("get:"));
+    expect(readCall).toBeDefined();
+    expect(readCall).toContain(encoded);
+  });
+
   it("reads a worksheet's used range when the mapping names a worksheet", async () => {
     const calls: string[] = [];
     const client = fakeClient(calls, {

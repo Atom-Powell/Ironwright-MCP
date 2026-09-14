@@ -40,7 +40,7 @@ function scriptedClient(responses: Record<string, unknown>): GraphClient {
 }
 
 describe("readWorkbookSnapshot", () => {
-  it("resolves the drive, reads the range, and assembles a snapshot whose source names the workbook", async () => {
+  it("resolves the drive, reads the range, and assembles a snapshot whose source names the range", async () => {
     const client = scriptedClient({
       [SITE]: { id: "site-1" },
       [DRIVES]: { value: [{ id: "drive-1", name: "Compliance Reports" }] },
@@ -51,7 +51,12 @@ describe("readWorkbookSnapshot", () => {
 
     const snapshot = await readWorkbookSnapshot(client, PROFILE);
 
-    expect(snapshot.source).toContain("Operational Tracking Workbook.xlsx");
+    // Which table was read is the fact that separates "the mapping points at
+    // the wrong range" from "the workbook is wrong", so the provenance carries
+    // it alongside the file and the library.
+    expect(snapshot.source).toBe(
+      "/Trackers/Operational Tracking Workbook.xlsx#ClientRoster in Compliance Reports",
+    );
     expect(snapshot.rows).toHaveLength(1);
     expect(snapshot.rejectedRows).toEqual([]);
   });
