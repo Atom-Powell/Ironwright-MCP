@@ -10,6 +10,7 @@ function fakeClient(responses: Record<string, unknown>, seen: string[] = []): Gr
       if (!(path in responses)) throw new Error(`unexpected path ${path}`);
       return responses[path] as T;
     },
+    post: async <T,>(): Promise<T> => { throw new Error("this fake does not implement post"); },
   };
 }
 

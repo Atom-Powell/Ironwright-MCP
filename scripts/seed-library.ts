@@ -588,6 +588,31 @@ export function createSeedGraphClient(options: {
       }
     },
 
+    // Not called by executeSeed today -- folder and file creation both go
+    // through send() directly below, not through this generic entry point.
+    // Implemented for real, rather than stubbed, because SeedGraphClient
+    // extends GraphClient and a stub that throws would be a client claiming a
+    // capability it silently refuses; the pattern matches get's above.
+    async post<T>(path: string, body?: unknown): Promise<T> {
+      const response = await send(
+        path,
+        "POST",
+        body === undefined ? undefined : { text: JSON.stringify(body), contentType: "application/json" },
+      );
+      if (response.status < 200 || response.status >= 300) {
+        throw new GraphRequestError({ method: "POST", path, status: response.status, body: response.body });
+      }
+      if (response.body.length === 0) return undefined as T;
+      try {
+        return JSON.parse(response.body) as T;
+      } catch {
+        throw new Error(
+          `Graph POST ${path} returned ${response.status} with a body that is not JSON. Something other than ` +
+            "Graph answered this request.",
+        );
+      }
+    },
+
     async createFolder(driveId, parentPath, name) {
       const path = `${driveItemPath(driveId, parentPath)}/children`;
       const response = await send(path, "POST", {

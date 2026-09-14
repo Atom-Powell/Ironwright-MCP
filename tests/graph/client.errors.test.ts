@@ -116,4 +116,59 @@ describe("createGraphClient failures", () => {
     await expect(client.get("/drives/d1")).rejects.toThrow(TokenRequestError);
     expect(fetchCalls).toBe(0);
   });
+
+  it("names the method in a failed POST, not GET", async () => {
+    const client = createGraphClient({
+      tokenProvider: TOKEN,
+      fetchImpl: (async () => new Response(JSON.stringify({ error: { code: "itemNotFound" } }), { status: 404 })) as typeof fetch,
+    });
+
+    await expect(client.post("/drives/d1/items/i1/workbook/createSession", {})).rejects.toMatchObject({
+      name: "GraphRequestError",
+      method: "POST",
+      status: 404,
+    });
+  });
+
+  it("does not retry a POST that rejects at the transport, because it may have reached the server", async () => {
+    let attempts = 0;
+    const client = createGraphClient({
+      tokenProvider: TOKEN,
+      retry: defaultRetryPolicy({ maxAttempts: 4, sleep: async () => {}, now: () => 0 }),
+      fetchImpl: (async () => {
+        attempts += 1;
+        throw new TypeError("fetch failed");
+      }) as typeof fetch,
+    });
+
+    await expect(client.post("/drives/d1/items/i1/workbook/createSession", {})).rejects.toThrow(/fetch failed/);
+    expect(attempts).toBe(1);
+  });
+
+  it("names the method in the non-JSON refusal, which currently hard-codes GET", async () => {
+    const client = createGraphClient({
+      tokenProvider: TOKEN,
+      fetchImpl: (async () => new Response("<html>proxy</html>", { status: 200 })) as typeof fetch,
+    });
+
+    await expect(client.post("/drives/d1/items/i1/workbook/createSession", {})).rejects.toThrow(/Graph POST/);
+  });
+
+  it("still retries a POST that returns a retriable status", async () => {
+    const statuses = [429, 200];
+    let call = 0;
+    const client = createGraphClient({
+      tokenProvider: TOKEN,
+      retry: defaultRetryPolicy({ sleep: async () => {}, now: () => 0 }),
+      fetchImpl: (async () => {
+        const status = statuses[call] ?? 200;
+        call += 1;
+        return new Response("{}", { status, headers: status === 429 ? { "retry-after": "0" } : {} });
+      }) as typeof fetch,
+    });
+
+    await client.post("/drives/d1/items/i1/workbook/createSession", {});
+
+    expect(client.requests()).toBe(2);
+  });
 });

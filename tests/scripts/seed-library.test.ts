@@ -236,6 +236,7 @@ function fakeSeedClient(driveName: string): { client: SeedGraphClient; calls: st
       calls.push(`FILE:${parentPath}/${name}`);
       return { status: 201 };
     },
+    post: async () => { throw new Error("this fake does not implement post"); },
   };
   return { client, calls };
 }

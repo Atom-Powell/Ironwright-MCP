@@ -62,6 +62,7 @@ describe("runScan when the stored deltaLink is rejected", () => {
           "@odata.deltaLink": "https://graph.microsoft.com/v1.0/after-resync",
         } as T;
       },
+      post: async <T,>(): Promise<T> => { throw new Error("this fake does not implement post"); },
     };
 
     const result = await runScan({ client, store, profile: PROFILE, now: NOW });
@@ -87,6 +88,7 @@ describe("runScan when a page fails partway", () => {
         }
         throw new GraphRequestError({ method: "GET", path, status: 503, body: "unavailable" });
       },
+      post: async <T,>(): Promise<T> => { throw new Error("this fake does not implement post"); },
     };
 
     await expect(runScan({ client, store, profile: PROFILE, now: NOW })).rejects.toThrow(GraphRequestError);
@@ -153,6 +155,7 @@ describe("runScan when a resync discards a partially applied first attempt", () 
         }
         throw new Error(`unexpected path ${path}`);
       },
+      post: async <T,>(): Promise<T> => { throw new Error("this fake does not implement post"); },
     };
 
     const result = await runScan({ client, store, profile: PROFILE, now: NOW });

@@ -6,6 +6,7 @@ function fakeClient(responses: Record<string, unknown>): GraphClient {
   return {
     requests: () => 0,
     get: async <T,>(path: string): Promise<T> => responses[path] as T,
+    post: async <T,>(): Promise<T> => { throw new Error("this fake does not implement post"); },
   };
 }
 
