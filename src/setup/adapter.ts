@@ -1,3 +1,4 @@
+import { GRAPH_BASE } from "../graph/client.js";
 import { GraphRequestError } from "../graph/errors.js";
 import { appRolesFromAccessToken } from "./steps.js";
 import type {
@@ -34,8 +35,6 @@ export interface SetupGraph {
   purgeDeletedApplication(objectId: string): Promise<void>;
 }
 
-const GRAPH = "https://graph.microsoft.com/v1.0";
-
 interface GraphResponse {
   method: string;
   path: string;
@@ -44,10 +43,14 @@ interface GraphResponse {
 }
 
 /**
- * `path` is a Graph-relative path, or an absolute Graph URL when it came from
- * an `@odata.nextLink`, which Graph returns fully qualified. The path is still
- * what a GraphRequestError reports, so an operator reading a failed page sees
- * the same shape of label either way.
+ * `path` may be a Graph-relative path, or an absolute Graph URL when it came
+ * from an `@odata.nextLink`, which Graph returns fully qualified. Either way,
+ * what a GraphRequestError reports is a relative label, sliced from
+ * GRAPH_BASE the same way src/graph/client.ts's own `get` does: an absolute
+ * URL that does not start with GRAPH_BASE is reported whole rather than having
+ * its first characters cut off by a blind slice, but a followed nextLink page
+ * is reported exactly like a first-page request, so isSitePermissionsPath and
+ * the other path matchers in cli.ts recognize a failure on it.
  */
 async function graphRequest(
   token: string,
@@ -55,7 +58,10 @@ async function graphRequest(
   path: string,
   body?: unknown,
 ): Promise<GraphResponse> {
-  const response = await fetch(path.startsWith("https://") ? path : `${GRAPH}${path}`, {
+  const url = path.startsWith("https://") ? path : `${GRAPH_BASE}${path}`;
+  const label = url.startsWith(GRAPH_BASE) ? url.slice(GRAPH_BASE.length) : url;
+
+  const response = await fetch(url, {
     method,
     headers: {
       authorization: `Bearer ${token}`,
@@ -66,7 +72,7 @@ async function graphRequest(
 
   const text = await response.text();
   if (!response.ok) {
-    throw new GraphRequestError({ method, path, status: response.status, body: text });
+    throw new GraphRequestError({ method, path: label, status: response.status, body: text });
   }
 
   let value: unknown = undefined;
@@ -78,13 +84,13 @@ async function graphRequest(
       // often a proxy. Treating it as an empty body would hide that behind a
       // missing-field error naming the wrong cause.
       throw new Error(
-        `Graph ${method} ${path} returned ${response.status} with a body that is not JSON. ` +
+        `Graph ${method} ${label} returned ${response.status} with a body that is not JSON. ` +
           "Something other than Graph answered this request, so the setup cannot continue.",
       );
     }
   }
 
-  return { method, path, status: response.status, value };
+  return { method, path: label, status: response.status, value };
 }
 
 /**
@@ -343,7 +349,7 @@ export function createFetchSetupGraph(options: FetchSetupGraphOptions): SetupGra
       // administrator's token. An administrator can read the site regardless, so
       // verifying with their token would pass while the app itself is still blocked.
       const appToken = await acquireAppToken(appId, secret);
-      const response = await fetch(`${GRAPH}/sites/${siteId}/drive`, {
+      const response = await fetch(`${GRAPH_BASE}/sites/${siteId}/drive`, {
         headers: { authorization: `Bearer ${appToken}` },
       });
       // The roles claim is carried out with the result because it is the only

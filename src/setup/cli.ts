@@ -425,14 +425,20 @@ export function describeDeleteServerAppOutcome(outcome: DeleteServerAppOutcome, 
   // window: the likelier reading is that it has not yet surfaced in deleted
   // items, which means it is sitting there restorable with its credentials
   // while a "not recoverable" message would say the opposite.
+  //
+  // The retrying clause is conditional on purgeRetried, not unconditional: a
+  // 404 whose code does not match Request_ResourceNotFound gives up after one
+  // attempt with no sleep at all, and that run never tested whether
+  // replication lag was the cause. Naming the retry there would tell the
+  // operator lag was ruled out when it was never ruled on anything.
   const purged = outcome.purgeConfirmed
     ? "Purged it from deleted items, so its secret is not recoverable: an application deleted but not purged " +
       "stays restorable, with its credentials, for 30 days."
-    : "The purge returned not found, even after retrying for the directory replication lag that usually " +
-      "explains that, so this run could not confirm the purge. Either it was already purged, or it has not " +
-      "yet appeared in the tenant's deleted items, where an application stays restorable with its credentials " +
-      "for 30 days. Confirm that App registrations, Deleted applications is empty before treating this " +
-      "credential as gone.";
+    : `The purge returned not found${
+        outcome.purgeRetried ? ", even after retrying for the directory replication lag that usually explains that," : ","
+      } so this run could not confirm the purge. Either it was already purged, or it has not yet appeared in the ` +
+      "tenant's deleted items, where an application stays restorable with its credentials for 30 days. Confirm " +
+      "that App registrations, Deleted applications is empty before treating this credential as gone.";
 
   return (
     `${deleted} ${purged} ${revoked}${residue} Onboarding this site again needs a fresh application, so run ` +
@@ -569,6 +575,16 @@ function isApplicationObjectPath(path: string): boolean {
   return /^\/applications\/[^/]+$/.test(path);
 }
 
+// Matches DELETE /directory/deletedItems/{id}, the purge issued by
+// --delete-server-app after deleteApplication already succeeded. It shares no
+// path segment with /applications/{id}, so isApplicationObjectPath cannot
+// match it, and a 403 here used to fall through to the generic tail below,
+// which names creating an application, the wrong operation entirely for a
+// call issued only once an application has already been deleted.
+function isDeletedItemsPath(path: string): boolean {
+  return /^\/directory\/deletedItems\/[^/]+$/.test(path);
+}
+
 function nextStepForGraphFailure(error: GraphRequestError): string {
   if (error.status === 403 && error.path.endsWith("/appRoleAssignedTo")) {
     return (
@@ -608,6 +624,21 @@ function nextStepForGraphFailure(error: GraphRequestError): string {
       "The signed-in user is not allowed to delete this application registration. Deleting one needs Application " +
       "Administrator or Cloud Application Administrator rights over it; no admin consent is involved in deleting, " +
       "so Privileged Role Administrator or Global Administrator is not required for this step."
+    );
+  }
+
+  // DELETE /directory/deletedItems/{id} is the purge, not the delete: it only
+  // ever runs after deleteApplication has already succeeded, on an object that
+  // is already soft-deleted. The generic 403 tail below names creating an app
+  // registration, which is not what this call does or what refused it.
+  // Which directory role this permanent-delete step needs is not confirmed
+  // here, so this deliberately does not name one.
+  if (error.status === 403 && isDeletedItemsPath(error.path)) {
+    return (
+      "The signed-in user is not allowed to permanently remove this already-deleted application from the " +
+      "tenant's deleted items. This is a separate step from deleting the live application, which already " +
+      "succeeded: purge it by hand in the Entra admin portal, under App registrations, Deleted applications, " +
+      "using the operator's own delegated sign-in."
     );
   }
 

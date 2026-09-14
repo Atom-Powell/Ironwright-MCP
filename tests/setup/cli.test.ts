@@ -391,6 +391,7 @@ describe("describeDeleteServerAppOutcome", () => {
         orphanedPermission: false,
         applicationDeleted: true,
         purgeConfirmed: true,
+        purgeRetried: false,
       },
       "https://contoso.sharepoint.com/sites/Example",
     );
@@ -405,6 +406,47 @@ describe("describeDeleteServerAppOutcome", () => {
     expect(message).not.toMatch(/Nothing was revoked/i);
   });
 
+  it("names the replication-lag retry only when the ladder actually ran", () => {
+    // purgeRetried is the field this test exists for: a 404 that never matched
+    // Request_ResourceNotFound gives up after zero sleeps, so the message must
+    // not claim a retry ruled out replication lag when nothing was retried.
+    const message = describeDeleteServerAppOutcome(
+      {
+        kind: "torn-down",
+        appId: "app-1",
+        objectId: "obj-1",
+        permissionRevoked: true,
+        orphanedPermission: false,
+        applicationDeleted: true,
+        purgeConfirmed: false,
+        purgeRetried: false,
+      },
+      "https://contoso.sharepoint.com/sites/Example",
+    );
+
+    expect(message).toMatch(/purge returned not found/i);
+    expect(message).not.toMatch(/even after retrying/i);
+  });
+
+  it("names the replication-lag retry when the ladder genuinely ran and still gave up", () => {
+    const message = describeDeleteServerAppOutcome(
+      {
+        kind: "torn-down",
+        appId: "app-1",
+        objectId: "obj-1",
+        permissionRevoked: true,
+        orphanedPermission: false,
+        applicationDeleted: true,
+        purgeConfirmed: false,
+        purgeRetried: true,
+      },
+      "https://contoso.sharepoint.com/sites/Example",
+    );
+
+    expect(message).toMatch(/purge returned not found/i);
+    expect(message).toMatch(/even after retrying for the directory replication lag/i);
+  });
+
   it("names the residue exactly when the permission entry was left behind", () => {
     const message = describeDeleteServerAppOutcome(
       {
@@ -415,6 +457,7 @@ describe("describeDeleteServerAppOutcome", () => {
         orphanedPermission: true,
         applicationDeleted: true,
         purgeConfirmed: true,
+        purgeRetried: false,
       },
       "https://contoso.sharepoint.com/sites/Example",
     );

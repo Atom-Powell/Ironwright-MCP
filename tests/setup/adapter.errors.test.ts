@@ -9,6 +9,19 @@ function stubFetch(response: { status: number; body: string }): void {
   vi.stubGlobal("fetch", async () => new Response(response.status === 204 ? null : response.body, { status: response.status }));
 }
 
+// listSitePermissions can fail on a page reached only through a followed
+// @odata.nextLink, which Graph returns as an absolute URL. That takes more
+// than one queued response, unlike every other test in this file.
+function stubFetchSequence(responses: { status: number; body: string }[]): void {
+  let index = 0;
+  vi.stubGlobal("fetch", async () => {
+    const next = responses[index];
+    index += 1;
+    if (next === undefined) throw new Error("unexpected extra fetch call");
+    return new Response(next.status === 204 ? null : next.body, { status: next.status });
+  });
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -39,6 +52,29 @@ describe("Graph failures", () => {
     await expect(graph().resolveSite("contoso.sharepoint.com")).rejects.toMatchObject({
       status: 502,
       code: undefined,
+    });
+  });
+
+  it("reports a relative path for a failure on a followed absolute nextLink page", async () => {
+    // graphRequest is handed the absolute URL from @odata.nextLink for the
+    // second page. Without slicing GRAPH_BASE back off, GraphRequestError.path
+    // carries the whole URL, which defeats isSitePermissionsPath's 403/401/404
+    // branches in cli.ts: every one of them is anchored to the relative
+    // /sites/{id}/permissions shape and none matches an absolute string.
+    stubFetchSequence([
+      {
+        status: 200,
+        body: JSON.stringify({
+          value: [{ id: "perm-1" }],
+          "@odata.nextLink": "https://graph.microsoft.com/v1.0/sites/site-1/permissions?$skiptoken=abc",
+        }),
+      },
+      { status: 403, body: '{"error":{"code":"accessDenied"}}' },
+    ]);
+
+    await expect(graph().listSitePermissions("site-1")).rejects.toMatchObject({
+      status: 403,
+      path: "/sites/site-1/permissions?$skiptoken=abc",
     });
   });
 });

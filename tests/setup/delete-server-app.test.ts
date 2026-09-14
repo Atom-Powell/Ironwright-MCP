@@ -164,6 +164,8 @@ describe("runDeleteServerApp", () => {
       orphanedPermission: false,
       applicationDeleted: true,
       purgeConfirmed: true,
+      // The purge succeeded on its first attempt, so the ladder never slept.
+      purgeRetried: false,
     });
     expect(calls.filter((call) => /deleteSitePermission|deleteApplication|purgeDeletedApplication/.test(call))).toEqual([
       "deleteSitePermission:site-1:perm-1",

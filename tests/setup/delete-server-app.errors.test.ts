@@ -236,7 +236,7 @@ describe("runDeleteServerApp errors", () => {
         forceOrphan: false,
         hasGrantIssuer: true,
       }),
-    ).resolves.toMatchObject({ kind: "torn-down", applicationDeleted: true, purgeConfirmed: false });
+    ).resolves.toMatchObject({ kind: "torn-down", applicationDeleted: true, purgeConfirmed: false, purgeRetried: false });
   });
 
   it("does not claim the secret is unrecoverable when the purge returned not found", async () => {
@@ -266,6 +266,12 @@ describe("runDeleteServerApp errors", () => {
     expect(message).toMatch(/could not confirm the purge/i);
     expect(message).toMatch(/Deleted applications is empty/);
     expect(message).not.toMatch(/not recoverable/i);
+    // This 404 carries no code at all (isDirectoryReplicationLagError is false
+    // on the very first attempt), so purgeDeletedApplicationWithRetry gives up
+    // after zero sleeps. The message must not claim a retry ladder ran and
+    // ruled out replication lag when nothing was ever retried.
+    expect(outcome).toMatchObject({ purgeRetried: false });
+    expect(message).not.toMatch(/even after retrying/i);
   });
 
   it("retries a purge that answers Request_ResourceNotFound, then gives up cleanly", async () => {
@@ -298,7 +304,12 @@ describe("runDeleteServerApp errors", () => {
     // the object is gone, and nothing observed says the purge failed either.
     expect(calls.filter((call) => call === "purgeDeletedApplication:obj-1")).toHaveLength(3);
     expect(slept).toEqual([3000, 6000]);
-    expect(outcome).toMatchObject({ kind: "torn-down", purgeConfirmed: false });
+    expect(outcome).toMatchObject({ kind: "torn-down", purgeConfirmed: false, purgeRetried: true });
+
+    // Unlike the no-code 404 above, this run genuinely slept through the whole
+    // ladder, so the message may say so.
+    const message = describeDeleteServerAppOutcome(outcome, "https://contoso.sharepoint.com/sites/Example");
+    expect(message).toMatch(/even after retrying/i);
   });
 
   it("does not retry a purge 404 that carries no replication-lag code", async () => {
@@ -309,7 +320,7 @@ describe("runDeleteServerApp errors", () => {
     });
     const slept: number[] = [];
 
-    await runDeleteServerApp(
+    const outcome = await runDeleteServerApp(
       graph,
       {
         siteUrl: "https://contoso.sharepoint.com/sites/Example",
@@ -327,6 +338,7 @@ describe("runDeleteServerApp errors", () => {
 
     expect(calls.filter((call) => call === "purgeDeletedApplication:obj-1")).toHaveLength(1);
     expect(slept).toEqual([]);
+    expect(outcome).toMatchObject({ purgeRetried: false });
   });
 
   it("says the grant is revoked and the application still exists when the delete fails", async () => {

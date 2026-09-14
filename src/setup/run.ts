@@ -403,6 +403,15 @@ export type DeleteServerAppOutcome =
        * succeeded lets the formatter say the secret is unrecoverable.
        */
       purgeConfirmed: boolean;
+      /**
+       * True only when the ladder actually slept at least once waiting on
+       * directory replication, as distinct from purgeConfirmed being false.
+       * A 404 whose code does not match Request_ResourceNotFound, or one from
+       * something other than Graph, gives up after the first attempt with no
+       * sleep at all: the formatter must not tell the operator lag was ruled
+       * out on a run that never waited for it.
+       */
+      purgeRetried: boolean;
     };
 
 function statusOf(error: unknown): number | undefined {
@@ -420,27 +429,34 @@ function statusOf(error: unknown): number | undefined {
  * code, that POST /servicePrincipals hits right after POST /applications, so it
  * gets the same ladder rather than a second mechanism of its own.
  *
- * Resolves true when Graph accepted the purge, false when a 404 outlasted the
- * ladder, and throws for every other failure, which is a real one the caller
- * has to report.
+ * Resolves `{ purged: true, ... }` when Graph accepted the purge, `{ purged:
+ * false, ... }` when a 404 outlasted the ladder or never matched it, and
+ * throws for every other failure, which is a real one the caller has to
+ * report. `retried` carries whether the ladder actually slept at least once,
+ * separately from `purged`: a 404 whose code does not match
+ * Request_ResourceNotFound gives up on the first attempt with no sleep at
+ * all, and the caller's message must not claim replication lag was ruled out
+ * on a run that never tested for it.
  */
 async function purgeDeletedApplicationWithRetry(
   graph: SetupGraph,
   objectId: string,
   sleep: (ms: number) => Promise<void>,
-): Promise<boolean> {
+): Promise<{ purged: boolean; retried: boolean }> {
+  let retried = false;
   for (let index = 0; ; index += 1) {
     try {
       await graph.purgeDeletedApplication(objectId);
-      return true;
+      return { purged: true, retried };
     } catch (error) {
       if (statusOf(error) !== 404) throw error;
       const delay = DIRECTORY_REPLICATION_RETRY_DELAYS_MS[index];
       // A 404 that is not the replication-lag code, or one that has outlasted
       // the ladder, is reported as an unconfirmed purge rather than thrown: the
       // object may be gone or may be lagging, and this run cannot tell which.
-      if (delay === undefined || !isDirectoryReplicationLagError(error)) return false;
+      if (delay === undefined || !isDirectoryReplicationLagError(error)) return { purged: false, retried };
       await sleep(delay);
+      retried = true;
     }
   }
 }
@@ -539,8 +555,11 @@ export async function runDeleteServerApp(
 
   notice(`Purging application ${existing.objectId} from deleted items.`);
   let purgeConfirmed: boolean;
+  let purgeRetried: boolean;
   try {
-    purgeConfirmed = await purgeDeletedApplicationWithRetry(graph, existing.objectId, sleep);
+    const purgeResult = await purgeDeletedApplicationWithRetry(graph, existing.objectId, sleep);
+    purgeConfirmed = purgeResult.purged;
+    purgeRetried = purgeResult.retried;
   } catch (error) {
     // Unlike the delete failure above, re-running does not retry this: the
     // application is now soft-deleted, which findApplicationByDisplayName's
@@ -567,6 +586,7 @@ export async function runDeleteServerApp(
     orphanedPermission: !args.hasGrantIssuer,
     applicationDeleted,
     purgeConfirmed,
+    purgeRetried,
   };
 }
 

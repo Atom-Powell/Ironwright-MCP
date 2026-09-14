@@ -410,6 +410,31 @@ describe("describeSetupFailure", () => {
     expect(message).not.toMatch(/Creating the app registration/);
   });
 
+  it("names the deleted-items purge, not application creation, for a refused purge", () => {
+    // isApplicationObjectPath matches /applications/{id}, not
+    // /directory/deletedItems/{id}, so before this branch existed a wrapped
+    // purge failure fell through to the generic 403 tail, which talks about
+    // creating an app registration and its service principal: the opposite of
+    // what a purge, issued only after the application was already deleted,
+    // actually does.
+    const message = describeSetupFailure(
+      new Error("Application app-1 was deleted, but purging it from deleted items failed.", {
+        cause: new GraphRequestError({
+          method: "DELETE",
+          path: "/directory/deletedItems/object-1",
+          status: 403,
+          body: '{"error":{"code":"Authorization_RequestDenied"}}',
+        }),
+      }),
+      "delete-server-app",
+    );
+
+    expect(message).toMatch(/^Server application teardown failed:/);
+    expect(message).toMatch(/permanently remove this already-deleted application/i);
+    expect(message).toMatch(/Deleted applications/);
+    expect(message).not.toMatch(/Creating the app registration/i);
+  });
+
   it("applies the mode-specific prefix to a GraphRequestError too, not just a plain Error", () => {
     const message = describeSetupFailure(
       new GraphRequestError({
