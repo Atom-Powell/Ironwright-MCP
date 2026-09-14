@@ -341,14 +341,26 @@ tried against it, but `await import("../domain/reconcile/expected.js")` produces
 Left as is: the rule's purpose is to stop the boundary eroding through ordinary code, and
 nothing in this codebase imports dynamically. Worth revisiting only if a dynamic import appears.
 
-## Outstanding operator action: delete the test tenant's server application
+## CLOSED: the test tenant's server application is deleted and purged
 
-**DELETED 2026-09-13 by the operator. The purge is not confirmed.** The operator reported deleting
-the application. Whether it was also purged from deleted items was not stated, and nobody has
-verified it against the tenant, so this section stays open rather than closed. If the purge did not
-happen, the exposed secret remains recoverable until roughly 2026-10-13 by anyone who can restore
-the object. Confirm at **App registrations, Deleted applications**: an empty list, or the
-application absent from it, closes this. Original entry follows.
+**CLOSED 2026-09-13.** The operator deleted `Ironwright Repository Reconciliation` from the
+`helloironwright` tenant and confirmed that **App registrations, Deleted applications** is empty,
+which is the check that matters: a soft-deleted registration keeps its credentials restorable for
+30 days, so the purge, not the delete, is what ends the exposure. The secret displayed in a session
+scrollback is no longer recoverable.
+
+Two consequences, both expected and neither a defect.
+
+The per-site permission entry survives on the SharePoint site, naming an identity that no longer
+exists. It grants access to nothing, and removing it would need a grant issuer recreated solely for
+that, which is not worth doing on a developer tenant. It is an instance of the teardown hole
+recorded above, not a new problem.
+
+There is now no server application in that tenant, so phase 2a's live verification needs a fresh
+one before it can run: `--create-bootstrap`, then a normal setup run, then the scan. Worth doing in
+one sitting.
+
+Original entry follows.
 
 Raised 2026-09-13, after phase 3 merged.
 
