@@ -41,11 +41,13 @@ function fakeGraph(overrides: Partial<SetupGraph> = {}): { graph: SetupGraph; ca
     }),
     grantAppRole: async () => {},
     grantSitePermission: async () => ({ permissionId: "p" }),
+    listSitePermissions: async () => [],
     verifyAppAccess: async () => ({ status: 200, body: "{}", appRoles: [] }),
     deleteSitePermission: async () => {},
     deleteApplication: async (objectId) => {
       calls.push(`deleteApplication:${objectId}`);
     },
+    purgeDeletedApplication: async () => {},
     ...overrides,
   };
   return { graph, calls };

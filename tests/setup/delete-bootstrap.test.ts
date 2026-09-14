@@ -47,6 +47,10 @@ function fakeGraph(found: { objectId: string; appId: string } | undefined): {
       calls.push(`grantSitePermission:${siteId}`);
       return { permissionId: "should-not-be-called" };
     },
+    listSitePermissions: async (siteId) => {
+      calls.push(`listSitePermissions:${siteId}`);
+      return [];
+    },
     verifyAppAccess: async () => {
       calls.push("verifyAppAccess");
       return { status: 200, body: "{}", appRoles: [] };
@@ -56,6 +60,9 @@ function fakeGraph(found: { objectId: string; appId: string } | undefined): {
     },
     deleteApplication: async (objectId) => {
       calls.push(`deleteApplication:${objectId}`);
+    },
+    purgeDeletedApplication: async (objectId) => {
+      calls.push(`purgeDeletedApplication:${objectId}`);
     },
   };
   return { graph, calls };

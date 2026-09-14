@@ -17,6 +17,8 @@ export interface SetupGraph {
   resolveServicePrincipal(appId: string): Promise<{ objectId: string; appRoles: GraphAppRole[] }>;
   grantAppRole(request: AppRoleAssignmentRequest): Promise<void>;
   grantSitePermission(siteId: string, request: SitePermissionRequest): Promise<{ permissionId: string }>;
+  /** Each entry's id, with the application ids inside its granted identities. */
+  listSitePermissions(siteId: string): Promise<Array<{ permissionId: string; appIds: string[] }>>;
   verifyAppAccess(args: {
     appId: string;
     secret: string;
@@ -24,6 +26,12 @@ export interface SetupGraph {
   }): Promise<{ status: number; body: string; appRoles: string[] | undefined }>;
   deleteSitePermission(siteId: string, permissionId: string): Promise<void>;
   deleteApplication(objectId: string): Promise<void>;
+  /**
+   * Removes an already soft-deleted application from the tenant's deleted
+   * items, so it cannot be restored with its credentials intact. A teardown
+   * that stops at deleteApplication has scheduled that removal, not performed it.
+   */
+  purgeDeletedApplication(objectId: string): Promise<void>;
 }
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
@@ -97,6 +105,33 @@ function requireFields<K extends string>(response: GraphResponse, names: readonl
     result[name] = found;
   }
   return result;
+}
+
+/**
+ * Reads the application ids out of one permission entry's granted identities.
+ * Graph's current shape is grantedToIdentitiesV2, but the deprecated
+ * grantedToIdentities is still a real possibility here, not a hypothetical
+ * one: grantSitePermission's own request body (steps.ts's
+ * SitePermissionRequest) is written in that older shape, so a response that
+ * echoes back what was sent, rather than Graph's newer field, is exactly the
+ * kind of response this teardown will actually see. V2 is preferred when
+ * present; the legacy field is read only as a fallback, so an entry carrying
+ * both is not double-counted.
+ */
+function applicationIdsFromGrant(entry: Record<string, unknown>): string[] {
+  const identities = Array.isArray(entry.grantedToIdentitiesV2)
+    ? entry.grantedToIdentitiesV2
+    : Array.isArray(entry.grantedToIdentities)
+      ? entry.grantedToIdentities
+      : [];
+
+  return identities.flatMap((identity: unknown) => {
+    const application =
+      typeof identity === "object" && identity !== null
+        ? (identity as { application?: { id?: unknown } }).application
+        : undefined;
+    return typeof application?.id === "string" ? [application.id] : [];
+  });
 }
 
 export interface FetchSetupGraphOptions {
@@ -223,6 +258,31 @@ export function createFetchSetupGraph(options: FetchSetupGraphOptions): SetupGra
       return { permissionId: requireFields(response, ["id"]).id };
     },
 
+    async listSitePermissions(siteId) {
+      // Same endpoint family as the grant and its rollback delete, so this
+      // read needs the bootstrap application's token too: Graph refuses a
+      // delegated token on /sites/{id}/permissions regardless of the caller's
+      // directory roles.
+      const bootstrapToken = await acquireBootstrapToken();
+      const response = await graphRequest(bootstrapToken, "GET", `/sites/${siteId}/permissions`);
+      const body = typeof response.value === "object" && response.value !== null ? response.value : {};
+      const entries = (body as { value?: unknown }).value;
+      const list = Array.isArray(entries) ? entries : [];
+
+      // An entry this cannot make sense of is skipped rather than refused,
+      // unlike the scan layer, which refuses loudly on an item it cannot read
+      // because that item might be a file the reconciliation would otherwise
+      // silently lose track of. A permission entry we cannot parse here is not
+      // that: it is metadata about who a grant was extended to, and skipping
+      // it means the entry contributes no application id rather than a bogus
+      // one, not that the whole listing is thrown away.
+      return list.flatMap((raw) => {
+        const entry = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+        if (typeof entry.id !== "string") return [];
+        return [{ permissionId: entry.id, appIds: applicationIdsFromGrant(entry) }];
+      });
+    },
+
     async verifyAppAccess({ appId, secret, siteId }) {
       // Verification deliberately uses a token minted for the new app, not the
       // administrator's token. An administrator can read the site regardless, so
@@ -254,6 +314,16 @@ export function createFetchSetupGraph(options: FetchSetupGraphOptions): SetupGra
       // role assignment held by it, and the client secret lives on the
       // application object, so this one call revokes the whole credential.
       await graphRequest(adminToken, "DELETE", `/applications/${objectId}`);
+    },
+
+    async purgeDeletedApplication(objectId) {
+      // Entra's delete of an application registration is a soft delete: the
+      // object sits in the tenant's deleted items for 30 days, where anyone
+      // holding Application Administrator can restore it along with its
+      // credentials. This call, like deleteApplication before it, is on the
+      // operator's own delegated token: deletedItems is not part of the
+      // /sites/{id}/permissions family the bootstrap token exists for.
+      await graphRequest(adminToken, "DELETE", `/directory/deletedItems/${objectId}`);
     },
   };
 }

@@ -9,6 +9,7 @@ function fakeGraph(overrides: Partial<SetupGraph> = {}): SetupGraph {
   return {
     findApplicationByDisplayName: async () => undefined,
     deleteApplication: async () => {},
+    purgeDeletedApplication: async () => {},
     resolveSite: async () => ({ siteId: "should-not-be-called" }),
     createApplication: async () => {
       throw new Error("should not be called");
@@ -18,6 +19,7 @@ function fakeGraph(overrides: Partial<SetupGraph> = {}): SetupGraph {
     resolveServicePrincipal: async () => ({ objectId: "should-not-be-called", appRoles: [] }),
     grantAppRole: async () => {},
     grantSitePermission: async () => ({ permissionId: "should-not-be-called" }),
+    listSitePermissions: async () => [],
     verifyAppAccess: async () => ({ status: 200, body: "{}", appRoles: [] }),
     deleteSitePermission: async () => {},
     ...overrides,

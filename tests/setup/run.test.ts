@@ -37,6 +37,10 @@ function fakeGraph(overrides: Partial<SetupGraph> = {}): { graph: SetupGraph; ca
       calls.push(`grantSitePermission:${siteId}:${request.roles.join(",")}`);
       return { permissionId: "permission-1" };
     },
+    listSitePermissions: async (siteId) => {
+      calls.push(`listSitePermissions:${siteId}`);
+      return [];
+    },
     verifyAppAccess: async () => {
       calls.push("verifyAppAccess");
       return { status: 200, body: "{}", appRoles: [SITES_SELECTED_ROLE_CLAIM] };
@@ -46,6 +50,9 @@ function fakeGraph(overrides: Partial<SetupGraph> = {}): { graph: SetupGraph; ca
     },
     deleteApplication: async (objectId) => {
       calls.push(`deleteApplication:${objectId}`);
+    },
+    purgeDeletedApplication: async (objectId) => {
+      calls.push(`purgeDeletedApplication:${objectId}`);
     },
     ...overrides,
   };
