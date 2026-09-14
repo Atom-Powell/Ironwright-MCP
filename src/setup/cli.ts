@@ -16,6 +16,9 @@ export interface ParsedArgs {
   clientId: string;
   createBootstrap: boolean;
   deleteBootstrap: boolean;
+  deleteServerApp: boolean;
+  confirm: boolean;
+  forceOrphan: boolean;
   bootstrap: BootstrapCredentials | undefined;
 }
 
@@ -88,15 +91,22 @@ function emptyToUndefined(value: string | undefined): string | undefined {
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): ParsedArgs {
   const createBootstrap = argv.includes("--create-bootstrap");
   const deleteBootstrap = argv.includes("--delete-bootstrap");
+  const deleteServerApp = argv.includes("--delete-server-app");
 
-  // Creating and deleting the grant issuer are opposite acts on the same
-  // application. Letting one silently win when both flags are given is how an
-  // operator deletes the grant issuer they meant to create, or recreates the
-  // one they meant to tear down, with no indication either happened.
-  if (createBootstrap && deleteBootstrap) {
+  // Three modes that act on different applications in different directions.
+  // Letting one silently win is how an operator tears down the application they
+  // meant to create, or deletes the grant issuer they meant to keep, with no
+  // indication either happened.
+  const modes = [
+    createBootstrap ? "--create-bootstrap" : undefined,
+    deleteBootstrap ? "--delete-bootstrap" : undefined,
+    deleteServerApp ? "--delete-server-app" : undefined,
+  ].filter((mode): mode is string => mode !== undefined);
+
+  if (modes.length > 1) {
     throw new Error(
-      "--create-bootstrap and --delete-bootstrap cannot be used together. Run one, confirm its result, then run " +
-        "the other if you still need to.",
+      `${modes.join(" and ")} cannot be used together. Run one, confirm its result, then run the other if you ` +
+        "still need to.",
     );
   }
 
@@ -114,6 +124,9 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     clientId: findValue(argv, "client-id") ?? DEFAULT_DEVICE_CODE_CLIENT_ID,
     createBootstrap,
     deleteBootstrap,
+    deleteServerApp,
+    confirm: argv.includes("--confirm"),
+    forceOrphan: argv.includes("--force-orphan"),
     bootstrap: resolveBootstrapCredentials(argv, env),
   };
 }

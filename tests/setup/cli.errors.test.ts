@@ -28,6 +28,28 @@ describe("parseArgs failures", () => {
     const argv = ["node", "main.js", "--tenant=tenant-1", "--site="];
     expect(() => parseArgs(argv)).toThrow(/missing required argument --site=<value>/);
   });
+
+  it("refuses the teardown mode without a site, because the permission entry lives on one", () => {
+    expect(() =>
+      parseArgs(["node", "main.js", "--tenant=contoso.onmicrosoft.com", "--delete-server-app"]),
+    ).toThrow(/--site/);
+  });
+
+  it.each([["--create-bootstrap"], ["--delete-bootstrap"]])(
+    "refuses --delete-server-app together with %s",
+    (other) => {
+      expect(() =>
+        parseArgs([
+          "node",
+          "main.js",
+          "--tenant=contoso.onmicrosoft.com",
+          "--site=https://contoso.sharepoint.com/sites/Example",
+          "--delete-server-app",
+          other,
+        ]),
+      ).toThrow(/cannot be used together/);
+    },
+  );
 });
 
 describe("extractAccessToken failures", () => {

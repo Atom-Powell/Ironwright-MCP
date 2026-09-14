@@ -50,6 +50,36 @@ describe("parseArgs", () => {
     expect(parsed.tenantId).toBe("tenant-1");
     expect(parsed.siteUrl).toBe("https://contoso.sharepoint.com/sites/Example");
   });
+
+  it("parses the server-app teardown mode, defaulting the name to the normal run's default", () => {
+    const parsed = parseArgs([
+      "node",
+      "main.js",
+      "--tenant=contoso.onmicrosoft.com",
+      "--site=https://contoso.sharepoint.com/sites/Example",
+      "--delete-server-app",
+    ]);
+
+    expect(parsed.deleteServerApp).toBe(true);
+    expect(parsed.confirm).toBe(false);
+    expect(parsed.forceOrphan).toBe(false);
+    expect(parsed.displayName).toBe("Ironwright Repository Reconciliation");
+  });
+
+  it("reads the confirm and force-orphan flags", () => {
+    const parsed = parseArgs([
+      "node",
+      "main.js",
+      "--tenant=contoso.onmicrosoft.com",
+      "--site=https://contoso.sharepoint.com/sites/Example",
+      "--delete-server-app",
+      "--confirm",
+      "--force-orphan",
+    ]);
+
+    expect(parsed.confirm).toBe(true);
+    expect(parsed.forceOrphan).toBe(true);
+  });
 });
 
 describe("extractAccessToken", () => {
