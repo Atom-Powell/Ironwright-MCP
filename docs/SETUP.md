@@ -454,9 +454,9 @@ healthy and then fail the first request it receives.
 
 Until phase 4a wired the first tool, none of this was read by the server itself: only
 `npm run scan` read the Graph credentials and the store connection string, and nothing read
-`IW_PROFILE_DIR` at all. An operator following an earlier version of this document would have
-started a server that came up cleanly and then failed on its first tool call. See
-`src/server/config.ts` and `src/config.ts` for what is actually checked.
+`IW_PROFILE_DIR` at all. As of this branch the server requires these variables at startup and
+will not come up without them. See `src/server/config.ts` and `src/config.ts` for what is
+actually checked.
 
 ## Running a scan
 

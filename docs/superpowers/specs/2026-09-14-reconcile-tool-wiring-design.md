@@ -72,7 +72,7 @@ with it, not wait to be discovered by whichever tool call happens to name it.
 
 Indexed by the field rather than the filename because the filename is not the identity: the report
 carries `profileId` from the profile itself, so a registry keyed on the filename could answer a call
-for one profile with a report labelled another.
+for one profile with a report labeled another.
 
 The registry splits in two so the validation is testable without a filesystem: a pure
 `createProfileRegistry(entries)` over already-read contents, and a thin `loadProfileDirectory(dir)`

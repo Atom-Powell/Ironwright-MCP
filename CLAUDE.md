@@ -147,9 +147,9 @@ registry, so a tool added later inherits every check.
   consumes.
 - **No emojis or icons anywhere**, including logs and docs. **US English throughout.**
 - **This repo's prose avoids em dashes and en dashes**, including inside string literals, in
-  code, docs, and commit messages alike. As of this branch a test enforces it for every tracked
-  text file, except the two imported research documents that predate the rule and are named as
-  exempt in the test itself.
+  code, docs, and commit messages alike. As of this branch a test enforces it across the repo's
+  tracked TypeScript, JavaScript, JSON, Markdown and YAML files, with two imported research
+  documents named as exempt in the test itself because they predate the rule.
 
 ## Working Agreement
 

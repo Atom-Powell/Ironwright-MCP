@@ -724,10 +724,9 @@ range above, before trusting it again.
 **CLOSED 2026-09-14.** Found during review of Task 9's documentation pass. This slice's own task
 framing asserted that CLAUDE.md's working agreement already stated the no-dash rule and that a
 hygiene test already enforced it across every tracked text file. Neither was true. Before this
-branch, CLAUDE.md said nothing about dashes at all. The rule appeared only in two executed-plan
-documents, `docs/superpowers/plans/2026-09-14-reconcile-tool-wiring.md` and
-`docs/superpowers/plans/2026-09-14-workbook-snapshot.md`, which CLAUDE.md itself classes as
-history rather than as a live reference, and the rule was enforced by no test:
+branch, CLAUDE.md said nothing about dashes at all. The rule appeared only in executed-plan
+documents, which CLAUDE.md itself classes as history rather than as a live reference, and the
+rule was enforced by no test:
 `tests/source-hygiene.test.ts` had exactly two cases, one confirming files exist to check and one
 checking each tracked text file for a NUL byte. Nothing anywhere checked for a dash.
 
