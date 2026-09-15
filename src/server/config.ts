@@ -1,6 +1,7 @@
 export interface ServerConfig {
   port: number;
   allowWrites: boolean;
+  profileDir: string;
 }
 
 /**
@@ -19,5 +20,17 @@ export function loadConfig(env: NodeJS.ProcessEnv): ServerConfig {
     throw new Error(`PORT must be an integer between 1 and 65535, received "${rawPort}"`);
   }
 
-  return { port, allowWrites: env.IW_ALLOW_WRITES === "true" };
+  // Required, and checked at startup rather than on the first tool call. A
+  // profile mistake does not surface as an error: it surfaces as a wrong
+  // compliance finding weeks later, which is far more expensive to diagnose
+  // than a deployment that refused to start.
+  const profileDir = env.IW_PROFILE_DIR?.trim();
+  if (profileDir === undefined || profileDir.length === 0) {
+    throw new Error(
+      "IW_PROFILE_DIR is required: it names the directory holding this deployment's profile files. " +
+        "Profiles are deployment configuration and are never committed, so there is no default to fall back to.",
+    );
+  }
+
+  return { port, allowWrites: env.IW_ALLOW_WRITES === "true", profileDir };
 }
