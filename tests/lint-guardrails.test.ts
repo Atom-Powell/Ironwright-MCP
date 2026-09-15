@@ -145,6 +145,19 @@ describe("the reconciliation engine's single entry point", () => {
     expect(ruleIds).not.toContain("no-restricted-imports");
   });
 
+  it("allows a tool test to load the engine's golden fixture", async () => {
+    // A fixture loader computes no part of the compliance answer, so a caller
+    // reaching it cannot produce the second, drifting answer this rule exists
+    // to prevent. Tool tests are pinned against the same golden report the
+    // engine's own tests use rather than each declaring their own.
+    const ruleIds = await ruleIdsFor(
+      "tests/tools/probe.test.ts",
+      'import { loadExpectedReport } from "../domain/reconcile/fixtures/load.js";\nexport const use = loadExpectedReport;\n',
+    );
+
+    expect(ruleIds).not.toContain("no-restricted-imports");
+  });
+
   it("still refuses an impure import inside the engine", async () => {
     // The entry-point rule and the purity allowlist are configured in
     // separate blocks over overlapping files, and ESLint gives one rule one
