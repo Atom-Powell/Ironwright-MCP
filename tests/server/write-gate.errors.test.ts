@@ -4,11 +4,12 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { createApp } from "../../src/server/app.js";
 import { buildServer } from "../../src/mcp/build-server.js";
+import { createFakeToolContext } from "../tools/fake-context.js";
 
 let httpServer: Server | undefined;
 
 async function startServer(allowWrites: boolean): Promise<URL> {
-  const app = createApp({ serverFactory: () => buildServer({ allowWrites }) });
+  const app = createApp({ serverFactory: () => buildServer({ allowWrites, context: createFakeToolContext() }) });
   httpServer = await new Promise<Server>((resolve) => {
     const listener = app.listen(0, () => resolve(listener));
   });
