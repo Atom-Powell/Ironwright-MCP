@@ -136,8 +136,11 @@ table at all is the case most likely to make that call fail for a reason unrelat
 project owns. Including a minimal style table costs a few hundred bytes and removes the question.
 They are written
 into a ZIP with stored entries, no compression, which keeps the container to local file headers, a
-central directory and an end-of-central-directory record, with CRCs from `zlib.crc32`. Node 22 is
-the floor in `engines` and `zlib.crc32` exists from 22 onward, so this needs no dependency.
+central directory and an end-of-central-directory record, with CRCs from `zlib.crc32`, so this
+needs no dependency. Corrected 2026-09-15: this design originally said `zlib.crc32` exists from
+Node 22 onward and that the `engines` floor of `>=22.0.0` therefore covered it. It does not. The
+function landed in 22.2.0, so 22.0 and 22.1 are declared-supported runtimes on which this script
+crashes, and the floor in `engines.node` is now `>=22.2.0`.
 
 Stored rather than deflated because the parts total a few kilobytes and compression would buy
 nothing but a second failure mode.

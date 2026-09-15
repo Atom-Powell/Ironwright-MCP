@@ -30,7 +30,7 @@
   },
   "homepage": "https://github.com/Atom-Powell/Ironwright-MCP#readme",
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.2.0"
   },
   "private": true,
   "dependencies": {

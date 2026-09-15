@@ -554,6 +554,40 @@ Until those numbers exist, this phase's central claim, that delta plus a persist
 link bounds the Graph request count, is unverified. The numbers belong in this file when they
 exist, not before.
 
+## A tracking workbook inside the library it describes is always an orphan
+
+Observed 2026-09-15, during the whole-branch review of the synthetic workbook seeding work, and
+confirmed by running the reconciliation engine over the two snapshots that seed produces. This
+is an observation for a human, not a decision taken here.
+
+`examples/profiles/example.json` puts `identity.workbookPath` at
+`/Trackers/Operational Tracking Workbook.xlsx`, inside the same document library the profile
+describes. The scan enumerates the whole library and applies no exclusion for that path, so the
+workbook is in the repository snapshot. Its name matches neither `naming.template` nor any of
+the profile's recognizers, so the parser cannot read a client, deliverable or period out of it.
+The engine therefore reports it as an orphan with `kind: "unrecognized"`, in every report, for
+as long as the workbook lives there. Every layer is behaving exactly as designed; there is no
+defect in any of them.
+
+The consequence is a product-level one rather than a bug. A customer whose tracker sits in the
+library it tracks gets one permanent orphan row that is not a finding and is not actionable, and
+an operator reading the orphan list as a work list has to know to skip it. With one tracker that
+is a footnote. It is worth deciding deliberately rather than discovering per tenant.
+
+Three shapes a resolution could take, none chosen here. The profile accepts the finding and
+whoever reads the report is told to expect it, which costs nothing and leaves the noise. Or the
+profile gains a way to name paths the reconciliation ignores, which is a new profile field, a
+change to the engine's inputs, and a new way for a real file to be absent from a compliance
+report without anybody being told, which is the quiet incompleteness this engine exists to
+prevent. Or the customer's workbook lives outside the library, which is an operational change
+for them rather than a code change here, and is not always available.
+
+What this branch did instead: `scripts/seed/expected.ts` predicts the orphan, so the expectation
+`npm run seed-library` prints matches what the live tool will return, and the printed block says
+in prose that the seeder's own workbook is the orphan it lists. That was the right move for a
+branch whose scope was the seeder, and it settles nothing about the product question. Step 7 of
+the phase 2a checklist above is where an operator meets this for the first time.
+
 ## Phase 2b-1: covered only by fakes, 2026-09-14
 
 Phase 2b-1, the workbook snapshot, has not been run against a real tenant. No Excel call has been

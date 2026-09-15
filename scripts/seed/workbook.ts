@@ -18,10 +18,54 @@ const TABLE_NAME = "ClientRoster";
 const XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const DATE_NUMBER_FORMAT = "yyyy-mm-dd";
 
-function splitWorkbookPath(workbookPath: string): { parentPath: string; libraryRelative: string } {
-  const libraryRelative = workbookPath.replace(/^\/+/, "");
+/**
+ * The library-relative form of a profile's identity.workbookPath, which is
+ * written with a leading slash and addressed without one.
+ *
+ * Exported because scripts/seed/expected.ts predicts a report over a library
+ * that contains this file, and the prediction has to name the same path this
+ * module writes to rather than a second derivation of it.
+ */
+export function workbookLibraryPath(workbookPath: string): string {
+  return workbookPath.replace(/^\/+/, "");
+}
+
+/**
+ * Every ancestor folder of the workbook, root to leaf, in the order
+ * createSeedWorkbook creates them. A workbook at the library root has none.
+ */
+export function workbookAncestorPaths(workbookPath: string): string[] {
+  const libraryRelative = workbookLibraryPath(workbookPath);
   const lastSlash = libraryRelative.lastIndexOf("/");
-  return { parentPath: lastSlash === -1 ? "" : libraryRelative.slice(0, lastSlash), libraryRelative };
+  if (lastSlash === -1) return [];
+
+  const paths: string[] = [];
+  let cursor = "";
+  for (const segment of libraryRelative.slice(0, lastSlash).split("/")) {
+    if (segment.length === 0) continue;
+    cursor = cursor === "" ? segment : `${cursor}/${segment}`;
+    paths.push(cursor);
+  }
+  return paths;
+}
+
+function splitPath(path: string): { parentPath: string; name: string } {
+  const lastSlash = path.lastIndexOf("/");
+  return lastSlash === -1
+    ? { parentPath: "", name: path }
+    : { parentPath: path.slice(0, lastSlash), name: path.slice(lastSlash + 1) };
+}
+
+/**
+ * Graph's own error code alongside the status, in the same shape
+ * GraphRequestError's message uses. A 403 is accessDenied or it is something
+ * else, and an operator acts on the two differently, so a message naming only
+ * the status discards the half that decides what to do next. The error itself
+ * is passed as `cause` wherever this appears, so the full response body stays
+ * reachable too.
+ */
+function statusAndCode(error: GraphRequestError): string {
+  return `${error.status}${error.code === undefined ? "" : ` (${error.code})`}`;
 }
 
 export async function createSeedWorkbook(
@@ -31,7 +75,7 @@ export async function createSeedWorkbook(
   plan: SeedPlan,
 ): Promise<{ requests: number }> {
   const before = client.requests();
-  const { parentPath, libraryRelative } = splitWorkbookPath(workbookPath);
+  const libraryRelative = workbookLibraryPath(workbookPath);
 
   // The workbook's folder is not part of the taxonomy, so the tree writer
   // never creates it. Every ancestor is created in order, root to leaf, the
@@ -40,18 +84,18 @@ export async function createSeedWorkbook(
   // created inside it, so a workbookPath nested more than one level deep
   // needs one createFolder call per level, not one call naming the leaf
   // under an ancestor that was never created.
-  const parentSegments = parentPath === "" ? [] : parentPath.split("/").filter((segment) => segment.length > 0);
-  let ancestorPath = "";
-  for (const segment of parentSegments) {
-    await client.createFolder(driveId, ancestorPath, segment);
-    ancestorPath = ancestorPath === "" ? segment : `${ancestorPath}/${segment}`;
+  for (const ancestorPath of workbookAncestorPaths(workbookPath)) {
+    const { parentPath, name } = splitPath(ancestorPath);
+    await client.createFolder(driveId, parentPath, name);
   }
 
   try {
     await client.putBytes(driveId, libraryRelative, blankWorkbookBytes(), XLSX_CONTENT_TYPE);
   } catch (error) {
     if (error instanceof GraphRequestError) {
-      throw new Error(`Uploading the blank workbook to ${workbookPath} failed with ${error.status}.`);
+      throw new Error(`Uploading the blank workbook to ${workbookPath} failed with ${statusAndCode(error)}.`, {
+        cause: error,
+      });
     }
     throw error;
   }
@@ -71,9 +115,10 @@ export async function createSeedWorkbook(
   } catch (error) {
     if (error instanceof GraphRequestError) {
       throw new Error(
-        `Writing the client rows into ${workbookPath} failed with ${error.status}. This is the first call that ` +
-          "requires Graph to open the uploaded file as a workbook, so the bytes this script uploaded are the " +
+        `Writing the client rows into ${workbookPath} failed with ${statusAndCode(error)}. This is the first call ` +
+          "that requires Graph to open the uploaded file as a workbook, so the bytes this script uploaded are the " +
           "first thing to suspect.",
+        { cause: error },
       );
     }
     throw error;
@@ -95,6 +140,7 @@ export async function createSeedWorkbook(
         throw new Error(
           `${workbookPath} already carries a table named ${TABLE_NAME}. This seed replaces the file rather than ` +
             "updating it, so a table surviving the upload means the upload did not replace what was there.",
+          { cause: error },
         );
       }
       // Two /workbook/ calls already succeeded by this point, both range
@@ -103,9 +149,10 @@ export async function createSeedWorkbook(
       // therefore not the suspect here; this request's own inputs are: the
       // address, the header row, or a table already sitting at that range.
       throw new Error(
-        `Adding the ${TABLE_NAME} table to ${workbookPath} failed with ${error.status}. Two workbook calls ` +
+        `Adding the ${TABLE_NAME} table to ${workbookPath} failed with ${statusAndCode(error)}. Two workbook calls ` +
           "already succeeded before this one, so Graph could open the uploaded file; this request's own " +
           "address, header row, or an existing table at that address is the more likely cause.",
+        { cause: error },
       );
     }
     throw error;

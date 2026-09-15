@@ -76,7 +76,9 @@ decommissioned, not once the current onboarding finishes; see "Retiring the gran
 - Site owner rights are not required for any of the four modes. The per-site grant is issued by
   the bootstrap application's own token, not by the signed-in operator's, so nobody running these
   commands needs any standing permission on the SharePoint site itself.
-- Node 22 or later.
+- Node 22.2 or later, which is what `engines.node` declares. The floor is 22.2 rather than 22.0
+  because `scripts/seed-library.ts` builds the synthetic tracking workbook's ZIP container with
+  `zlib.crc32`, which landed in that release.
 
 ## Running `--create-bootstrap`
 

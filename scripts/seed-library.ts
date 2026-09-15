@@ -45,16 +45,19 @@ import { GraphRequestError, graphErrorCodeFromBody } from "../src/graph/errors.j
 import { driveItemPath } from "../src/graph/paths.js";
 import { clientCredentialsTokenProvider, type ClientCredentials, type TokenProvider } from "../src/graph/token.js";
 import { readProfile } from "../src/scan/cli.js";
-import { expectedReport, formatExpectedReport } from "./seed/expected.js";
+import { expectedReport, formatExpectedReport, parseProfile, type Profile } from "./seed/expected.js";
 import { createSeedWorkbook } from "./seed/workbook.js";
 
 // ---------------------------------------------------------------------------
-// Profile input: only the fields this script reads, validated by hand rather
-// than against the full zod schema in src/domain/profile/schema.ts, since
-// reaching for that schema would mean importing the domain layer this file is
-// not allowed to depend on. A profile that fails this script's own, narrower
-// checks may still be a perfectly valid profile for the scan; this validation
-// only promises that the four fields the tree-builder needs are usable.
+// Profile input: only the fields this script's own tree building reads,
+// checked by hand so a profile that cannot be seeded fails with a message
+// about the tree rather than a schema path. The full zod schema in
+// src/domain/profile/schema.ts is not reached for here because tree building
+// has no use for the rest of it; runSeed validates the same raw profile
+// against that schema, through scripts/seed/expected.ts, before anything is
+// written. A profile that fails these narrower checks may still be a
+// perfectly valid profile for the scan; this validation only promises that
+// the four fields the tree-builder needs are usable.
 // ---------------------------------------------------------------------------
 
 export interface SeedProfileIdentity {
@@ -242,12 +245,14 @@ const MONTH_NAMES = [
 
 // The last month of each calendar quarter. This is a simplified stand-in for
 // a deliverable's own periodAnchor (src/domain/profile/schema.ts), which this
-// script does not read: periodAnchor selection is domain-schema behavior, and
-// reaching for it would mean reaching for the domain layer this file is not
-// allowed to depend on. "Last month of the quarter" is a reasonable synthetic
-// placement on its own and does not have to match that field's exact
-// semantics to serve this script's one purpose, sizing a tree for a request
-// count comparison.
+// script does not read: the tree below is a fixture, and a fixture generator
+// is not a legitimate consumer of the renderer the engine uses to decide
+// compliance, nor of the placement rules that go with it, for the same reason
+// the token substitution above is a local reimplementation rather than a
+// second copy of that renderer. "Last month of the quarter" is a reasonable
+// synthetic placement on its own and does not have to match that field's
+// exact semantics to serve this script's one purpose, sizing a tree for a
+// request count comparison.
 const QUARTER_END_MONTHS = new Set([3, 6, 9, 12]);
 
 export const DEFAULT_CLIENT_COUNT = 12;
@@ -612,7 +617,14 @@ export function parseSeedArguments(argv: readonly string[], options: { now?: () 
   const now = options.now ?? (() => new Date());
   let profilePath: string | undefined;
   let clientCount = DEFAULT_CLIENT_COUNT;
-  let year = now().getFullYear();
+  // UTC, matching the month cap below and asOfFromClock, which is the Period
+  // the expected report is computed against. A local reading disagrees with a
+  // UTC one for a few hours around New Year in every time zone behind UTC,
+  // and the disagreement is not cosmetic: the year would not equal
+  // currentYear, throughMonth would fall back to 12, and the seeder would
+  // write twelve months of a year asOf sits outside, which is the orphan
+  // noise the cap exists to prevent.
+  let year = now().getUTCFullYear();
   let includeQuarterly = true;
   let confirm = false;
 
@@ -671,7 +683,16 @@ export function parseSeedArguments(argv: readonly string[], options: { now?: () 
 // number that was not actually derived from the tree or the run.
 // ---------------------------------------------------------------------------
 
-export function formatDryRunReport(tree: SeedTree, args: SeedArguments, workbookPath: string): string[] {
+/**
+ * Takes the validated profile rather than a workbook path, for two reasons.
+ * The path this report names and the path the expected report is built from
+ * have to be one value, not two reads of the same field. And holding a
+ * `Profile` at all is evidence that ProfileSchema accepted the raw profile,
+ * which is what lets the dry run say so without asserting an outcome it did
+ * not observe.
+ */
+export function formatDryRunReport(tree: SeedTree, args: SeedArguments, profile: Profile): string[] {
+  const workbookPath = profile.identity.workbookPath;
   const estimate = estimateGraphRequests(tree, workbookPath);
   return [
     "Dry run: nothing was created. Pass --confirm to create this tree.",
@@ -680,6 +701,9 @@ export function formatDryRunReport(tree: SeedTree, args: SeedArguments, workbook
     `Folders that would be created: ${tree.folderPaths.length}.`,
     `Files that would be created: ${tree.filePaths.length}.`,
     `Workbook that would be replaced, not updated: ${workbookPath}.`,
+    "This profile parsed against the full profile schema in src/domain/profile/schema.ts, the same schema the " +
+      "reconciliation engine requires. That check runs before the tree is written rather than after, so a " +
+      "confirmed run cannot seed a whole library and then fail it.",
     `Estimated Graph requests to build this tree and replace the workbook: ${estimate}. This is an estimate, ` +
       "not a measured cost: it assumes one request per folder, one per file, the two requests resolveDrive " +
       "issues to find the site and the library, and the fixed calls createSeedWorkbook issues to replace the " +
@@ -994,15 +1018,19 @@ function asOfFromClock(now: () => Date): { year: number; month: number } {
 
 export async function runSeed(argv: readonly string[], dependencies: SeedDependencies): Promise<void> {
   const args = parseSeedArguments(argv, { now: dependencies.now });
-  // rawProfile, not profile, goes to expectedReport below: loadSeedProfile
-  // only validates the four fields this script's own tree-building needs, but
-  // expectedReport runs the real reconciliation engine, which needs the full
-  // profile shape ProfileSchema validates, including workbookMapping, window,
-  // and every recognizer. Keeping both around, rather than only the narrower
-  // one, is what lets each side ask for exactly what it uses.
   const rawProfile = await dependencies.readProfileFile(args.profilePath);
-  const profile = loadSeedProfile(rawProfile);
-  const plan = buildSeedPlan(profile, {
+  // Both readings of the same raw profile, and both taken here, before the
+  // --confirm branch. The full schema is what the reconciliation engine
+  // requires, including workbookMapping, window and every recognizer, and it
+  // used to be parsed inside expectedReport, which runs after the library and
+  // the workbook are already written: a profile that passed loadSeedProfile
+  // and failed ProfileSchema therefore cost a complete seed against a live
+  // tenant and then died with a zod error, printing no expectation at all.
+  // Parsing it here also makes the dry run a real precondition check rather
+  // than a partial one.
+  const profile = parseProfile(rawProfile);
+  const seedProfile = loadSeedProfile(rawProfile);
+  const plan = buildSeedPlan(seedProfile, {
     clientCount: args.clientCount,
     year: args.year,
     includeQuarterly: args.includeQuarterly,
@@ -1010,17 +1038,22 @@ export async function runSeed(argv: readonly string[], dependencies: SeedDepende
   });
 
   if (!args.confirm) {
-    for (const line of formatDryRunReport(plan.tree, args, profile.identity.workbookPath)) dependencies.log(line);
+    for (const line of formatDryRunReport(plan.tree, args, profile)) dependencies.log(line);
     return;
   }
 
   const client = dependencies.createGraphClient();
-  const result = await executeSeed(client, profile.identity, plan.tree);
-  const workbook = await createSeedWorkbook(client, result.driveId, profile.identity.workbookPath, plan);
+  const result = await executeSeed(client, seedProfile.identity, plan.tree);
+  // profile.identity.workbookPath, the same field expectedReport predicts the
+  // orphan from, so the file this run writes and the file the expectation
+  // describes cannot be two different paths.
+  const workbookPath = profile.identity.workbookPath;
+  const workbook = await createSeedWorkbook(client, result.driveId, workbookPath, plan);
   for (const line of formatExecutionReport({ ...result, workbookRequests: workbook.requests })) {
     dependencies.log(line);
   }
-  for (const line of formatExpectedReport(expectedReport(rawProfile, plan, asOfFromClock(dependencies.now)))) {
+  const expected = expectedReport(profile, plan, asOfFromClock(dependencies.now));
+  for (const line of formatExpectedReport(expected, workbookPath)) {
     dependencies.log(line);
   }
 }

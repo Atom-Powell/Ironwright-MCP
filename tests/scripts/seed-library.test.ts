@@ -22,6 +22,7 @@ import {
   type SeedGraphClient,
   type SeedProfileInput,
 } from "../../scripts/seed-library.js";
+import { parseProfile } from "../../scripts/seed/expected.js";
 import { exampleSeedProfile } from "./seed/fixtures.js";
 
 function exampleProfileRaw(): unknown {
@@ -205,12 +206,39 @@ describe("parseSeedArguments throughMonth", () => {
     });
     expect(args.throughMonth).toBe(12);
   });
+
+  it("defaults the year from the same UTC clock the cap is computed against", () => {
+    // A stand-in rather than a real Date, because the disagreement this guards
+    // against only exists in host time zones behind UTC and a real Date would
+    // make the test pass or fail on where it ran. Around New Year the two
+    // readings differ for a few hours: local is still the old year while UTC
+    // has rolled over. Defaulting the year from the local reading and the cap
+    // from the UTC one made them name different years, so throughMonth fell
+    // back to 12 and the seeder wrote a full year that asOf sits outside,
+    // which is exactly the orphan noise the cap exists to prevent.
+    const newYearUtcAheadOfLocal = {
+      getFullYear: () => 2026,
+      getUTCFullYear: () => 2027,
+      getUTCMonth: () => 0,
+    } as unknown as Date;
+
+    const args = parseSeedArguments(["--profile", "p.json"], { now: () => newYearUtcAheadOfLocal });
+
+    expect(args.year).toBe(2027);
+    expect(args.throughMonth).toBe(1);
+  });
 });
 
 describe("formatDryRunReport", () => {
   it("states the tree's own counts, names the workbook, and derives the estimate from both", () => {
     const tree = buildSeedTree(exampleSeedProfile(), { clientCount: 1, year: 2026, includeQuarterly: false, throughMonth: 12 });
-    const workbookPath = exampleSeedProfile().identity.workbookPath;
+    // The validated profile rather than a bare path string: the workbook path
+    // this report names and the one the expectation is built from must be the
+    // same value, and holding the parsed profile is also what lets this report
+    // say the profile passed the engine's schema without asserting something
+    // it did not observe.
+    const profile = parseProfile(JSON.parse(readFileSync("examples/profiles/example.json", "utf8")));
+    const workbookPath = profile.identity.workbookPath;
     const lines = formatDryRunReport(
       tree,
       {
@@ -221,7 +249,7 @@ describe("formatDryRunReport", () => {
         confirm: false,
         throughMonth: 12,
       },
-      workbookPath,
+      profile,
     ).join("\n");
 
     expect(lines).toMatch(/Dry run/);
@@ -452,9 +480,13 @@ describe("runSeed", () => {
     const readCalls: string[] = [];
 
     await runSeed(["--profile", "p.json"], {
+      // The real example profile, not exampleProfileRaw(): runSeed validates
+      // the whole profile against ProfileSchema before the --confirm branch,
+      // and exampleProfileRaw() carries only the four fields loadSeedProfile
+      // itself reads.
       readProfileFile: async (path) => {
         readCalls.push(path);
-        return exampleProfileRaw();
+        return JSON.parse(readFileSync("examples/profiles/example.json", "utf8")) as unknown;
       },
       createGraphClient: () => {
         throw new Error("createGraphClient must not be called on a dry run");
@@ -485,10 +517,10 @@ describe("runSeed", () => {
     // range, so there is nothing to narrow.
     //
     // readProfileFile returns the real examples/profiles/example.json here,
-    // not exampleProfileRaw(): runSeed's confirmed path now also calls
-    // expectedReport, which validates the full profile against
-    // ProfileSchema, and exampleProfileRaw() only carries the narrower set of
-    // fields loadSeedProfile itself needs.
+    // not exampleProfileRaw(): runSeed validates the whole profile against
+    // ProfileSchema on every path, before the --confirm branch, and
+    // exampleProfileRaw() only carries the narrower set of fields
+    // loadSeedProfile itself needs.
     await runSeed(["--profile", "p.json", "--no-quarterly", "--confirm"], {
       readProfileFile: async () => JSON.parse(readFileSync("examples/profiles/example.json", "utf8")) as unknown,
       createGraphClient: () => client,
@@ -550,6 +582,39 @@ describe("runSeed with the workbook", () => {
       log: (line) => lines.push(line),
     });
     expect(lines.join("\n")).toContain("Expected report from the live reconciliation tool");
+  });
+
+  it("refuses a profile that fails the full schema before the dry run prints anything", async () => {
+    // exampleProfileRaw() passes loadSeedProfile's four-field check and fails
+    // ProfileSchema, which is the exact shape of profile this guard exists
+    // for. Validated in the dry run, not only on the confirmed path: the
+    // alternative is a complete seed against a live tenant that then dies
+    // with a Zod error and prints no expectation at all.
+    const lines: string[] = [];
+    await expect(
+      runSeed(["--profile", "p.json"], {
+        readProfileFile: async () => exampleProfileRaw(),
+        createGraphClient: () => {
+          throw new Error("a dry run must not build a client");
+        },
+        now: () => new Date("2026-09-15T00:00:00Z"),
+        log: (line) => lines.push(line),
+      }),
+    ).rejects.toThrow();
+    expect(lines).toEqual([]);
+  });
+
+  it("says in the dry run that the profile passed the schema the engine requires", async () => {
+    const lines: string[] = [];
+    await runSeed(["--profile", "examples/profiles/example.json"], {
+      readProfileFile: async () => JSON.parse(readFileSync("examples/profiles/example.json", "utf8")) as unknown,
+      createGraphClient: () => {
+        throw new Error("a dry run must not build a client");
+      },
+      now: () => new Date("2026-09-15T00:00:00Z"),
+      log: (line) => lines.push(line),
+    });
+    expect(lines.join("\n")).toMatch(/profile schema/i);
   });
 });
 
