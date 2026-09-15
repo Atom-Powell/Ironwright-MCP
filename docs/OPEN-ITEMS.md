@@ -503,20 +503,39 @@ operator.
 1. Settle the credentials question first. Delete and purge the exposed server application per the
    outstanding operator action above, then either create a new server application for the
    developer tenant or run `npm run setup` again to produce one.
-2. In the developer tenant, create a synthetic document library with a small tree matching the
-   example profile's taxonomy: a year folder, two client folders, and three or four files. Use no
-   real client data.
-3. Write a profile JSON for the synthetic library under `profiles/`, which is git-ignored.
+2. Write a profile JSON for the synthetic library under `profiles/`, which is git-ignored, with the
+   taxonomy, naming, workbook mapping and window `npm run seed-library` and the scan below both
+   read; `examples/profiles/example.json` is the template to copy from.
+3. Run `npm run seed-library -- --profile <path to that profile>`, first without `--confirm` to
+   read the dry-run estimate, then with it. In one pass, against the developer tenant and using no
+   real client data, it builds a synthetic document library matching the profile's taxonomy and
+   places a tracking workbook at the profile's `identity.workbookPath` with a table matching its
+   workbook mapping. It plants three deliberate discrepancies, one client absent from the
+   repository, one monthly artifact missing, and one monthly artifact misnamed, rather than a clean
+   tree, so step 7 below has something to find. It also prints the report it expects the live
+   reconciliation tool to return over what it just built. Keep that output; step 7 compares
+   against it.
 4. Start Azurite.
 5. Run a cold scan against the profile. Record the mode, the file and folder counts, the Graph
    request count, and the write-operation count.
 6. Run the scan again immediately. Record whether it reports `incremental`, whether it avoided a
    resync, and the Graph request count, against the design's expectation of a small bounded
    number.
-7. Add a file to the synthetic library and scan. Rename a file and scan. Move a file between
+7. Call `reconcile_workbook_vs_repository` against the same profile and compare its report,
+   finding by finding, against the "Expected report from the live reconciliation tool" that step 3
+   printed, before step 8 perturbs anything the comparison depends on. This step needs the tool
+   that phase 4a wires; at the time of writing that work sits on the `phase-4a-reconcile-tool-wiring`
+   branch rather than `main`, so if it has not merged yet, do steps 1 through 6 and 8 through 10
+   and come back to this one once it has. A match here is not evidence that the reconciliation
+   engine itself is correct: `scripts/seed/expected.ts` computes the printed expectation by running
+   that same engine over the seed plan in memory, so the two sides agree by construction on
+   anything the engine gets wrong. What a match does check is Graph, Excel, Azure Table Storage,
+   and the tool's own composition, the layers a fake cannot reach. Any difference is a real
+   finding.
+8. Add a file to the synthetic library and scan. Rename a file and scan. Move a file between
    client folders and scan. Delete a file and scan. After each, confirm the snapshot tracks the
    change and that no ghost row survives the move.
-8. Tear the server application back down with `npm run setup -- --tenant=<tenant-id>
+9. Tear the server application back down with `npm run setup -- --tenant=<tenant-id>
    --site=<site-url> --delete-server-app`, first without `--confirm` and then with it. This is the
    sitting in which that mode gets exercised against a real tenant for the first time, which the
    teardown design expected rather than a separate trip. Two things to check that no test can
@@ -526,9 +545,9 @@ operator.
    nobody on this project has verified that deleting an application registration also removes its
    service principal, and if one survives, this mode needs a step to remove it and the rollback in
    `runSetup` has the same gap. Record which it was.
-9. Record the actual numbers and outcomes from steps 5 through 7 in this file, in a new dated
+10. Record the actual numbers and outcomes from steps 5, 6, 7 and 8 in this file, in a new dated
    section, following the tone of the 2026-09-12 setup entry above: name the numbers, name what
-   still was not exercised, and do not describe an untested path as working. Record step 8's two
+   still was not exercised, and do not describe an untested path as working. Record step 9's two
    answers in the same section.
 
 Until those numbers exist, this phase's central claim, that delta plus a persisted continuation
@@ -553,11 +572,11 @@ it against a real Excel workbook or Microsoft Graph.
 
 **Why the live run has not happened.** No session in this implementing session could open a real
 Excel workbook through Graph; the fakes exist because a live workbook was never available to
-read against. The live verification this phase needs is a synthetic tracking workbook, placed in
-the site by hand alongside the synthetic library the phase 2a seeder builds, with a table whose
-headers match the example profile's workbook mapping. Reading that table through a real,
-non-persistent Excel session is the first thing that would check the session layer's retry and
-close behavior against Graph's actual responses rather than a fake's.
+read against. The live verification this phase needs is the synthetic tracking workbook
+`npm run seed-library` now places in the site, in the same run that builds the synthetic library,
+with a table whose headers match the example profile's workbook mapping. Reading that table
+through a real, non-persistent Excel session is the first thing that would check the session
+layer's retry and close behavior against Graph's actual responses rather than a fake's.
 
 Until that run happens, this phase's session-layer behavior, its rejection handling, and the
 snapshot assembly are known from reading the code and from tests against fakes only. None of it

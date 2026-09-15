@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   ABSENT_CLIENT,
@@ -129,10 +130,26 @@ describe("buildSeedTree", () => {
 });
 
 describe("estimateGraphRequests", () => {
-  it("is exactly two more than the tree's own folder and file counts", () => {
+  it("adds the workbook's fixed five calls plus one createFolder per ancestor segment of its path", () => {
     const tree = buildSeedTree(exampleSeedProfile(), { clientCount: 2, year: 2026, includeQuarterly: true, throughMonth: 12 });
 
-    expect(estimateGraphRequests(tree)).toBe(2 + tree.folderPaths.length + tree.filePaths.length);
+    expect(estimateGraphRequests(tree, "/Trackers/Operational Tracking Workbook.xlsx")).toBe(
+      2 + tree.folderPaths.length + tree.filePaths.length + 6,
+    );
+  });
+
+  it("costs five, not six, for a workbook sitting at the library root", () => {
+    const tree = buildSeedTree(exampleSeedProfile(), { clientCount: 2, year: 2026, includeQuarterly: true, throughMonth: 12 });
+
+    expect(estimateGraphRequests(tree, "/Tracker.xlsx")).toBe(2 + tree.folderPaths.length + tree.filePaths.length + 5);
+  });
+
+  it("costs one more request for each additional level the workbook is nested", () => {
+    const tree = buildSeedTree(exampleSeedProfile(), { clientCount: 2, year: 2026, includeQuarterly: true, throughMonth: 12 });
+
+    expect(estimateGraphRequests(tree, "/A/B/C/Tracker.xlsx")).toBe(
+      2 + tree.folderPaths.length + tree.filePaths.length + 8,
+    );
   });
 });
 
@@ -191,21 +208,28 @@ describe("parseSeedArguments throughMonth", () => {
 });
 
 describe("formatDryRunReport", () => {
-  it("states the tree's own counts and derives the estimate from them", () => {
+  it("states the tree's own counts, names the workbook, and derives the estimate from both", () => {
     const tree = buildSeedTree(exampleSeedProfile(), { clientCount: 1, year: 2026, includeQuarterly: false, throughMonth: 12 });
-    const lines = formatDryRunReport(tree, {
-      profilePath: "p.json",
-      clientCount: 1,
-      year: 2026,
-      includeQuarterly: false,
-      confirm: false,
-      throughMonth: 12,
-    }).join("\n");
+    const workbookPath = exampleSeedProfile().identity.workbookPath;
+    const lines = formatDryRunReport(
+      tree,
+      {
+        profilePath: "p.json",
+        clientCount: 1,
+        year: 2026,
+        includeQuarterly: false,
+        confirm: false,
+        throughMonth: 12,
+      },
+      workbookPath,
+    ).join("\n");
 
     expect(lines).toMatch(/Dry run/);
     expect(lines).toMatch(new RegExp(`Folders that would be created: ${tree.folderPaths.length}`));
     expect(lines).toMatch(new RegExp(`Files that would be created: ${tree.filePaths.length}`));
-    expect(lines).toMatch(new RegExp(`Estimated Graph requests[^:]*: ${estimateGraphRequests(tree)}`));
+    expect(lines).toContain(workbookPath);
+    expect(lines).toMatch(/replaced/i);
+    expect(lines).toMatch(new RegExp(`Estimated Graph requests[^:]*: ${estimateGraphRequests(tree, workbookPath)}`));
     expect(lines).toMatch(/estimate/i);
   });
 });
@@ -323,19 +347,25 @@ describe("buildSeedPlan", () => {
 });
 
 describe("formatExecutionReport", () => {
-  it("reports the counts and requests it was given", () => {
+  it("reports the tree's counts and the workbook's request count as separate lines", () => {
     const lines = formatExecutionReport({
       driveId: "drive-1",
       foldersProcessed: 5,
       filesProcessed: 7,
       graphRequests: 14,
       elapsedMs: 250,
+      workbookRequests: 6,
     }).join("\n");
 
     expect(lines).toMatch(/drive-1/);
     expect(lines).toMatch(/Folders processed: 5/);
     expect(lines).toMatch(/Files processed: 7/);
-    expect(lines).toMatch(/Graph requests issued: 14/);
+    // The tree's own count (14) and the workbook's (6) never sum to one
+    // number in the output: that would bury the count this script exists to
+    // let an operator measure inside a total that also depends on how deep
+    // the workbook happens to be nested.
+    expect(lines).toMatch(/tree: 14/);
+    expect(lines).toMatch(/workbook: 6/);
     expect(lines).toMatch(/250ms/);
   });
 });
@@ -369,9 +399,27 @@ function fakeSeedClient(driveName: string): { client: SeedGraphClient; calls: st
       calls.push(`FILE:${parentPath}/${name}`);
       return { status: 201 };
     },
-    post: async () => { throw new Error("this fake does not implement post"); },
-    putBytes: async () => { throw new Error("this fake does not implement putBytes"); },
-    patch: async () => { throw new Error("this fake does not implement patch"); },
+    // post, putBytes and patch answer for real, unlike the get/createFolder/
+    // createFile branches' earlier not-implemented stand-ins, because
+    // createSeedWorkbook (scripts/seed/workbook.ts) drives all three: the
+    // table-add POST, the blank-workbook PUT, and the range/format/rename
+    // PATCHes. A fake that threw on any of them could no longer stand in for
+    // a confirmed run once runSeed always seeds the workbook after the tree.
+    post: async <T,>(path: string): Promise<T> => {
+      requestCount += 1;
+      calls.push(`POST:${path}`);
+      return { id: "t" } as T;
+    },
+    putBytes: async (_driveId, path) => {
+      requestCount += 1;
+      calls.push(`PUT:${path}`);
+      return { status: 201 };
+    },
+    patch: async <T,>(path: string): Promise<T> => {
+      requestCount += 1;
+      calls.push(`PATCH:${path}`);
+      return {} as T;
+    },
   };
   return { client, calls };
 }
@@ -429,8 +477,20 @@ describe("runSeed", () => {
     const logs: string[] = [];
     const { client } = fakeSeedClient("Compliance Reports");
 
-    await runSeed(["--profile", "p.json", "--clients", "1", "--no-quarterly", "--confirm"], {
-      readProfileFile: async () => exampleProfileRaw(),
+    // No --clients here, unlike an earlier version of this test that passed
+    // "1": buildSeedPlan (which runSeed now calls in place of buildSeedTree)
+    // guards clientCount to [9, 12] so both planted discrepancies land inside
+    // the tree and ABSENT_CLIENT stays outside it, and 1 falls under that
+    // floor. The default client count (12) already sits inside the guarded
+    // range, so there is nothing to narrow.
+    //
+    // readProfileFile returns the real examples/profiles/example.json here,
+    // not exampleProfileRaw(): runSeed's confirmed path now also calls
+    // expectedReport, which validates the full profile against
+    // ProfileSchema, and exampleProfileRaw() only carries the narrower set of
+    // fields loadSeedProfile itself needs.
+    await runSeed(["--profile", "p.json", "--no-quarterly", "--confirm"], {
+      readProfileFile: async () => JSON.parse(readFileSync("examples/profiles/example.json", "utf8")) as unknown,
       createGraphClient: () => client,
       // Same reasoning as the dry-run test above: December keeps throughMonth
       // at 12 so this test's fixed folder and file counts stay meaningful.
@@ -439,8 +499,57 @@ describe("runSeed", () => {
     });
 
     expect(logs.some((line) => /Seed complete/.test(line))).toBe(true);
-    expect(logs.some((line) => /Folders processed: 14/.test(line))).toBe(true);
-    expect(logs.some((line) => /Files processed: 12/.test(line))).toBe(true);
+    expect(logs.some((line) => /Folders processed: 157/.test(line))).toBe(true);
+    expect(logs.some((line) => /Files processed: 143/.test(line))).toBe(true);
+  });
+});
+
+describe("runSeed with the workbook", () => {
+  it("issues no Graph call at all without --confirm", async () => {
+    let created = false;
+    await runSeed(["--profile", "examples/profiles/example.json"], {
+      readProfileFile: async () => JSON.parse(readFileSync("examples/profiles/example.json", "utf8")) as unknown,
+      createGraphClient: () => {
+        created = true;
+        throw new Error("a dry run must not build a client");
+      },
+      now: () => new Date("2026-09-15T00:00:00Z"),
+      log: () => {},
+    });
+    expect(created).toBe(false);
+  });
+
+  it("names the workbook it will create in the dry run report", async () => {
+    const lines: string[] = [];
+    await runSeed(["--profile", "examples/profiles/example.json"], {
+      readProfileFile: async () => JSON.parse(readFileSync("examples/profiles/example.json", "utf8")) as unknown,
+      createGraphClient: () => {
+        throw new Error("not reached");
+      },
+      now: () => new Date("2026-09-15T00:00:00Z"),
+      log: (line) => lines.push(line),
+    });
+    expect(lines.join("\n")).toContain("Operational Tracking Workbook.xlsx");
+  });
+
+  // The brief's version of this test narrowed to --clients=2, which fails
+  // for two reasons: this parser only takes a flag's value as the next,
+  // space-separated argv entry ("--clients", "2"), not an "=" form, and even
+  // spelled correctly, 2 falls under buildSeedPlan's guarded floor of 9. The
+  // default client count (12) already sits inside the guarded range, so
+  // --clients is omitted here rather than set to a value the guard would
+  // refuse.
+  it("prints the expected report after a confirmed run", async () => {
+    const lines: string[] = [];
+    const { client } = fakeSeedClient("Compliance Reports");
+
+    await runSeed(["--profile", "examples/profiles/example.json", "--confirm"], {
+      readProfileFile: async () => JSON.parse(readFileSync("examples/profiles/example.json", "utf8")) as unknown,
+      createGraphClient: () => client,
+      now: () => new Date("2026-09-15T00:00:00Z"),
+      log: (line) => lines.push(line),
+    });
+    expect(lines.join("\n")).toContain("Expected report from the live reconciliation tool");
   });
 });
 

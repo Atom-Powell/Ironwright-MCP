@@ -45,6 +45,8 @@ import { GraphRequestError, graphErrorCodeFromBody } from "../src/graph/errors.j
 import { driveItemPath } from "../src/graph/paths.js";
 import { clientCredentialsTokenProvider, type ClientCredentials, type TokenProvider } from "../src/graph/token.js";
 import { readProfile } from "../src/scan/cli.js";
+import { expectedReport, formatExpectedReport } from "./seed/expected.js";
+import { createSeedWorkbook } from "./seed/workbook.js";
 
 // ---------------------------------------------------------------------------
 // Profile input: only the fields this script reads, validated by hand rather
@@ -58,6 +60,7 @@ import { readProfile } from "../src/scan/cli.js";
 export interface SeedProfileIdentity {
   siteUrl: string;
   library: string;
+  workbookPath: string;
 }
 
 export interface SeedProfileTaxonomy {
@@ -94,6 +97,13 @@ export function loadSeedProfile(raw: unknown): SeedProfileInput {
     throw new Error(
       'The profile\'s "identity" section must carry a "siteUrl" string and a "library" string; the seeder ' +
         "resolves the same site and library the scan does.",
+    );
+  }
+
+  if (typeof identityRaw.workbookPath !== "string" || identityRaw.workbookPath.length === 0) {
+    throw new Error(
+      'The profile\'s "identity.workbookPath" must be a non-empty string; it names the workbook this seeder ' +
+        "replaces with a freshly built one.",
     );
   }
 
@@ -137,7 +147,7 @@ export function loadSeedProfile(raw: unknown): SeedProfileInput {
   });
 
   return {
-    identity: { siteUrl: identityRaw.siteUrl, library: identityRaw.library },
+    identity: { siteUrl: identityRaw.siteUrl, library: identityRaw.library, workbookPath: identityRaw.workbookPath },
     taxonomy: { segments },
     naming: { template },
     deliverables,
@@ -528,21 +538,56 @@ function plantedPath(
 // between the two.
 const RESOLVE_DRIVE_REQUEST_COUNT = 2;
 
+// createSeedWorkbook (scripts/seed/workbook.ts) issues five requests once the
+// workbook's parent folder exists: the blank upload, the range write, the
+// Onboarded column's number format, the table add, and the table rename. This
+// constant mirrors that count rather than measuring it, so if
+// createSeedWorkbook's own call sequence ever changes, this estimate silently
+// drifts from it; there is no automated link between the two.
+const WORKBOOK_FIXED_REQUEST_COUNT = 5;
+
+/**
+ * The workbook's ancestor folders, root to leaf, the same walk
+ * createSeedWorkbook performs before its own five fixed calls: one
+ * createFolder per segment of the path above the workbook file itself. A
+ * workbook sitting directly at the library root has no ancestor to create, so
+ * this returns an empty array rather than a "-1" that would have to be
+ * special-cased at every call site.
+ */
+function workbookAncestorSegments(workbookPath: string): string[] {
+  const { parentPath } = splitPath(workbookPath.replace(/^\/+/, ""));
+  return parentPath === "" ? [] : parentPath.split("/").filter((segment) => segment.length > 0);
+}
+
+/**
+ * Derived from workbookPath rather than a flat constant, because the cost
+ * this function estimates is not fixed: createSeedWorkbook walks the path's
+ * own ancestor chain before its five fixed calls, so a workbook nested
+ * several folders deep costs more than one at the library root. See
+ * WORKBOOK_FIXED_REQUEST_COUNT above for why the five is a mirror, not a
+ * measurement, of createSeedWorkbook's own call count.
+ */
+function estimateWorkbookRequests(workbookPath: string): number {
+  return WORKBOOK_FIXED_REQUEST_COUNT + workbookAncestorSegments(workbookPath).length;
+}
+
 /**
  * Derived from the same tree the execution layer walks, not computed
  * separately: RESOLVE_DRIVE_REQUEST_COUNT aside, this is exactly
  * folderPaths.length POSTs plus filePaths.length PUTs, one request each,
  * because that is what executeSeed below actually issues, unconditionally,
- * with no existence check before it. It is still an estimate, not a measured
- * cost, because it assumes nothing is retried. It is not, however, an
- * estimate a re-run "beats": executeSeed issues the same request for every
- * tree entry whether or not that entry already exists, so a re-run against a
- * partially built tree costs the same number of requests as a fresh one.
- * What changes on a re-run is the side effect at each already-existing path,
- * not the request count.
+ * with no existence check before it, plus estimateWorkbookRequests above for
+ * the workbook createSeedWorkbook replaces afterward. It is still an
+ * estimate, not a measured cost, because it assumes nothing is retried. It is
+ * not, however, an estimate a re-run "beats": executeSeed issues the same
+ * request for every tree entry whether or not that entry already exists, and
+ * createSeedWorkbook always replaces the workbook outright, so a re-run
+ * against a partially built tree costs the same number of requests as a
+ * fresh one. What changes on a re-run is the side effect at each
+ * already-existing path, not the request count.
  */
-export function estimateGraphRequests(tree: SeedTree): number {
-  return RESOLVE_DRIVE_REQUEST_COUNT + tree.folderPaths.length + tree.filePaths.length;
+export function estimateGraphRequests(tree: SeedTree, workbookPath: string): number {
+  return RESOLVE_DRIVE_REQUEST_COUNT + tree.folderPaths.length + tree.filePaths.length + estimateWorkbookRequests(workbookPath);
 }
 
 // ---------------------------------------------------------------------------
@@ -626,20 +671,25 @@ export function parseSeedArguments(argv: readonly string[], options: { now?: () 
 // number that was not actually derived from the tree or the run.
 // ---------------------------------------------------------------------------
 
-export function formatDryRunReport(tree: SeedTree, args: SeedArguments): string[] {
-  const estimate = estimateGraphRequests(tree);
+export function formatDryRunReport(tree: SeedTree, args: SeedArguments, workbookPath: string): string[] {
+  const estimate = estimateGraphRequests(tree, workbookPath);
   return [
     "Dry run: nothing was created. Pass --confirm to create this tree.",
     `Profile: ${args.profilePath}. Clients: ${args.clientCount}. Year: ${args.year}. ` +
       `Quarterly deliverable: ${args.includeQuarterly ? "included" : "excluded"}.`,
     `Folders that would be created: ${tree.folderPaths.length}.`,
     `Files that would be created: ${tree.filePaths.length}.`,
-    `Estimated Graph requests to build this tree: ${estimate}. This is an estimate, not a measured cost: it ` +
-      "assumes one request per folder, one per file, and the two requests resolveDrive issues to find the site " +
-      "and the library. A re-run costs the same number of requests, not fewer: executeSeed issues one request " +
-      "per tree entry regardless of whether that item already exists. What a re-run changes is the side effect, " +
-      "not the count: an existing folder is left alone rather than recreated or erroring, and an existing file " +
-      "is overwritten with the same placeholder content it already had.",
+    `Workbook that would be replaced, not updated: ${workbookPath}.`,
+    `Estimated Graph requests to build this tree and replace the workbook: ${estimate}. This is an estimate, ` +
+      "not a measured cost: it assumes one request per folder, one per file, the two requests resolveDrive " +
+      "issues to find the site and the library, and the fixed calls createSeedWorkbook issues to replace the " +
+      "workbook (one createFolder per ancestor folder in its path, plus five to upload the blank file, write its " +
+      "rows, format its date column, add its table, and name it). A re-run costs the same number of requests, " +
+      "not fewer: executeSeed issues one request per tree entry regardless of whether that item already exists, " +
+      "and createSeedWorkbook always replaces the workbook outright. What a re-run changes is the side effect, " +
+      "not the count: an existing folder is left alone rather than recreated or erroring, an existing file is " +
+      "overwritten with the same placeholder content it already had, and the workbook is overwritten with a " +
+      "freshly built one either way.",
   ];
 }
 
@@ -651,11 +701,24 @@ export interface SeedExecutionResult {
   elapsedMs: number;
 }
 
-export function formatExecutionReport(result: SeedExecutionResult): string[] {
+// workbookRequests is kept off SeedExecutionResult itself and carried as an
+// intersection here instead, because executeSeed above never learns it:
+// createSeedWorkbook runs after executeSeed returns, against the driveId
+// executeSeed resolved, so the caller has to combine the two before this
+// function ever sees them.
+//
+// Printed as its own line rather than folded into graphRequests, on purpose.
+// graphRequests is the number this whole script exists to let an operator
+// measure against the recursive-enumeration baseline Pain-Points.txt
+// complains about; the workbook's calls have nothing to do with that
+// comparison, and adding them into the same total would make that number
+// stop meaning what it is supposed to mean.
+export function formatExecutionReport(result: SeedExecutionResult & { workbookRequests: number }): string[] {
   return [
     `Seed complete against drive ${result.driveId}.`,
     `Folders processed: ${result.foldersProcessed}. Files processed: ${result.filesProcessed}.`,
-    `Graph requests issued: ${result.graphRequests}.`,
+    `Graph requests issued to build the tree: ${result.graphRequests}.`,
+    `Graph requests issued to replace the workbook: ${result.workbookRequests}.`,
     `Elapsed: ${result.elapsedMs}ms.`,
   ];
 }
@@ -914,11 +977,32 @@ export interface SeedDependencies {
   log: (line: string) => void;
 }
 
+/**
+ * Converts the injected clock to the Period reconcile takes as asOf, in UTC,
+ * the same offset parseSeedArguments already uses to cap throughMonth at the
+ * current month. Not exported: nothing outside this orchestration needs it,
+ * and it stays a plain { year, month } literal rather than importing
+ * src/domain/reconcile's Period type, because this file's only sanctioned
+ * path into src/domain/ is through scripts/seed/expected.ts, per this file's
+ * own header comment. Structural typing satisfies expectedReport's asOf
+ * parameter without an import.
+ */
+function asOfFromClock(now: () => Date): { year: number; month: number } {
+  const date = now();
+  return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1 };
+}
+
 export async function runSeed(argv: readonly string[], dependencies: SeedDependencies): Promise<void> {
   const args = parseSeedArguments(argv, { now: dependencies.now });
+  // rawProfile, not profile, goes to expectedReport below: loadSeedProfile
+  // only validates the four fields this script's own tree-building needs, but
+  // expectedReport runs the real reconciliation engine, which needs the full
+  // profile shape ProfileSchema validates, including workbookMapping, window,
+  // and every recognizer. Keeping both around, rather than only the narrower
+  // one, is what lets each side ask for exactly what it uses.
   const rawProfile = await dependencies.readProfileFile(args.profilePath);
   const profile = loadSeedProfile(rawProfile);
-  const tree = buildSeedTree(profile, {
+  const plan = buildSeedPlan(profile, {
     clientCount: args.clientCount,
     year: args.year,
     includeQuarterly: args.includeQuarterly,
@@ -926,13 +1010,19 @@ export async function runSeed(argv: readonly string[], dependencies: SeedDepende
   });
 
   if (!args.confirm) {
-    for (const line of formatDryRunReport(tree, args)) dependencies.log(line);
+    for (const line of formatDryRunReport(plan.tree, args, profile.identity.workbookPath)) dependencies.log(line);
     return;
   }
 
   const client = dependencies.createGraphClient();
-  const result = await executeSeed(client, profile.identity, tree);
-  for (const line of formatExecutionReport(result)) dependencies.log(line);
+  const result = await executeSeed(client, profile.identity, plan.tree);
+  const workbook = await createSeedWorkbook(client, result.driveId, profile.identity.workbookPath, plan);
+  for (const line of formatExecutionReport({ ...result, workbookRequests: workbook.requests })) {
+    dependencies.log(line);
+  }
+  for (const line of formatExpectedReport(expectedReport(rawProfile, plan, asOfFromClock(dependencies.now)))) {
+    dependencies.log(line);
+  }
 }
 
 function presentEnv(value: string | undefined): value is string {
