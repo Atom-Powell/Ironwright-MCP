@@ -340,9 +340,19 @@ export function buildSeedTree(profile: SeedProfileInput, options: SeedOptions): 
  */
 export const ABSENT_CLIENT = "Client13";
 export const MISSING_FILE_CLIENT = "Client04";
-export const MISSING_FILE_MONTH = 7;
 export const MISNAMED_FILE_CLIENT = "Client09";
-export const MISNAMED_FILE_MONTH = 3;
+
+// Both planted months are January, not a later, more illustrative month.
+// throughMonth caps the tree at the current month when the seeded year is
+// the current year, so a plant placed later in the year is unreachable for
+// however much of the year has not happened yet: at month 7 this plant was
+// unreachable from January through June, and at month 3 it was unreachable
+// in January and February too. January is always within range, because
+// throughMonth is never below 1, and it is on or after the January 1
+// effective date every client gets, so the window still expects it. Leave
+// this at 1.
+export const MISSING_FILE_MONTH = 1;
+export const MISNAMED_FILE_MONTH = 1;
 
 /**
  * The misnamed file uses the example profile's vendor-token recognizer, not
@@ -443,20 +453,28 @@ export function buildSeedPlan(profile: SeedProfileInput, options: SeedOptions): 
   // runs: a `.map` silently no-ops when its own target is absent, so a single
   // check on the resulting array's length cannot see a failed rename the way
   // it can see a failed removal (removing nothing changes the length; a
-  // no-op rename does not). Each message names its own plant, since an
-  // operator reading one needs to know which of the two to look at.
+  // no-op rename does not). Each message leads with the fact this function
+  // actually observed: the path is not in the tree buildSeedTree produced.
+  // Only then does it name a likely cause. That inference is sound here,
+  // where it would not have been for a bare length check: clientCount is
+  // guarded on both sides above (MINIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT and
+  // MAXIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT), and both planted months are
+  // fixed at 1, always within throughMonth's 1..12 range, so neither plant's
+  // client nor its month can be why its path is missing. What is left is a
+  // disagreement between the profile's naming template and this seed's
+  // planted set.
   if (!base.filePaths.includes(replacedFrom)) {
     throw new Error(
-      `The misnamed-file plant for ${MISNAMED_FILE_CLIENT} expected to find ${replacedFrom} in the tree, to ` +
-        `rename it to ${replacedTo}, but the tree does not contain that path. The profile's naming template and ` +
-        "this seed's planted set have diverged.",
+      `${replacedFrom} is not in the tree buildSeedTree produced, so the misnamed-file plant for ` +
+        `${MISNAMED_FILE_CLIENT} cannot rename it to ${replacedTo}. clientCount and month are both guaranteed in ` +
+        "range here, so the profile's naming template and this seed's planted set must have diverged.",
     );
   }
   if (!base.filePaths.includes(omitted)) {
     throw new Error(
-      `The missing-file plant for ${MISSING_FILE_CLIENT} expected to find ${omitted} in the tree, to remove it, ` +
-        "but the tree does not contain that path. The profile's naming template and this seed's planted set have " +
-        "diverged.",
+      `${omitted} is not in the tree buildSeedTree produced, so the missing-file plant for ${MISSING_FILE_CLIENT} ` +
+        "cannot remove it. clientCount and month are both guaranteed in range here, so the profile's naming " +
+        "template and this seed's planted set must have diverged.",
     );
   }
 

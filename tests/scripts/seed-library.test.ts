@@ -242,21 +242,21 @@ describe("buildSeedPlan", () => {
 
   it("omits exactly one monthly file, for the planted client and month", () => {
     const plan = buildSeedPlan(exampleProfile(), options);
-    const omitted = `2026/${MISSING_FILE_CLIENT}/07-July/2026-07_${MISSING_FILE_CLIENT}_MonthlyTraining.xlsx`;
+    const omitted = `2026/${MISSING_FILE_CLIENT}/01-January/2026-01_${MISSING_FILE_CLIENT}_MonthlyTraining.xlsx`;
     expect(plan.tree.filePaths).not.toContain(omitted);
     // The folder still exists: a missing artifact and a missing client are
     // different findings, and this row is meant to produce the first.
-    expect(plan.tree.folderPaths).toContain(`2026/${MISSING_FILE_CLIENT}/07-July`);
-    expect(MISSING_FILE_MONTH).toBe(7);
+    expect(plan.tree.folderPaths).toContain(`2026/${MISSING_FILE_CLIENT}/01-January`);
+    expect(MISSING_FILE_MONTH).toBe(1);
   });
 
   it("writes the planted misnamed file in the vendor-token shape", () => {
     const plan = buildSeedPlan(exampleProfile(), options);
-    const compliant = `2026/${MISNAMED_FILE_CLIENT}/03-March/2026-03_${MISNAMED_FILE_CLIENT}_MonthlyTraining.xlsx`;
-    const misnamed = `2026/${MISNAMED_FILE_CLIENT}/03-March/2026-03_${MISNAMED_FILE_CLIENT}_VendorTraining.xlsx`;
+    const compliant = `2026/${MISNAMED_FILE_CLIENT}/01-January/2026-01_${MISNAMED_FILE_CLIENT}_MonthlyTraining.xlsx`;
+    const misnamed = `2026/${MISNAMED_FILE_CLIENT}/01-January/2026-01_${MISNAMED_FILE_CLIENT}_VendorTraining.xlsx`;
     expect(plan.tree.filePaths).not.toContain(compliant);
     expect(plan.tree.filePaths).toContain(misnamed);
-    expect(MISNAMED_FILE_MONTH).toBe(3);
+    expect(MISNAMED_FILE_MONTH).toBe(1);
   });
 
   it("is identical across two builds with the same arguments", () => {
@@ -279,23 +279,60 @@ describe("buildSeedPlan", () => {
     expect(() => buildSeedPlan(exampleProfile(), { ...options, clientCount: 13 })).toThrow(/clientCount/);
   });
 
-  it("names the misnamed-file plant when its rename target is absent from the tree", () => {
-    // throughMonth 2 excludes both planted months (misnamed's month 3 and
-    // missing's month 7), so both plants would fail here: this asserts the
-    // misnamed check is the one that actually fires and that its message
-    // names the misnamed plant, not the missing one.
-    expect(() =>
-      buildSeedPlan(exampleProfile(), { ...options, throughMonth: 2 }),
-    ).toThrow(/misnamed-file plant/);
+  // Both planted months are now fixed at 1, always within throughMonth's
+  // 1..12 range, and clientCount is bounded on both sides above, so neither
+  // lever can exclude one plant's path from the tree without also excluding
+  // the other's, or without buildSeedPlan refusing to run at all. The two
+  // tests below construct the divergence the guards actually exist to catch
+  // a different way: a profile whose naming.template answers differently on
+  // one specific read than it did while buildSeedTree built the tree, which
+  // is what "the profile's naming template and this seed's planted set have
+  // diverged" is describing.
+  //
+  // buildSeedTree reads profile.naming.template once per (client, month)
+  // pair while building the tree. With clientCount 9 (the plant's own floor)
+  // and throughMonth 1, that pair count is 9 (9 clients times 1 month), and
+  // month 1 is never a quarter-end month, so the quarterly branch never adds
+  // a read. buildSeedPlan then reads the template three more times, in a
+  // fixed order, one read per plantedPath call: omitted (the missing-file
+  // plant), then replacedFrom (the misnamed-file plant's rename source),
+  // then replacedTo (its rename target). So the omitted read is read 10, and
+  // the replacedFrom read is read 11.
+  const DIVERGENCE_OPTIONS = { clientCount: 9, year: 2026, includeQuarterly: true, throughMonth: 1 };
+  const OMITTED_TEMPLATE_READ = 10;
+  const REPLACED_FROM_TEMPLATE_READ = 11;
+
+  function profileWithDivergedTemplateOnRead(divergeOnRead: number): SeedProfileInput {
+    const profile = exampleProfile();
+    const realTemplate = profile.naming.template;
+    let reads = 0;
+    return {
+      ...profile,
+      naming: {
+        get template() {
+          reads += 1;
+          return reads === divergeOnRead ? "{year}-{month:02}_{client}_{deliverable}_DIVERGED.xlsx" : realTemplate;
+        },
+      },
+    };
+  }
+
+  it("names the missing-file plant when only its path was computed from a different template", () => {
+    // Read 10 (omitted) answers with a different template; read 11
+    // (replacedFrom) still answers with the real one, so the misnamed check
+    // passes on its own and the missing-file check is the one that fires.
+    expect(() => buildSeedPlan(profileWithDivergedTemplateOnRead(OMITTED_TEMPLATE_READ), DIVERGENCE_OPTIONS)).toThrow(
+      /missing-file plant/,
+    );
   });
 
-  it("names the missing-file plant when only its target is absent from the tree", () => {
-    // throughMonth 5 includes the misnamed plant's month (3) but excludes the
-    // missing plant's month (7): the misnamed check passes on its own, and
-    // the missing-file check is the one that fires, independently of it.
+  it("names the misnamed-file plant when only its rename-source path was computed from a different template", () => {
+    // Read 11 (replacedFrom) answers with a different template; read 10
+    // (omitted) still answers with the real one, so the misnamed check is
+    // the one that fires, independently of the missing-file check.
     expect(() =>
-      buildSeedPlan(exampleProfile(), { ...options, throughMonth: 5 }),
-    ).toThrow(/missing-file plant/);
+      buildSeedPlan(profileWithDivergedTemplateOnRead(REPLACED_FROM_TEMPLATE_READ), DIVERGENCE_OPTIONS),
+    ).toThrow(/misnamed-file plant/);
   });
 });
 
