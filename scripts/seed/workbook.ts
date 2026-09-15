@@ -34,12 +34,17 @@ export async function createSeedWorkbook(
   const { parentPath, libraryRelative } = splitWorkbookPath(workbookPath);
 
   // The workbook's folder is not part of the taxonomy, so the tree writer
-  // never creates it.
-  if (parentPath !== "") {
-    const lastSlash = parentPath.lastIndexOf("/");
-    const grandparent = lastSlash === -1 ? "" : parentPath.slice(0, lastSlash);
-    const name = lastSlash === -1 ? parentPath : parentPath.slice(lastSlash + 1);
-    await client.createFolder(driveId, grandparent, name);
+  // never creates it. Every ancestor is created in order, root to leaf, the
+  // same way executeSeed's own folder loop walks tree.folderPaths: Graph's
+  // children endpoint needs a parent to already exist before a child can be
+  // created inside it, so a workbookPath nested more than one level deep
+  // needs one createFolder call per level, not one call naming the leaf
+  // under an ancestor that was never created.
+  const parentSegments = parentPath === "" ? [] : parentPath.split("/").filter((segment) => segment.length > 0);
+  let ancestorPath = "";
+  for (const segment of parentSegments) {
+    await client.createFolder(driveId, ancestorPath, segment);
+    ancestorPath = ancestorPath === "" ? segment : `${ancestorPath}/${segment}`;
   }
 
   try {
@@ -53,9 +58,27 @@ export async function createSeedWorkbook(
 
   const item = driveItemPath(driveId, libraryRelative);
   const grid = workbookGrid(plan);
-  await client.patch(`${item}/workbook/worksheets('${SHEET_NAME}')/range(address='${rangeAddress(plan)}')`, {
-    values: grid,
-  });
+
+  try {
+    // Stated as position, not as diagnosis: this range write is the first
+    // call that requires Graph to open the uploaded file as a workbook, so a
+    // failure here implicates the uploaded bytes more than anything after
+    // it. Which of the two it actually was is not something this code
+    // observed.
+    await client.patch(`${item}/workbook/worksheets('${SHEET_NAME}')/range(address='${rangeAddress(plan)}')`, {
+      values: grid,
+    });
+  } catch (error) {
+    if (error instanceof GraphRequestError) {
+      throw new Error(
+        `Writing the client rows into ${workbookPath} failed with ${error.status}. This is the first call that ` +
+          "requires Graph to open the uploaded file as a workbook, so the bytes this script uploaded are the " +
+          "first thing to suspect.",
+      );
+    }
+    throw error;
+  }
+
   await client.patch(`${item}/workbook/worksheets('${SHEET_NAME}')/range(address='${onboardedColumnAddress(plan)}')`, {
     numberFormat: grid.slice(1).map(() => [DATE_NUMBER_FORMAT]),
   });
@@ -74,14 +97,15 @@ export async function createSeedWorkbook(
             "updating it, so a table surviving the upload means the upload did not replace what was there.",
         );
       }
-      // Stated as position, not as diagnosis: this is the first call that
-      // requires Graph to open the file as a workbook, so a failure here
-      // implicates the uploaded bytes more than anything after it. Which of
-      // the two it actually was is not something this code observed.
+      // Two /workbook/ calls already succeeded by this point, both range
+      // writes above, so the code has positively observed that Graph can
+      // open the uploaded file as a workbook. The uploaded bytes are
+      // therefore not the suspect here; this request's own inputs are: the
+      // address, the header row, or a table already sitting at that range.
       throw new Error(
-        `Adding the ${TABLE_NAME} table to ${workbookPath} failed with ${error.status}. This is the first call ` +
-          "that requires Graph to open the uploaded file as a workbook, so the bytes this script uploaded are " +
-          "the first thing to suspect.",
+        `Adding the ${TABLE_NAME} table to ${workbookPath} failed with ${error.status}. Two workbook calls ` +
+          "already succeeded before this one, so Graph could open the uploaded file; this request's own " +
+          "address, header row, or an existing table at that address is the more likely cause.",
       );
     }
     throw error;

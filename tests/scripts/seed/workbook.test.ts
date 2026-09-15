@@ -58,4 +58,33 @@ describe("createSeedWorkbook", () => {
     expect(values[0]).toEqual(["Client", "Monthly Training", "Quarterly Phishing", "Onboarded"]);
     expect(values).toHaveLength(14);
   });
+
+  it("creates every ancestor folder in order for a workbook nested two levels deep", async () => {
+    const { client, calls } = recordingClient((call) =>
+      call.url.includes("/tables/add") ? new Response(JSON.stringify({ id: "t" }), { status: 201 }) : new Response("{}", { status: 200 }),
+    );
+
+    await createSeedWorkbook(client, "drive-1", "/Ops/Trackers/Workbook.xlsx", plan());
+
+    // One POST per ancestor level, root to leaf, before the upload: "Ops"
+    // under the drive root, then "Trackers" under "Ops". A single
+    // createFolder call naming "Trackers" under a parent that was never
+    // created would fail against a real tenant, which is exactly the defect
+    // this test guards against.
+    expect(calls.map((call) => call.method)).toEqual(["POST", "POST", "PUT", "PATCH", "PATCH", "POST", "PATCH"]);
+    expect(calls[0]?.url).not.toContain("Ops:/children");
+    expect(JSON.parse(calls[0]?.body ?? "{}")).toMatchObject({ name: "Ops" });
+    expect(calls[1]?.url).toContain("root:/Ops:/children");
+    expect(JSON.parse(calls[1]?.body ?? "{}")).toMatchObject({ name: "Trackers" });
+  });
+
+  it("issues no folder call for a workbook at the library root", async () => {
+    const { client, calls } = recordingClient((call) =>
+      call.url.includes("/tables/add") ? new Response(JSON.stringify({ id: "t" }), { status: 201 }) : new Response("{}", { status: 200 }),
+    );
+
+    await createSeedWorkbook(client, "drive-1", "/Workbook.xlsx", plan());
+
+    expect(calls.map((call) => call.method)).toEqual(["PUT", "PATCH", "PATCH", "POST", "PATCH"]);
+  });
 });
