@@ -47,10 +47,17 @@ export function reconcileText(output: ReconcileToolOutput): string[] {
   );
 
   const compliantClients = output.clients.filter((client) => client.compliant).length;
+  // The noun tracks the denominator (how many clients are in scope) and the
+  // verb tracks the numerator (how many of them are compliant); those are two
+  // different counts, and a single `plural()` call over one of them made the
+  // verb agree with the wrong number, assembling "1 of 2 clients are
+  // compliant" for a single compliant client.
+  const totalClientsNoun = output.clients.length === 1 ? "client" : "clients";
+  const compliantVerb = compliantClients === 1 ? "is" : "are";
   lines.push(
     output.clients.length === 0
       ? "No clients are in scope, so there is no compliance result to report."
-      : `${compliantClients} of ${plural(output.clients.length, "client is", "clients are")} compliant.`,
+      : `${compliantClients} of ${output.clients.length} ${totalClientsNoun} ${compliantVerb} compliant.`,
   );
 
   // Tallied over the returned findings rather than over the per-client counts,
@@ -73,8 +80,15 @@ export function reconcileText(output: ReconcileToolOutput): string[] {
   );
 
   if (output.artifactsOmittedByCap > 0) {
+    // "further" presupposes a list the reader has already seen some of. When
+    // the cap is small enough that nothing survived it, `artifacts` is empty
+    // and "further" would describe omissions from a list this response never
+    // showed, so the qualifier is dropped exactly when there is nothing for
+    // it to follow.
+    const qualifier = output.artifacts.length > 0 ? "further " : "";
+    const findingWord = output.artifactsOmittedByCap === 1 ? "finding was" : "findings were";
     lines.push(
-      `${plural(output.artifactsOmittedByCap, "further non-compliant finding was", "further non-compliant findings were")} ` +
+      `${output.artifactsOmittedByCap} ${qualifier}non-compliant ${findingWord} ` +
         "omitted to keep this response bounded. The per-client counts above are complete and were not truncated; " +
         "narrow the call with the clients argument to see the rest.",
     );
@@ -94,12 +108,24 @@ export function reconcileText(output: ReconcileToolOutput): string[] {
     extras.push(plural(output.emptyFolders.length, "empty folder", "empty folders"));
   }
   if (extras.length > 0) {
-    lines.push(
-      `Also found: ${extras.join(", ")}.` +
-        (output.scope.unattributableFindingsRepositoryWide
+    // The caveat below is specifically about unrecognized orphans and empty
+    // folders, so it must not fire on a filtered report whose "Also found"
+    // line lists only duplicates or client-attributed orphans, neither of
+    // which the caveat's own sentence is about.
+    const hasUnattributableExtras =
+      output.orphans.some((orphan) => orphan.kind === "unrecognized") || output.emptyFolders.length > 0;
+    // scope.clients is `[]` when the caller passed an empty client list, which
+    // still sets `unattributableFindingsRepositoryWide` (the filter exists)
+    // without a single client having been named, so "scoped to the named
+    // clients" would name clients that were never named.
+    const clientsWereNamed = (output.scope.clients?.length ?? 0) > 0;
+    const caveat =
+      output.scope.unattributableFindingsRepositoryWide && hasUnattributableExtras
+        ? clientsWereNamed
           ? " Unrecognized orphans and empty folders are repository-wide rather than scoped to the named clients, because neither is attributable to a client."
-          : ""),
-    );
+          : " Unrecognized orphans and empty folders are repository-wide, because neither is attributable to a client."
+        : "";
+    lines.push(`Also found: ${extras.join(", ")}.${caveat}`);
   }
 
   if (output.rejectedWorkbookRows.length > 0) {
@@ -110,9 +136,15 @@ export function reconcileText(output: ReconcileToolOutput): string[] {
   }
 
   if (output.scope.unknownClients.length > 0) {
+    // The verb and the trailing pronoun both describe the same named clients,
+    // so they must track the same count; picking `is` for the verb while
+    // leaving "it" fixed regardless of count read as one client's worth of
+    // grammar wrapped around a list of several.
+    const severalUnknown = output.scope.unknownClients.length !== 1;
     lines.push(
-      `${quoteList(output.scope.unknownClients)} ${output.scope.unknownClients.length === 1 ? "is" : "are"} ` +
-        "not in the workbook, so nothing was reconciled for it. That is not the same as having nothing outstanding.",
+      `${quoteList(output.scope.unknownClients)} ${severalUnknown ? "are" : "is"} ` +
+        `not in the workbook, so nothing was reconciled for ${severalUnknown ? "them" : "it"}. ` +
+        "That is not the same as having nothing outstanding.",
     );
   }
 
