@@ -4,11 +4,25 @@ import { buildSeedPlan, ABSENT_CLIENT, MISNAMED_FILE_CLIENT, MISSING_FILE_CLIENT
 import { expectedReport, formatExpectedReport, parseProfile } from "../../../scripts/seed/expected.js";
 import { exampleSeedProfile } from "./fixtures.js";
 
-const profile = parseProfile(JSON.parse(readFileSync("examples/profiles/example.json", "utf8")));
+const exampleProfileJson = JSON.parse(readFileSync("examples/profiles/example.json", "utf8"));
+const profile = parseProfile(exampleProfileJson);
 const plan = buildSeedPlan(exampleSeedProfile(), { clientCount: 12, year: 2026, includeQuarterly: true, throughMonth: 9 });
 const report = () => expectedReport(profile, plan, { year: 2026, month: 9 });
 const workbookPath = profile.identity.workbookPath;
 const workbookInLibrary = workbookPath.replace(/^\/+/, "");
+
+/**
+ * The base example profile with only identity.workbookPath swapped, so a
+ * test can put the seeded workbook at a filename that behaves differently
+ * against examples/profiles/example.json's own taxonomy, naming template and
+ * recognizers without inventing a second profile to track.
+ */
+function profileWithWorkbookPath(newWorkbookPath: string) {
+  return parseProfile({
+    ...exampleProfileJson,
+    identity: { ...exampleProfileJson.identity, workbookPath: newWorkbookPath },
+  });
+}
 
 describe("expectedReport", () => {
   it("reports every period the absent client owes as missing", () => {
@@ -78,6 +92,45 @@ describe("formatExpectedReport", () => {
     const lines = formatExpectedReport(current, workbookPath).join("\n");
     expect(current.emptyFolders.length).toBeGreaterThan(0);
     for (const folder of current.emptyFolders) expect(lines).toContain(folder);
+  });
+
+  it("distinguishes an unexpected orphan from an unrecognized one, since the engine already tells them apart", () => {
+    // example.json's "legacy-spaced" recognizer matches this shape but names
+    // a client with no workbook row, so the workbook parses cleanly and still
+    // lands as an orphan: this is the case the old unconditional wording got
+    // backwards, reading as "no recognizer matches" for a file a recognizer
+    // just matched.
+    const unexpectedProfile = profileWithWorkbookPath("/Trackers/ZZZZ Monthly - January 2000.xlsx");
+    const unexpectedWorkbookInLibrary = unexpectedProfile.identity.workbookPath.replace(/^\/+/, "");
+    const unexpectedReport = expectedReport(unexpectedProfile, plan, { year: 2026, month: 9 });
+
+    const orphan = unexpectedReport.orphans.find((candidate) => candidate.path === unexpectedWorkbookInLibrary);
+    expect(orphan?.kind).toBe("unexpected");
+
+    const lines = formatExpectedReport(unexpectedReport, unexpectedProfile.identity.workbookPath).join("\n");
+    expect(lines).toContain(
+      "a recognizer in the profile matches its name, but no slot in this report expects the client, deliverable",
+    );
+    expect(lines).toContain("engine reports it as an unexpected orphan");
+    expect(lines).not.toMatch(/no recognizer in the profile matches its name/);
+  });
+
+  it("states plainly, without a guessed cause, when the workbook is absent from the orphan list", () => {
+    // A filename that matches the canonical naming template for a client,
+    // deliverable and period the workbook already owes is recognized into
+    // that real artifact slot rather than reported as any kind of orphan,
+    // which is the second way the old wording's guess could be wrong: absence
+    // from the orphan list is not proof no recognizer matched.
+    const recognizedProfile = profileWithWorkbookPath("/Trackers/2026-09_Client01_MonthlyTraining.xlsx");
+    const recognizedWorkbookInLibrary = recognizedProfile.identity.workbookPath.replace(/^\/+/, "");
+    const recognizedReport = expectedReport(recognizedProfile, plan, { year: 2026, month: 9 });
+
+    expect(recognizedReport.orphans.some((candidate) => candidate.path === recognizedWorkbookInLibrary)).toBe(false);
+
+    const lines = formatExpectedReport(recognizedReport, recognizedProfile.identity.workbookPath).join("\n");
+    expect(lines).toContain("but the orphan list above does not name it");
+    expect(lines).toContain("not why it is or is not there");
+    expect(lines).not.toMatch(/no recognizer in the profile matches its name/);
   });
 
   it("names the deliverable on each artifact line, so one client's two findings for a month differ", () => {

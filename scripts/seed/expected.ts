@@ -26,6 +26,7 @@ import type {
 import type { SeedPlan } from "../seed-library.js";
 import { excelDateSerial } from "./rows.js";
 import { workbookAncestorPaths, workbookLibraryPath } from "./workbook.js";
+import type { OrphanKind } from "../../src/domain/reconcile/index.js";
 
 export type { Profile };
 
@@ -116,6 +117,26 @@ function section(heading: string, rows: string[]): string[] {
   return [heading, ...(rows.length === 0 ? ["    (none)"] : rows)];
 }
 
+/**
+ * States only what a given `OrphanKind` means, per the definition in
+ * types.ts: `unrecognized` is a parse failure against both the canonical
+ * template and every recognizer, `unexpected` is a clean parse into a client,
+ * deliverable and period that no slot in this report expects. Naming a cause
+ * for either would assert something the engine did not observe; this reads
+ * the cause straight off the classification the engine already made.
+ */
+function orphanKindClause(kind: OrphanKind): string {
+  switch (kind) {
+    case "unrecognized":
+      return "neither the naming template nor any recognizer in the profile matches its name, so the engine reports it as an unrecognized orphan";
+    case "unexpected":
+      return (
+        "a recognizer in the profile matches its name, but no slot in this report expects the client, deliverable " +
+        "and period it captured, so the engine reports it as an unexpected orphan"
+      );
+  }
+}
+
 export function formatExpectedReport(report: ReconciliationReport, workbookPath: string): string[] {
   const exceptions = report.artifacts.filter((artifact) => artifact.state !== "compliant");
   const workbookInLibrary = workbookLibraryPath(workbookPath);
@@ -157,15 +178,19 @@ export function formatExpectedReport(report: ReconciliationReport, workbookPath:
     "",
     // Read off the predicted report rather than stated as a fact about every
     // run: this function can see whether the workbook is among the orphans it
-    // is printing, so it says which of the two it found.
+    // is printing and, when it is, which kind the engine gave it, so it says
+    // only that. It does not guess why a recognizer did or did not match, and
+    // it does not guess why the workbook is absent from the list when it is:
+    // absence could equally mean a recognizer matched it into a real
+    // artifact slot, which this function never checked.
     workbookOrphan === undefined
-      ? `${workbookInLibrary} is the tracking workbook this seed writes, and no orphan above names it. It sits ` +
-        "inside the library it describes and no recognizer in the profile matches its name, so an orphan the " +
-        "live tool reports at that path is this file rather than a finding against the tool."
+      ? `${workbookInLibrary} is the tracking workbook this seed writes. It sits inside the library it describes, ` +
+        "so the live scan enumerates it along with everything else, but the orphan list above does not name it. " +
+        "This function only checks whether the workbook's path is among the predicted orphans, not why it is or " +
+        "is not there. If the live tool reports an orphan at that path, it is this file, not a new finding."
       : `The orphan above at ${workbookInLibrary} is the tracking workbook this seed writes. It sits inside the ` +
-        "library it describes, the scan excludes nothing at that path, and no recognizer in the profile matches " +
-        `its name, so the engine reports it as an ${workbookOrphan.kind} orphan. That row is expected, not a ` +
-        "finding against the tool.",
+        `library it describes, the scan excludes nothing at that path, and ${orphanKindClause(workbookOrphan.kind)}. ` +
+        "That row is expected, not a finding against the tool.",
     "",
     "Compare the counts first, then the rows. Anything the live tool reports that is not listed above is a real",
     "finding. This expectation was computed by running the same engine the tool runs, so it cannot",
