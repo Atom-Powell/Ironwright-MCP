@@ -1206,12 +1206,19 @@ The file opens by stating it deliberately imports nothing from `src/domain/`. Th
 
 ```ts
 /*
- * Imports exactly one thing from src/domain/: the reconciliation engine's
- * front door, used by scripts/seed/expected.ts to predict the report this
- * seed should produce. That is what the front door is for, and the
- * alternative is a second implementation of the rolling window, the quarterly
- * anchor and the effective-date rule, which is the duplication the
- * single-entry rule exists to prevent.
+ * Imports two things from src/domain/, both through scripts/seed/expected.ts.
+ * The reconciliation engine's front door, to predict the report this seed
+ * should produce: that is what the front door is for, and the alternative is a
+ * second implementation of the rolling window, the quarterly anchor and the
+ * effective-date rule, which is the duplication the single-entry rule exists
+ * to prevent. And the profile schema, because reconcile takes a validated
+ * Profile while this script starts from raw JSON, so something has to parse
+ * it, and a second hand-written validator would be the same duplication in a
+ * different place.
+ *
+ * Corrected 2026-09-15: this paragraph originally said "exactly one thing" and
+ * never mentioned the schema, which made the comment written to fix a false
+ * comment false in the same way.
  *
  * The token substitution below is still a local reimplementation of just
  * enough of naming.template's placeholder syntax, not a second copy of the
