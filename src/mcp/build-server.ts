@@ -16,7 +16,7 @@ export interface BuildServerOptions {
   tools?: ToolDefinition[];
 }
 
-export const SERVER_NAME = "ironwright-repo-reconciliation";
+export const SERVER_NAME = "ironwright-mcp";
 export const SERVER_VERSION = "0.1.0";
 
 /**

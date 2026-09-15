@@ -1,5 +1,5 @@
 {
-  "name": "@ironwright/repo-reconciliation-mcp",
+  "name": "@ironwright/mcp",
   "version": "0.1.0",
   "description": "MCP Server by Ironwright (Adam Powell).",
   "directories": {

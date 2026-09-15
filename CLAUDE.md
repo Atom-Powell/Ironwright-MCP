@@ -88,7 +88,11 @@ latency reason.
 governance is per-server rather than per-tool and cannot substitute for it.
 
 **Name.** The product is officially Ironwright MCP. Settled 2026-09-15, closing the last item
-that was carried as open. Use that spelling in prose, with the repo staying `Ironwright-MCP`.
+that was carried as open. Use that spelling in prose, with the repo staying `Ironwright-MCP`. The
+identifiers follow it: the npm package is `@ironwright/mcp` and the advertised MCP server name is
+`ironwright-mcp`. Both were renamed the same day, before any deployment or connector exists to key
+on the old strings. The executed plan documents still quote the old server name and are left alone,
+because they are history rather than current instruction.
 
 **Product shape.** An Ironwright product under Elastic License 2.0, not an internal tool. One
 server instance per customer tenant. Recurring-deliverable compliance is the fixed domain shape,
