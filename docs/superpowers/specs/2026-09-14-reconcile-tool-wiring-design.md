@@ -256,10 +256,10 @@ Two of these are stated in the text block in words rather than left as fields, b
 | Path | Purpose | Pure |
 |---|---|---|
 | `src/tools/context.ts` | `ToolContext` and `ToolHandler` types | types only |
-| `src/tools/reconcile/run.ts` | The tool's composition root: profile, workbook, scan, engine | no |
-| `src/tools/reconcile/shape.ts` | Report to tool output: filter, omit, truncate | yes |
-| `src/tools/reconcile/output.ts` | The Zod `outputSchema` and its types | yes |
-| `src/tools/reconcile/text.ts` | The text block, derived from the shaped output | yes |
+| `src/tools/reconciliation/run.ts` | The tool's composition root: profile, workbook, scan, engine | no |
+| `src/tools/reconciliation/shape.ts` | Report to tool output: filter, omit, truncate | yes |
+| `src/tools/reconciliation/output.ts` | The Zod `outputSchema` and its types | yes |
+| `src/tools/reconciliation/text.ts` | The text block, derived from the shaped output | yes |
 | `src/tools/errors.ts` | Failure to operator-readable message | yes |
 | `src/profiles/registry.ts` | `createProfileRegistry`, `loadProfileDirectory` | split |
 | `src/scan/coordinator.ts` | Single-flight scan coordination | no |
