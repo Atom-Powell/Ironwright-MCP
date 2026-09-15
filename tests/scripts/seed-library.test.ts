@@ -21,24 +21,10 @@ import {
   type SeedGraphClient,
   type SeedProfileInput,
 } from "../../scripts/seed-library.js";
-
-function exampleProfile(): SeedProfileInput {
-  // Mirrors examples/profiles/example.json's taxonomy, naming, and
-  // deliverables exactly, since the spec that drove this script names that
-  // file as the token vocabulary this seeder has to support.
-  return {
-    identity: { siteUrl: "https://contoso.sharepoint.com/sites/Example", library: "Compliance Reports" },
-    taxonomy: { segments: ["{year}", "{client}", "{month:02}-{monthName}"] },
-    naming: { template: "{year}-{month:02}_{client}_{deliverable}.xlsx" },
-    deliverables: [
-      { token: "MonthlyTraining", cadence: "monthly" },
-      { token: "QuarterlyPhishing", cadence: "quarterly" },
-    ],
-  };
-}
+import { exampleSeedProfile } from "./seed/fixtures.js";
 
 function exampleProfileRaw(): unknown {
-  return exampleProfile();
+  return exampleSeedProfile();
 }
 
 describe("substituteTokens", () => {
@@ -77,14 +63,14 @@ describe("splitPath", () => {
 
 describe("buildSeedTree", () => {
   it("produces 157 folders and 192 files for the documented default shape", () => {
-    const tree = buildSeedTree(exampleProfile(), { clientCount: DEFAULT_CLIENT_COUNT, year: 2026, includeQuarterly: true, throughMonth: 12 });
+    const tree = buildSeedTree(exampleSeedProfile(), { clientCount: DEFAULT_CLIENT_COUNT, year: 2026, includeQuarterly: true, throughMonth: 12 });
 
     expect(tree.folderPaths).toHaveLength(157);
     expect(tree.filePaths).toHaveLength(192);
   });
 
   it("builds one year folder, one folder per client, and one per client-month", () => {
-    const tree = buildSeedTree(exampleProfile(), { clientCount: 2, year: 2026, includeQuarterly: false, throughMonth: 12 });
+    const tree = buildSeedTree(exampleSeedProfile(), { clientCount: 2, year: 2026, includeQuarterly: false, throughMonth: 12 });
 
     expect(tree.folderPaths).toContain("2026");
     expect(tree.folderPaths).toContain("2026/Client01");
@@ -96,13 +82,13 @@ describe("buildSeedTree", () => {
   });
 
   it("lists every folder exactly once even though clients and months share ancestors", () => {
-    const tree = buildSeedTree(exampleProfile(), { clientCount: 3, year: 2026, includeQuarterly: false, throughMonth: 12 });
+    const tree = buildSeedTree(exampleSeedProfile(), { clientCount: 3, year: 2026, includeQuarterly: false, throughMonth: 12 });
 
     expect(new Set(tree.folderPaths).size).toBe(tree.folderPaths.length);
   });
 
   it("orders every folder after its own parent", () => {
-    const tree = buildSeedTree(exampleProfile(), { clientCount: 2, year: 2026, includeQuarterly: true, throughMonth: 12 });
+    const tree = buildSeedTree(exampleSeedProfile(), { clientCount: 2, year: 2026, includeQuarterly: true, throughMonth: 12 });
 
     for (const path of tree.folderPaths) {
       const lastSlash = path.lastIndexOf("/");
@@ -113,13 +99,13 @@ describe("buildSeedTree", () => {
   });
 
   it("places the monthly file under the client's month folder, named from the template", () => {
-    const tree = buildSeedTree(exampleProfile(), { clientCount: 1, year: 2026, includeQuarterly: false, throughMonth: 12 });
+    const tree = buildSeedTree(exampleSeedProfile(), { clientCount: 1, year: 2026, includeQuarterly: false, throughMonth: 12 });
 
     expect(tree.filePaths).toContain("2026/Client01/01-January/2026-01_Client01_MonthlyTraining.xlsx");
   });
 
   it("adds a quarterly file only in the last month of each quarter when requested", () => {
-    const tree = buildSeedTree(exampleProfile(), { clientCount: 1, year: 2026, includeQuarterly: true, throughMonth: 12 });
+    const tree = buildSeedTree(exampleSeedProfile(), { clientCount: 1, year: 2026, includeQuarterly: true, throughMonth: 12 });
 
     expect(tree.filePaths).toContain("2026/Client01/03-March/2026-03_Client01_QuarterlyPhishing.xlsx");
     expect(tree.filePaths).toContain("2026/Client01/06-June/2026-06_Client01_QuarterlyPhishing.xlsx");
@@ -129,14 +115,14 @@ describe("buildSeedTree", () => {
   });
 
   it("omits every quarterly file when includeQuarterly is false", () => {
-    const tree = buildSeedTree(exampleProfile(), { clientCount: 1, year: 2026, includeQuarterly: false, throughMonth: 12 });
+    const tree = buildSeedTree(exampleSeedProfile(), { clientCount: 1, year: 2026, includeQuarterly: false, throughMonth: 12 });
 
     expect(tree.filePaths.some((path) => path.includes("QuarterlyPhishing"))).toBe(false);
     expect(tree.filePaths).toHaveLength(12);
   });
 
   it("builds a tree of one client's worth for clientCount 1", () => {
-    const tree = buildSeedTree(exampleProfile(), { clientCount: 1, year: 2026, includeQuarterly: false, throughMonth: 12 });
+    const tree = buildSeedTree(exampleSeedProfile(), { clientCount: 1, year: 2026, includeQuarterly: false, throughMonth: 12 });
 
     expect(tree.folderPaths).toHaveLength(1 + 1 + 12);
   });
@@ -144,7 +130,7 @@ describe("buildSeedTree", () => {
 
 describe("estimateGraphRequests", () => {
   it("is exactly two more than the tree's own folder and file counts", () => {
-    const tree = buildSeedTree(exampleProfile(), { clientCount: 2, year: 2026, includeQuarterly: true, throughMonth: 12 });
+    const tree = buildSeedTree(exampleSeedProfile(), { clientCount: 2, year: 2026, includeQuarterly: true, throughMonth: 12 });
 
     expect(estimateGraphRequests(tree)).toBe(2 + tree.folderPaths.length + tree.filePaths.length);
   });
@@ -206,7 +192,7 @@ describe("parseSeedArguments throughMonth", () => {
 
 describe("formatDryRunReport", () => {
   it("states the tree's own counts and derives the estimate from them", () => {
-    const tree = buildSeedTree(exampleProfile(), { clientCount: 1, year: 2026, includeQuarterly: false, throughMonth: 12 });
+    const tree = buildSeedTree(exampleSeedProfile(), { clientCount: 1, year: 2026, includeQuarterly: false, throughMonth: 12 });
     const lines = formatDryRunReport(tree, {
       profilePath: "p.json",
       clientCount: 1,
@@ -228,20 +214,20 @@ describe("buildSeedPlan", () => {
   const options = { clientCount: 12, year: 2026, includeQuarterly: true, throughMonth: 9 };
 
   it("stops the tree at throughMonth", () => {
-    const plan = buildSeedPlan(exampleProfile(), options);
+    const plan = buildSeedPlan(exampleSeedProfile(), options);
     expect(plan.tree.filePaths.some((path) => path.includes("10-October"))).toBe(false);
     expect(plan.tree.filePaths.some((path) => path.includes("09-September"))).toBe(true);
   });
 
   it("writes no folder for the absent client but lists it in the workbook", () => {
-    const plan = buildSeedPlan(exampleProfile(), options);
+    const plan = buildSeedPlan(exampleSeedProfile(), options);
     expect(plan.clients).not.toContain(ABSENT_CLIENT);
     expect(plan.workbookClients).toContain(ABSENT_CLIENT);
     expect(plan.tree.folderPaths.some((path) => path.includes(ABSENT_CLIENT))).toBe(false);
   });
 
   it("omits exactly one monthly file, for the planted client and month", () => {
-    const plan = buildSeedPlan(exampleProfile(), options);
+    const plan = buildSeedPlan(exampleSeedProfile(), options);
     const omitted = `2026/${MISSING_FILE_CLIENT}/01-January/2026-01_${MISSING_FILE_CLIENT}_MonthlyTraining.xlsx`;
     expect(plan.tree.filePaths).not.toContain(omitted);
     // The folder still exists: a missing artifact and a missing client are
@@ -251,7 +237,7 @@ describe("buildSeedPlan", () => {
   });
 
   it("writes the planted misnamed file in the vendor-token shape", () => {
-    const plan = buildSeedPlan(exampleProfile(), options);
+    const plan = buildSeedPlan(exampleSeedProfile(), options);
     const compliant = `2026/${MISNAMED_FILE_CLIENT}/01-January/2026-01_${MISNAMED_FILE_CLIENT}_MonthlyTraining.xlsx`;
     const misnamed = `2026/${MISNAMED_FILE_CLIENT}/01-January/2026-01_${MISNAMED_FILE_CLIENT}_VendorTraining.xlsx`;
     expect(plan.tree.filePaths).not.toContain(compliant);
@@ -260,7 +246,7 @@ describe("buildSeedPlan", () => {
   });
 
   it("is identical across two builds with the same arguments", () => {
-    expect(buildSeedPlan(exampleProfile(), options)).toEqual(buildSeedPlan(exampleProfile(), options));
+    expect(buildSeedPlan(exampleSeedProfile(), options)).toEqual(buildSeedPlan(exampleSeedProfile(), options));
   });
 
   it("refuses a clientCount below the highest planted client index", () => {
@@ -268,7 +254,7 @@ describe("buildSeedPlan", () => {
     // indexes, so a clientCount of 8 never builds a folder for it: planting
     // would fail for a reason that has nothing to do with the naming
     // template, which is exactly the false blame this guard exists to avoid.
-    expect(() => buildSeedPlan(exampleProfile(), { ...options, clientCount: 8 })).toThrow(/clientCount/);
+    expect(() => buildSeedPlan(exampleSeedProfile(), { ...options, clientCount: 8 })).toThrow(/clientCount/);
   });
 
   it("refuses a clientCount at or above ABSENT_CLIENT's index", () => {
@@ -276,7 +262,7 @@ describe("buildSeedPlan", () => {
     // folder for it, which is exactly the client this plant needs to stay
     // absent from the repository so the reconciliation report has a missing
     // client finding to make.
-    expect(() => buildSeedPlan(exampleProfile(), { ...options, clientCount: 13 })).toThrow(/clientCount/);
+    expect(() => buildSeedPlan(exampleSeedProfile(), { ...options, clientCount: 13 })).toThrow(/clientCount/);
   });
 
   // Both planted months are now fixed at 1, always within throughMonth's
@@ -303,7 +289,7 @@ describe("buildSeedPlan", () => {
   const REPLACED_FROM_TEMPLATE_READ = 11;
 
   function profileWithDivergedTemplateOnRead(divergeOnRead: number): SeedProfileInput {
-    const profile = exampleProfile();
+    const profile = exampleSeedProfile();
     const realTemplate = profile.naming.template;
     let reads = 0;
     return {
@@ -356,7 +342,7 @@ describe("formatExecutionReport", () => {
 
 describe("loadSeedProfile", () => {
   it("accepts the fields this script needs from a profile-shaped object", () => {
-    expect(loadSeedProfile(exampleProfileRaw())).toEqual(exampleProfile());
+    expect(loadSeedProfile(exampleProfileRaw())).toEqual(exampleSeedProfile());
   });
 });
 
@@ -390,7 +376,7 @@ function fakeSeedClient(driveName: string): { client: SeedGraphClient; calls: st
 
 describe("executeSeed", () => {
   it("resolves the drive, creates every folder before any file, and counts every request", async () => {
-    const profile = exampleProfile();
+    const profile = exampleSeedProfile();
     const tree = buildSeedTree(profile, { clientCount: 1, year: 2026, includeQuarterly: false, throughMonth: 12 });
     const { client, calls } = fakeSeedClient(profile.identity.library);
 

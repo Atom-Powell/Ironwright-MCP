@@ -5,20 +5,8 @@ import {
   loadSeedProfile,
   parseSeedArguments,
   substituteTokens,
-  type SeedProfileInput,
 } from "../../scripts/seed-library.js";
-
-function exampleProfile(): SeedProfileInput {
-  return {
-    identity: { siteUrl: "https://contoso.sharepoint.com/sites/Example", library: "Compliance Reports" },
-    taxonomy: { segments: ["{year}", "{client}", "{month:02}-{monthName}"] },
-    naming: { template: "{year}-{month:02}_{client}_{deliverable}.xlsx" },
-    deliverables: [
-      { token: "MonthlyTraining", cadence: "monthly" },
-      { token: "QuarterlyPhishing", cadence: "quarterly" },
-    ],
-  };
-}
+import { exampleSeedProfile } from "./seed/fixtures.js";
 
 describe("substituteTokens failures", () => {
   it("refuses a token this seeder does not support", () => {
@@ -44,31 +32,31 @@ describe("substituteTokens failures", () => {
 
 describe("buildSeedTree failures", () => {
   it("refuses a clientCount below 1", () => {
-    expect(() => buildSeedTree(exampleProfile(), { clientCount: 0, year: 2026, includeQuarterly: false, throughMonth: 12 })).toThrow(
+    expect(() => buildSeedTree(exampleSeedProfile(), { clientCount: 0, year: 2026, includeQuarterly: false, throughMonth: 12 })).toThrow(
       /clientCount/,
     );
   });
 
   it("refuses a non-integer clientCount", () => {
-    expect(() => buildSeedTree(exampleProfile(), { clientCount: 1.5, year: 2026, includeQuarterly: false, throughMonth: 12 })).toThrow(
+    expect(() => buildSeedTree(exampleSeedProfile(), { clientCount: 1.5, year: 2026, includeQuarterly: false, throughMonth: 12 })).toThrow(
       /clientCount/,
     );
   });
 
   it("refuses a profile with no monthly-cadence deliverable", () => {
-    const profile = exampleProfile();
+    const profile = exampleSeedProfile();
     profile.deliverables = [{ token: "QuarterlyPhishing", cadence: "quarterly" }];
     expect(() => buildSeedTree(profile, { clientCount: 1, year: 2026, includeQuarterly: false, throughMonth: 12 })).toThrow(/monthly/);
   });
 
   it("refuses includeQuarterly when the profile has no quarterly-cadence deliverable", () => {
-    const profile = exampleProfile();
+    const profile = exampleSeedProfile();
     profile.deliverables = [{ token: "MonthlyTraining", cadence: "monthly" }];
     expect(() => buildSeedTree(profile, { clientCount: 1, year: 2026, includeQuarterly: true, throughMonth: 12 })).toThrow(/quarterly/);
   });
 
   it("refuses an empty taxonomy", () => {
-    const profile = exampleProfile();
+    const profile = exampleSeedProfile();
     profile.taxonomy = { segments: [] };
     expect(() => buildSeedTree(profile, { clientCount: 1, year: 2026, includeQuarterly: false, throughMonth: 12 })).toThrow(
       /taxonomy/,
@@ -108,28 +96,28 @@ describe("loadSeedProfile failures", () => {
   });
 
   it("refuses a profile missing identity.siteUrl or identity.library", () => {
-    const profile = exampleProfile() as unknown as Record<string, unknown>;
+    const profile = exampleSeedProfile() as unknown as Record<string, unknown>;
     delete (profile as { identity?: unknown }).identity;
     expect(() => loadSeedProfile(profile)).toThrow(/identity/);
   });
 
   it("refuses a profile with an empty taxonomy.segments", () => {
-    const profile = { ...exampleProfile(), taxonomy: { segments: [] } };
+    const profile = { ...exampleSeedProfile(), taxonomy: { segments: [] } };
     expect(() => loadSeedProfile(profile)).toThrow(/taxonomy/);
   });
 
   it("refuses a profile with no naming.template", () => {
-    const profile = { ...exampleProfile(), naming: {} };
+    const profile = { ...exampleSeedProfile(), naming: {} };
     expect(() => loadSeedProfile(profile)).toThrow(/naming/);
   });
 
   it("refuses a profile whose deliverables is not an array", () => {
-    const profile = { ...exampleProfile(), deliverables: "nope" };
+    const profile = { ...exampleSeedProfile(), deliverables: "nope" };
     expect(() => loadSeedProfile(profile)).toThrow(/deliverables/);
   });
 
   it("refuses a deliverable entry with no token or cadence", () => {
-    const profile = { ...exampleProfile(), deliverables: [{ id: "x" }] };
+    const profile = { ...exampleSeedProfile(), deliverables: [{ id: "x" }] };
     expect(() => loadSeedProfile(profile)).toThrow(/deliverables\[0\]/);
   });
 });
