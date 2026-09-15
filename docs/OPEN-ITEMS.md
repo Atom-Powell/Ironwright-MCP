@@ -724,9 +724,10 @@ range above, before trusting it again.
 **CLOSED 2026-09-14.** Found during review of Task 9's documentation pass. This slice's own task
 framing asserted that CLAUDE.md's working agreement already stated the no-dash rule and that a
 hygiene test already enforced it across every tracked text file. Neither was true. Before this
-branch, CLAUDE.md said nothing about dashes at all, the only in-repo statement of the rule lived
-in `docs/superpowers/plans/2026-09-14-reconcile-tool-wiring.md`, which CLAUDE.md itself classes
-as executed-plan history rather than a live reference, and the rule was enforced by no test:
+branch, CLAUDE.md said nothing about dashes at all. The rule appeared only in two executed-plan
+documents, `docs/superpowers/plans/2026-09-14-reconcile-tool-wiring.md` and
+`docs/superpowers/plans/2026-09-14-workbook-snapshot.md`, which CLAUDE.md itself classes as
+history rather than as a live reference, and the rule was enforced by no test:
 `tests/source-hygiene.test.ts` had exactly two cases, one confirming files exist to check and one
 checking each tracked text file for a NUL byte. Nothing anywhere checked for a dash.
 
@@ -742,9 +743,9 @@ predates the style rule and that CLAUDE.md itself describes as an input to this 
 than as its own prose. Every other tracked text file was already clean, so closing the gap needed
 a rule to point the check at and a check to enforce the rule, not a rewrite pass.
 
-The emoji half of the same principle remains unenforced. A correct check needs a character range
-confident enough to avoid both a miss, a genuine emoji the range does not cover, and a false flag,
-an ordinary symbol or CJK character the range wrongly catches, once variation selectors,
-zero-width-joiner sequences, and skin-tone modifiers are accounted for. That is more than a few
-lines to get right with confidence, so it was left open rather than shipped as a check nobody can
-vouch for.
+The separate emoji rule, "No emojis or icons anywhere," has no test behind it. A correct check
+needs a character range confident enough to avoid both a miss, a genuine emoji the range does not
+cover, and a false flag, an ordinary symbol or CJK character the range wrongly catches, once
+variation selectors, zero-width-joiner sequences, and skin-tone modifiers are accounted for. That
+is more than a few lines to get right with confidence, so it was left open rather than shipped as
+a check nobody can vouch for.
