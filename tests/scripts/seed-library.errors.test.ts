@@ -44,13 +44,13 @@ describe("substituteTokens failures", () => {
 
 describe("buildSeedTree failures", () => {
   it("refuses a clientCount below 1", () => {
-    expect(() => buildSeedTree(exampleProfile(), { clientCount: 0, year: 2026, includeQuarterly: false })).toThrow(
+    expect(() => buildSeedTree(exampleProfile(), { clientCount: 0, year: 2026, includeQuarterly: false, throughMonth: 12 })).toThrow(
       /clientCount/,
     );
   });
 
   it("refuses a non-integer clientCount", () => {
-    expect(() => buildSeedTree(exampleProfile(), { clientCount: 1.5, year: 2026, includeQuarterly: false })).toThrow(
+    expect(() => buildSeedTree(exampleProfile(), { clientCount: 1.5, year: 2026, includeQuarterly: false, throughMonth: 12 })).toThrow(
       /clientCount/,
     );
   });
@@ -58,19 +58,19 @@ describe("buildSeedTree failures", () => {
   it("refuses a profile with no monthly-cadence deliverable", () => {
     const profile = exampleProfile();
     profile.deliverables = [{ token: "QuarterlyPhishing", cadence: "quarterly" }];
-    expect(() => buildSeedTree(profile, { clientCount: 1, year: 2026, includeQuarterly: false })).toThrow(/monthly/);
+    expect(() => buildSeedTree(profile, { clientCount: 1, year: 2026, includeQuarterly: false, throughMonth: 12 })).toThrow(/monthly/);
   });
 
   it("refuses includeQuarterly when the profile has no quarterly-cadence deliverable", () => {
     const profile = exampleProfile();
     profile.deliverables = [{ token: "MonthlyTraining", cadence: "monthly" }];
-    expect(() => buildSeedTree(profile, { clientCount: 1, year: 2026, includeQuarterly: true })).toThrow(/quarterly/);
+    expect(() => buildSeedTree(profile, { clientCount: 1, year: 2026, includeQuarterly: true, throughMonth: 12 })).toThrow(/quarterly/);
   });
 
   it("refuses an empty taxonomy", () => {
     const profile = exampleProfile();
     profile.taxonomy = { segments: [] };
-    expect(() => buildSeedTree(profile, { clientCount: 1, year: 2026, includeQuarterly: false })).toThrow(
+    expect(() => buildSeedTree(profile, { clientCount: 1, year: 2026, includeQuarterly: false, throughMonth: 12 })).toThrow(
       /taxonomy/,
     );
   });

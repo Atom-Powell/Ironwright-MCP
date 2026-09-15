@@ -235,6 +235,7 @@ export interface SeedOptions {
   clientCount: number;
   year: number;
   includeQuarterly: boolean;
+  throughMonth: number;
 }
 
 export interface SeedTree {
@@ -249,6 +250,9 @@ function clientName(index: number): string {
 export function buildSeedTree(profile: SeedProfileInput, options: SeedOptions): SeedTree {
   if (!Number.isInteger(options.clientCount) || options.clientCount < 1) {
     throw new Error(`clientCount must be a positive whole number, got ${options.clientCount}.`);
+  }
+  if (!Number.isInteger(options.throughMonth) || options.throughMonth < 1 || options.throughMonth > 12) {
+    throw new Error(`throughMonth must be a whole number from 1 through 12, got ${options.throughMonth}.`);
   }
   if (profile.taxonomy.segments.length === 0) {
     throw new Error("profile.taxonomy.segments is empty; there is no folder shape to seed.");
@@ -281,7 +285,7 @@ export function buildSeedTree(profile: SeedProfileInput, options: SeedOptions): 
   for (let clientIndex = 1; clientIndex <= options.clientCount; clientIndex += 1) {
     const client = clientName(clientIndex);
 
-    for (let month = 1; month <= 12; month += 1) {
+    for (let month = 1; month <= options.throughMonth; month += 1) {
       const monthName = MONTH_NAMES[month - 1];
       if (monthName === undefined) {
         // Unreachable: the loop bound keeps month within 1..12, matching the
@@ -316,6 +320,146 @@ export function buildSeedTree(profile: SeedProfileInput, options: SeedOptions): 
   }
 
   return { folderPaths: [...folderPaths], filePaths };
+}
+
+// ---------------------------------------------------------------------------
+// The seed plan: the tree buildSeedTree produces, plus the fixed set of
+// planted discrepancies a later reconciliation run is meant to find. Kept as
+// a second, thin layer over buildSeedTree rather than folded into it, because
+// planting drift is a concern specific to the workbook-and-reconciliation
+// exercise this seeder is building toward, not a property of "a synthetic
+// tree" in general; npm run scan's request-count measurement, the one
+// buildSeedTree alone still serves, has no use for it.
+// ---------------------------------------------------------------------------
+
+/**
+ * The three planted discrepancies. Fixed rather than random, because the
+ * expected report this seed prints has to stay true across a re-seed, and
+ * because an operator comparing a live report against it needs to know which
+ * findings were put there on purpose.
+ */
+export const ABSENT_CLIENT = "Client13";
+export const MISSING_FILE_CLIENT = "Client04";
+export const MISSING_FILE_MONTH = 7;
+export const MISNAMED_FILE_CLIENT = "Client09";
+export const MISNAMED_FILE_MONTH = 3;
+
+/**
+ * The misnamed file uses the example profile's vendor-token recognizer, not
+ * its legacy-spaced one. legacy-spaced anchors its client capture on
+ * [A-Z0-9]+, which cannot match "Client09", so a file in that shape would
+ * land as an unrecognized orphan and exercise the recognizer path not at all.
+ */
+const MISNAMED_DELIVERABLE_TOKEN = "VendorTraining";
+
+function clientIndexFromPlantedName(name: string): number {
+  const match = /^Client(\d+)$/.exec(name);
+  if (match === null) {
+    // Unreachable today: both planted client constants above are written by
+    // hand in the same Client<NN> shape clientName produces below. Checked
+    // anyway so a future edit to either constant fails here, with a clear
+    // reason, rather than silently computing a floor of NaN.
+    throw new Error(`Internal error: "${name}" is not in the Client<NN> shape clientName produces.`);
+  }
+  return Number.parseInt(match[1] as string, 10);
+}
+
+// The lowest clientCount that can carry the fixed planted set. Below it,
+// buildSeedTree never creates a folder for one of the two clients the plant
+// names, so planting would fail for a reason that has nothing to do with the
+// naming template. Derived from the constants above, not hardcoded, so a
+// future edit to either one cannot leave this floor behind.
+const MINIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT = Math.max(
+  clientIndexFromPlantedName(MISSING_FILE_CLIENT),
+  clientIndexFromPlantedName(MISNAMED_FILE_CLIENT),
+);
+
+export interface SeedPlan {
+  clients: string[];
+  workbookClients: string[];
+  year: number;
+  throughMonth: number;
+  includeQuarterly: boolean;
+  tree: SeedTree;
+}
+
+export function buildSeedPlan(profile: SeedProfileInput, options: SeedOptions): SeedPlan {
+  if (options.clientCount < MINIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT) {
+    // Refused rather than seeded without the plant: this seed's whole point
+    // is to put one of each interesting finding in front of the
+    // reconciliation engine, and a run that silently drops the planted drift
+    // would make the expectation a later task prints against this tree false.
+    throw new Error(
+      `clientCount must be at least ${MINIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT} to plant this seed's fixed ` +
+        `discrepancy set, which names ${MISSING_FILE_CLIENT} and ${MISNAMED_FILE_CLIENT}. Got ` +
+        `${options.clientCount}.`,
+    );
+  }
+
+  const base = buildSeedTree(profile, options);
+  const clients: string[] = [];
+  for (let index = 1; index <= options.clientCount; index += 1) clients.push(clientName(index));
+
+  const year = String(options.year);
+  if (MONTH_NAMES[MISSING_FILE_MONTH - 1] === undefined || MONTH_NAMES[MISNAMED_FILE_MONTH - 1] === undefined) {
+    // Unreachable today: both constants are within 1..12 and MONTH_NAMES has
+    // twelve entries. Checked anyway so a future edit to either constant fails
+    // here rather than producing a path with "undefined" in it.
+    throw new Error("Internal error: a planted month has no name in MONTH_NAMES.");
+  }
+
+  const monthlyToken = profile.deliverables.find((entry) => entry.cadence === "monthly")?.token;
+  if (monthlyToken === undefined) {
+    throw new Error(
+      'The profile carries no deliverable with cadence "monthly", so this seed has no artifact to plant against.',
+    );
+  }
+
+  const omitted = plantedPath(profile, year, MISSING_FILE_CLIENT, MISSING_FILE_MONTH, monthlyToken);
+  const replacedFrom = plantedPath(profile, year, MISNAMED_FILE_CLIENT, MISNAMED_FILE_MONTH, monthlyToken);
+  const replacedTo = plantedPath(profile, year, MISNAMED_FILE_CLIENT, MISNAMED_FILE_MONTH, MISNAMED_DELIVERABLE_TOKEN);
+
+  const filePaths = base.filePaths
+    .filter((path) => path !== omitted)
+    .map((path) => (path === replacedFrom ? replacedTo : path));
+
+  if (filePaths.length !== base.filePaths.length - 1) {
+    // The planted paths are built from the same profile and tokens the tree
+    // used, so a mismatch means the naming template changed underneath this
+    // function. Refused rather than silently seeding a library whose planted
+    // drift is not where the printed expectation says it is.
+    throw new Error(
+      `Planting expected to remove exactly one file at ${omitted}, but the tree does not contain that path. ` +
+        "The profile's naming template and this seed's planted set have diverged.",
+    );
+  }
+
+  return {
+    clients,
+    workbookClients: [...clients, ABSENT_CLIENT],
+    year: options.year,
+    throughMonth: options.throughMonth,
+    includeQuarterly: options.includeQuarterly,
+    tree: { folderPaths: base.folderPaths, filePaths },
+  };
+}
+
+function plantedPath(
+  profile: SeedProfileInput,
+  year: string,
+  client: string,
+  month: number,
+  deliverable: string,
+): string {
+  const monthNumber = String(month).padStart(2, "0");
+  const monthName = MONTH_NAMES[month - 1] as string;
+  const values = { year, client, monthNumber, monthName };
+  let cursor = "";
+  for (const segment of profile.taxonomy.segments) {
+    const rendered = substituteTokens(segment, values);
+    cursor = cursor === "" ? rendered : `${cursor}/${rendered}`;
+  }
+  return `${cursor}/${substituteTokens(profile.naming.template, { ...values, deliverable })}`;
 }
 
 // resolveDrive (src/graph/drive.ts) issues exactly two GET requests: one to
@@ -357,6 +501,7 @@ export interface SeedArguments {
   year: number;
   includeQuarterly: boolean;
   confirm: boolean;
+  throughMonth: number;
 }
 
 export function parseSeedArguments(argv: readonly string[], options: { now?: () => Date } = {}): SeedArguments {
@@ -405,7 +550,15 @@ export function parseSeedArguments(argv: readonly string[], options: { now?: () 
   }
 
   if (profilePath === undefined) throw new Error(`--profile is required. ${USAGE}`);
-  return { profilePath, clientCount, year, includeQuarterly, confirm };
+
+  // A deliverable for a month that has not happened yet is not a realistic
+  // synthetic library, and against a rolling window the engine reports each
+  // one as an unexpected orphan: with twelve clients seeded in September that
+  // is thirty-six findings burying the three this seed plants on purpose.
+  const currentYear = now().getUTCFullYear();
+  const throughMonth = year === currentYear ? now().getUTCMonth() + 1 : 12;
+
+  return { profilePath, clientCount, year, includeQuarterly, confirm, throughMonth };
 }
 
 // ---------------------------------------------------------------------------
@@ -678,6 +831,7 @@ export async function runSeed(argv: readonly string[], dependencies: SeedDepende
     clientCount: args.clientCount,
     year: args.year,
     includeQuarterly: args.includeQuarterly,
+    throughMonth: args.throughMonth,
   });
 
   if (!args.confirm) {
