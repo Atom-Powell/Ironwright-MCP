@@ -748,7 +748,9 @@ git commit -m "feat(seed): shape the workbook grid from the seed plan"
 - Consumes: `blankWorkbookBytes`, `SHEET_NAME` (Task 1); `SeedPlan` (Task 2); `workbookGrid`, `rangeAddress`, `onboardedColumnAddress` (Task 3); `driveItemPath` from `src/graph/paths.js`; `GraphRequestError` from `src/graph/errors.js`.
 - Produces: on `SeedGraphClient`, `putBytes(driveId, path, bytes, contentType): Promise<{ status: number }>` and `patch<T>(path, body): Promise<T>`; and `export async function createSeedWorkbook(client: SeedGraphClient, driveId: string, workbookPath: string, plan: SeedPlan): Promise<{ requests: number }>`.
 
-Four calls after the parent folder exists. `tables/add` is third on purpose: it is the first call that requires Graph to open the file as a workbook, so bad bytes fail here, attached to the seeder, rather than later inside `readWorkbookSnapshot`, which is one of the things the sitting is testing.
+Five calls after the parent folder exists, and the parent folder itself is a chain: every ancestor segment is created root to leaf, because Graph's children endpoint needs each parent to exist before a child can go in it, and `workbookPath` carries no depth limit.
+
+Corrected 2026-09-15. This plan originally put the bad-bytes attribution on `tables/add`, calling it the first call that requires Graph to open the file as a workbook. It is not: every `/workbook/` call opens the file, so the first range write gets there first, and by the time `tables/add` runs the code has already observed two successful opens. The first range `PATCH` carries the bytes-are-the-suspect message, and `tables/add` says the opposite, naming the table request rather than the bytes.
 
 None of this goes through `src/graph/excel.ts`. That module opens a non-persistent session and structurally cannot write, which is a locked decision: the server only ever reads a document that is the customer's live operational authority.
 
@@ -847,7 +849,7 @@ describe("createSeedWorkbook failures", () => {
   it("names the workbook bytes as the suspect when tables/add is what failed", async () => {
     const client = clientFailing((url) => url.includes("/tables/add"), 400, '{"error":{"code":"invalidRequest"}}');
     await expect(createSeedWorkbook(client, "drive-1", "/Trackers/Book.xlsx", plan())).rejects.toThrow(
-      /first call that requires Graph to open the uploaded file as a workbook/,
+      /the bytes this script uploaded are the first thing to suspect/,
     );
   });
 

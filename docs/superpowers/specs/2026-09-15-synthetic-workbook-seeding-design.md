@@ -153,19 +153,25 @@ The blank generator names its single worksheet `Sheet1`, and the range and table
 that name. Both modules take the name from one exported constant rather than repeating the literal,
 because a disagreement between them would fail only against a live tenant.
 
-Against the seeder's own Graph client, four calls after that folder exists:
+Against the seeder's own Graph client, five calls after that folder exists:
 
 1. `PUT` the blank bytes to the workbook path from `profile.identity.workbookPath`.
 2. `PATCH` the worksheet range with the header row and the client rows.
-3. `POST` to `workbook/tables/add` over that range with `hasHeaders: true`.
-4. `PATCH` the created table to name it `ClientRoster`.
+3. `PATCH` the `Onboarded` column with a date number format.
+4. `POST` to `workbook/tables/add` over the range with `hasHeaders: true`.
+5. `PATCH` the created table to name it `ClientRoster`.
 
-Step 3 is where a malformed workbook fails, and it is placed here on purpose. It is the first call
-that requires Graph to open the file as a workbook, so invalid bytes surface at seed time, attached
-to the seeder, rather than at read time attached to `readWorkbookSnapshot`, which is one of the
-things under test. A failure there reports the workbook as the suspect in those words.
+Step 2 is where a malformed workbook fails. Corrected 2026-09-15: this design originally put that
+role on `tables/add`, on the reasoning that it was the first call requiring Graph to open the file as
+a workbook. It is not. Every `/workbook/` call opens the file, so the first range write gets there
+first, and by the time `tables/add` runs the code has positively observed two successful opens. So
+step 2 carries the message saying the uploaded bytes are the first thing to suspect, stated as
+position rather than diagnosis, and invalid bytes still surface at seed time attached to the seeder
+rather than at read time attached to `readWorkbookSnapshot`, which is one of the things under test.
 
-The number format on the `Onboarded` column is set alongside step 2.
+A `tables/add` failure says the opposite, because the code has evidence against the bytes by then:
+two workbook calls have already succeeded, so Graph could open the file, and the suspect is the table
+request itself, its address, its header row, or a table already there.
 
 ### Not through the server's Excel layer
 
