@@ -64,7 +64,7 @@ export interface ProfileRegistry {
  * Indexed by the `profileId` field rather than by the file name, because the
  * file name is not the identity: the report carries `profileId` from the
  * profile itself, so a registry keyed on the file name could answer a call for
- * one profile with a report labelled another.
+ * one profile with a report labeled another.
  */
 export function createProfileRegistry(entries: readonly ProfileEntry[]): ProfileRegistry {
   const issues: string[] = [];

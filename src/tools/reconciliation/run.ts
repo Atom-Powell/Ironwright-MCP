@@ -48,6 +48,7 @@ type ReadWorkbook = (client: GraphClient, profile: Profile) => Promise<WorkbookS
 export async function runReconcile(
   input: unknown,
   context: ToolContext,
+  // Injected only by tests. Production always uses `readWorkbookSnapshot`.
   readWorkbook: ReadWorkbook = readWorkbookSnapshot,
 ): Promise<CallToolResult> {
   const args = InputObject.parse(input);
