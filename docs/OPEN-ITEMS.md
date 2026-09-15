@@ -503,20 +503,39 @@ operator.
 1. Settle the credentials question first. Delete and purge the exposed server application per the
    outstanding operator action above, then either create a new server application for the
    developer tenant or run `npm run setup` again to produce one.
-2. In the developer tenant, create a synthetic document library with a small tree matching the
-   example profile's taxonomy: a year folder, two client folders, and three or four files. Use no
-   real client data.
-3. Write a profile JSON for the synthetic library under `profiles/`, which is git-ignored.
+2. Write a profile JSON for the synthetic library under `profiles/`, which is git-ignored, with the
+   taxonomy, naming, workbook mapping and window `npm run seed-library` and the scan below both
+   read; `examples/profiles/example.json` is the template to copy from.
+3. Run `npm run seed-library -- --profile <path to that profile>`, first without `--confirm` to
+   read the dry-run estimate, then with it. In one pass, against the developer tenant and using no
+   real client data, it builds a synthetic document library matching the profile's taxonomy and
+   places a tracking workbook at the profile's `identity.workbookPath` with a table matching its
+   workbook mapping. It plants three deliberate discrepancies, one client absent from the
+   repository, one monthly artifact missing, and one monthly artifact misnamed, rather than a clean
+   tree, so step 7 below has something to find. It also prints the report it expects the live
+   reconciliation tool to return over what it just built. Keep that output; step 7 compares
+   against it.
 4. Start Azurite.
 5. Run a cold scan against the profile. Record the mode, the file and folder counts, the Graph
    request count, and the write-operation count.
 6. Run the scan again immediately. Record whether it reports `incremental`, whether it avoided a
    resync, and the Graph request count, against the design's expectation of a small bounded
    number.
-7. Add a file to the synthetic library and scan. Rename a file and scan. Move a file between
+7. Call `reconcile_workbook_vs_repository` against the same profile and compare its report,
+   finding by finding, against the "Expected report from the live reconciliation tool" that step 3
+   printed, before step 8 perturbs anything the comparison depends on. This step needs the tool
+   that phase 4a wires; at the time of writing that work sits on the `phase-4a-reconcile-tool-wiring`
+   branch rather than `main`, so if it has not merged yet, do steps 1 through 6 and 8 through 10
+   and come back to this one once it has. A match here is not evidence that the reconciliation
+   engine itself is correct: `scripts/seed/expected.ts` computes the printed expectation by running
+   that same engine over the seed plan in memory, so the two sides agree by construction on
+   anything the engine gets wrong. What a match does check is Graph, Excel, Azure Table Storage,
+   and the tool's own composition, the layers a fake cannot reach. Any difference is a real
+   finding.
+8. Add a file to the synthetic library and scan. Rename a file and scan. Move a file between
    client folders and scan. Delete a file and scan. After each, confirm the snapshot tracks the
    change and that no ghost row survives the move.
-8. Tear the server application back down with `npm run setup -- --tenant=<tenant-id>
+9. Tear the server application back down with `npm run setup -- --tenant=<tenant-id>
    --site=<site-url> --delete-server-app`, first without `--confirm` and then with it. This is the
    sitting in which that mode gets exercised against a real tenant for the first time, which the
    teardown design expected rather than a separate trip. Two things to check that no test can
@@ -526,14 +545,48 @@ operator.
    nobody on this project has verified that deleting an application registration also removes its
    service principal, and if one survives, this mode needs a step to remove it and the rollback in
    `runSetup` has the same gap. Record which it was.
-9. Record the actual numbers and outcomes from steps 5 through 7 in this file, in a new dated
+10. Record the actual numbers and outcomes from steps 5, 6, 7 and 8 in this file, in a new dated
    section, following the tone of the 2026-09-12 setup entry above: name the numbers, name what
-   still was not exercised, and do not describe an untested path as working. Record step 8's two
+   still was not exercised, and do not describe an untested path as working. Record step 9's two
    answers in the same section.
 
 Until those numbers exist, this phase's central claim, that delta plus a persisted continuation
 link bounds the Graph request count, is unverified. The numbers belong in this file when they
 exist, not before.
+
+## A tracking workbook inside the library it describes is always an orphan
+
+Observed 2026-09-15, during the whole-branch review of the synthetic workbook seeding work, and
+confirmed by running the reconciliation engine over the two snapshots that seed produces. This
+is an observation for a human, not a decision taken here.
+
+`examples/profiles/example.json` puts `identity.workbookPath` at
+`/Trackers/Operational Tracking Workbook.xlsx`, inside the same document library the profile
+describes. The scan enumerates the whole library and applies no exclusion for that path, so the
+workbook is in the repository snapshot. Its name matches neither `naming.template` nor any of
+the profile's recognizers, so the parser cannot read a client, deliverable or period out of it.
+The engine therefore reports it as an orphan with `kind: "unrecognized"`, in every report, for
+as long as the workbook lives there. Every layer is behaving exactly as designed; there is no
+defect in any of them.
+
+The consequence is a product-level one rather than a bug. A customer whose tracker sits in the
+library it tracks gets one permanent orphan row that is not a finding and is not actionable, and
+an operator reading the orphan list as a work list has to know to skip it. With one tracker that
+is a footnote. It is worth deciding deliberately rather than discovering per tenant.
+
+Three shapes a resolution could take, none chosen here. The profile accepts the finding and
+whoever reads the report is told to expect it, which costs nothing and leaves the noise. Or the
+profile gains a way to name paths the reconciliation ignores, which is a new profile field, a
+change to the engine's inputs, and a new way for a real file to be absent from a compliance
+report without anybody being told, which is the quiet incompleteness this engine exists to
+prevent. Or the customer's workbook lives outside the library, which is an operational change
+for them rather than a code change here, and is not always available.
+
+What this branch did instead: `scripts/seed/expected.ts` predicts the orphan, so the expectation
+`npm run seed-library` prints matches what the live tool will return, and the printed block says
+in prose that the seeder's own workbook is the orphan it lists. That was the right move for a
+branch whose scope was the seeder, and it settles nothing about the product question. Step 7 of
+the phase 2a checklist above is where an operator meets this for the first time.
 
 ## Phase 2b-1: covered only by fakes, 2026-09-14
 
@@ -553,11 +606,11 @@ it against a real Excel workbook or Microsoft Graph.
 
 **Why the live run has not happened.** No session in this implementing session could open a real
 Excel workbook through Graph; the fakes exist because a live workbook was never available to
-read against. The live verification this phase needs is a synthetic tracking workbook, placed in
-the site by hand alongside the synthetic library the phase 2a seeder builds, with a table whose
-headers match the example profile's workbook mapping. Reading that table through a real,
-non-persistent Excel session is the first thing that would check the session layer's retry and
-close behavior against Graph's actual responses rather than a fake's.
+read against. The live verification this phase needs is the synthetic tracking workbook
+`npm run seed-library` now places in the site, in the same run that builds the synthetic library,
+with a table whose headers match the example profile's workbook mapping. Reading that table
+through a real, non-persistent Excel session is the first thing that would check the session
+layer's retry and close behavior against Graph's actual responses rather than a fake's.
 
 Until that run happens, this phase's session-layer behavior, its rejection handling, and the
 snapshot assembly are known from reading the code and from tests against fakes only. None of it

@@ -11,12 +11,23 @@
  * exists to make the difference visible, not to prove the mechanism works
  * again.
  *
- * Deliberately does not import anything from src/domain/: that layer is pure
- * and has one enforced entry point (the reconciliation engine), and a fixture
- * generator run against a live tenant is not a legitimate consumer of it. The
- * token substitution below is a small, local reimplementation of just enough
- * of naming.template's placeholder syntax to build file and folder names, not
- * a second copy of the domain's own renderer.
+ * Imports exactly two things from src/domain/, both by scripts/seed/expected.ts,
+ * and both legitimate for the same underlying reason: a caller of the engine
+ * should not have to re-derive what the engine already derives. The
+ * reconciliation engine's front door, src/domain/reconcile/index.js, predicts
+ * the report this seed should produce; that is what the front door is for,
+ * and the alternative is a second implementation of the rolling window, the
+ * quarterly anchor and the effective-date rule, which is the duplication the
+ * single-entry rule exists to prevent. And the profile schema,
+ * src/domain/profile/schema.js, because reconcile takes a validated Profile
+ * while this script starts from raw JSON, so something has to parse and
+ * validate it, and writing a second validator by hand would be the same
+ * duplication in a different place.
+ *
+ * The token substitution below is still a local reimplementation of just
+ * enough of naming.template's placeholder syntax, not a second copy of the
+ * domain's renderer, and that stays deliberate: a fixture generator is not a
+ * legitimate consumer of the renderer the engine uses to decide compliance.
  *
  * Authenticates as the grant issuer (IW_BOOTSTRAP_CLIENT_ID and
  * IW_BOOTSTRAP_CLIENT_SECRET), the same application docs/SETUP.md's
@@ -34,19 +45,25 @@ import { GraphRequestError, graphErrorCodeFromBody } from "../src/graph/errors.j
 import { driveItemPath } from "../src/graph/paths.js";
 import { clientCredentialsTokenProvider, type ClientCredentials, type TokenProvider } from "../src/graph/token.js";
 import { readProfile } from "../src/scan/cli.js";
+import { expectedReport, formatExpectedReport, parseProfile, type Profile } from "./seed/expected.js";
+import { createSeedWorkbook } from "./seed/workbook.js";
 
 // ---------------------------------------------------------------------------
-// Profile input: only the fields this script reads, validated by hand rather
-// than against the full zod schema in src/domain/profile/schema.ts, since
-// reaching for that schema would mean importing the domain layer this file is
-// not allowed to depend on. A profile that fails this script's own, narrower
-// checks may still be a perfectly valid profile for the scan; this validation
-// only promises that the four fields the tree-builder needs are usable.
+// Profile input: only the fields this script's own tree building reads,
+// checked by hand so a profile that cannot be seeded fails with a message
+// about the tree rather than a schema path. The full zod schema in
+// src/domain/profile/schema.ts is not reached for here because tree building
+// has no use for the rest of it; runSeed validates the same raw profile
+// against that schema, through scripts/seed/expected.ts, before anything is
+// written. A profile that fails these narrower checks may still be a
+// perfectly valid profile for the scan; this validation only promises that
+// the four fields the tree-builder needs are usable.
 // ---------------------------------------------------------------------------
 
 export interface SeedProfileIdentity {
   siteUrl: string;
   library: string;
+  workbookPath: string;
 }
 
 export interface SeedProfileTaxonomy {
@@ -83,6 +100,13 @@ export function loadSeedProfile(raw: unknown): SeedProfileInput {
     throw new Error(
       'The profile\'s "identity" section must carry a "siteUrl" string and a "library" string; the seeder ' +
         "resolves the same site and library the scan does.",
+    );
+  }
+
+  if (typeof identityRaw.workbookPath !== "string" || identityRaw.workbookPath.length === 0) {
+    throw new Error(
+      'The profile\'s "identity.workbookPath" must be a non-empty string; it names the workbook this seeder ' +
+        "replaces with a freshly built one.",
     );
   }
 
@@ -126,7 +150,7 @@ export function loadSeedProfile(raw: unknown): SeedProfileInput {
   });
 
   return {
-    identity: { siteUrl: identityRaw.siteUrl, library: identityRaw.library },
+    identity: { siteUrl: identityRaw.siteUrl, library: identityRaw.library, workbookPath: identityRaw.workbookPath },
     taxonomy: { segments },
     naming: { template },
     deliverables,
@@ -221,12 +245,14 @@ const MONTH_NAMES = [
 
 // The last month of each calendar quarter. This is a simplified stand-in for
 // a deliverable's own periodAnchor (src/domain/profile/schema.ts), which this
-// script does not read: periodAnchor selection is domain-schema behavior, and
-// reaching for it would mean reaching for the domain layer this file is not
-// allowed to depend on. "Last month of the quarter" is a reasonable synthetic
-// placement on its own and does not have to match that field's exact
-// semantics to serve this script's one purpose, sizing a tree for a request
-// count comparison.
+// script does not read: the tree below is a fixture, and a fixture generator
+// is not a legitimate consumer of the renderer the engine uses to decide
+// compliance, nor of the placement rules that go with it, for the same reason
+// the token substitution above is a local reimplementation rather than a
+// second copy of that renderer. "Last month of the quarter" is a reasonable
+// synthetic placement on its own and does not have to match that field's
+// exact semantics to serve this script's one purpose, sizing a tree for a
+// request count comparison.
 const QUARTER_END_MONTHS = new Set([3, 6, 9, 12]);
 
 export const DEFAULT_CLIENT_COUNT = 12;
@@ -235,6 +261,7 @@ export interface SeedOptions {
   clientCount: number;
   year: number;
   includeQuarterly: boolean;
+  throughMonth: number;
 }
 
 export interface SeedTree {
@@ -249,6 +276,9 @@ function clientName(index: number): string {
 export function buildSeedTree(profile: SeedProfileInput, options: SeedOptions): SeedTree {
   if (!Number.isInteger(options.clientCount) || options.clientCount < 1) {
     throw new Error(`clientCount must be a positive whole number, got ${options.clientCount}.`);
+  }
+  if (!Number.isInteger(options.throughMonth) || options.throughMonth < 1 || options.throughMonth > 12) {
+    throw new Error(`throughMonth must be a whole number from 1 through 12, got ${options.throughMonth}.`);
   }
   if (profile.taxonomy.segments.length === 0) {
     throw new Error("profile.taxonomy.segments is empty; there is no folder shape to seed.");
@@ -281,7 +311,7 @@ export function buildSeedTree(profile: SeedProfileInput, options: SeedOptions): 
   for (let clientIndex = 1; clientIndex <= options.clientCount; clientIndex += 1) {
     const client = clientName(clientIndex);
 
-    for (let month = 1; month <= 12; month += 1) {
+    for (let month = 1; month <= options.throughMonth; month += 1) {
       const monthName = MONTH_NAMES[month - 1];
       if (monthName === undefined) {
         // Unreachable: the loop bound keeps month within 1..12, matching the
@@ -318,6 +348,194 @@ export function buildSeedTree(profile: SeedProfileInput, options: SeedOptions): 
   return { folderPaths: [...folderPaths], filePaths };
 }
 
+// ---------------------------------------------------------------------------
+// The seed plan: the tree buildSeedTree produces, plus the fixed set of
+// planted discrepancies a later reconciliation run is meant to find. Kept as
+// a second, thin layer over buildSeedTree rather than folded into it, because
+// planting drift is a concern specific to the workbook-and-reconciliation
+// exercise this seeder is building toward, not a property of "a synthetic
+// tree" in general; npm run scan's request-count measurement, the one
+// buildSeedTree alone still serves, has no use for it.
+// ---------------------------------------------------------------------------
+
+/**
+ * The three planted discrepancies. Fixed rather than random, because the
+ * expected report this seed prints has to stay true across a re-seed, and
+ * because an operator comparing a live report against it needs to know which
+ * findings were put there on purpose.
+ */
+export const ABSENT_CLIENT = "Client13";
+export const MISSING_FILE_CLIENT = "Client04";
+export const MISNAMED_FILE_CLIENT = "Client09";
+
+// Both planted months are January, not a later, more illustrative month.
+// throughMonth caps the tree at the current month when the seeded year is
+// the current year, so a plant placed later in the year is unreachable for
+// however much of the year has not happened yet: at month 7 this plant was
+// unreachable from January through June, and at month 3 it was unreachable
+// in January and February too. January is always within range, because
+// throughMonth is never below 1, and it is on or after the January 1
+// effective date every client gets, so the window still expects it. Leave
+// this at 1.
+export const MISSING_FILE_MONTH = 1;
+export const MISNAMED_FILE_MONTH = 1;
+
+/**
+ * The misnamed file uses the example profile's vendor-token recognizer, not
+ * its legacy-spaced one. legacy-spaced anchors its client capture on
+ * [A-Z0-9]+, which cannot match "Client09", so a file in that shape would
+ * land as an unrecognized orphan and exercise the recognizer path not at all.
+ */
+const MISNAMED_DELIVERABLE_TOKEN = "VendorTraining";
+
+function clientIndexFromPlantedName(name: string): number {
+  const match = /^Client(\d+)$/.exec(name);
+  if (match === null) {
+    // Unreachable today: both planted client constants above are written by
+    // hand in the same Client<NN> shape clientName produces below. Checked
+    // anyway so a future edit to either constant fails here, with a clear
+    // reason, rather than silently computing a floor of NaN.
+    throw new Error(`Internal error: "${name}" is not in the Client<NN> shape clientName produces.`);
+  }
+  return Number.parseInt(match[1] as string, 10);
+}
+
+// The lowest clientCount that can carry the fixed planted set. Below it,
+// buildSeedTree never creates a folder for one of the two clients the plant
+// names, so planting would fail for a reason that has nothing to do with the
+// naming template. Derived from the constants above, not hardcoded, so a
+// future edit to either one cannot leave this floor behind.
+const MINIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT = Math.max(
+  clientIndexFromPlantedName(MISSING_FILE_CLIENT),
+  clientIndexFromPlantedName(MISNAMED_FILE_CLIENT),
+);
+
+// The highest clientCount that leaves ABSENT_CLIENT out of the tree. At or
+// above it, buildSeedTree builds a folder for the very client this plant
+// means to report as missing from the repository, and workbookClients below
+// would then list it twice: once from the built clients array, once from the
+// explicit ABSENT_CLIENT append. Derived from the constant above, not
+// hardcoded, so a future edit to ABSENT_CLIENT cannot leave this ceiling
+// behind.
+const MAXIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT = clientIndexFromPlantedName(ABSENT_CLIENT) - 1;
+
+export interface SeedPlan {
+  clients: string[];
+  workbookClients: string[];
+  year: number;
+  throughMonth: number;
+  includeQuarterly: boolean;
+  tree: SeedTree;
+}
+
+export function buildSeedPlan(profile: SeedProfileInput, options: SeedOptions): SeedPlan {
+  if (options.clientCount < MINIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT) {
+    // Refused rather than seeded without the plant: this seed's whole point
+    // is to put one of each interesting finding in front of the
+    // reconciliation engine, and a run that silently drops the planted drift
+    // would make the expectation a later task prints against this tree false.
+    throw new Error(
+      `clientCount must be at least ${MINIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT} to plant this seed's fixed ` +
+        `discrepancy set, which names ${MISSING_FILE_CLIENT} and ${MISNAMED_FILE_CLIENT}. Got ` +
+        `${options.clientCount}.`,
+    );
+  }
+  if (options.clientCount > MAXIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT) {
+    // Refused for the same reason as the floor guard above, from the other
+    // direction: at clientCount 13 or higher, buildSeedTree would build a
+    // folder for Client13, the client this plant means to report as absent
+    // from the repository, and this function would list it twice in
+    // workbookClients without ever noticing.
+    throw new Error(
+      `clientCount must be at most ${MAXIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT} so ${ABSENT_CLIENT} stays absent ` +
+        `from the tree, which is what this plant needs it to be. Got ${options.clientCount}.`,
+    );
+  }
+
+  const base = buildSeedTree(profile, options);
+  const clients: string[] = [];
+  for (let index = 1; index <= options.clientCount; index += 1) clients.push(clientName(index));
+
+  const year = String(options.year);
+  if (MONTH_NAMES[MISSING_FILE_MONTH - 1] === undefined || MONTH_NAMES[MISNAMED_FILE_MONTH - 1] === undefined) {
+    // Unreachable today: both constants are within 1..12 and MONTH_NAMES has
+    // twelve entries. Checked anyway so a future edit to either constant fails
+    // here rather than producing a path with "undefined" in it.
+    throw new Error("Internal error: a planted month has no name in MONTH_NAMES.");
+  }
+
+  const monthlyToken = profile.deliverables.find((entry) => entry.cadence === "monthly")?.token;
+  if (monthlyToken === undefined) {
+    throw new Error(
+      'The profile carries no deliverable with cadence "monthly", so this seed has no artifact to plant against.',
+    );
+  }
+
+  const omitted = plantedPath(profile, year, MISSING_FILE_CLIENT, MISSING_FILE_MONTH, monthlyToken);
+  const replacedFrom = plantedPath(profile, year, MISNAMED_FILE_CLIENT, MISNAMED_FILE_MONTH, monthlyToken);
+  const replacedTo = plantedPath(profile, year, MISNAMED_FILE_CLIENT, MISNAMED_FILE_MONTH, MISNAMED_DELIVERABLE_TOKEN);
+
+  // Checked individually, by path presence, and before the filter/map below
+  // runs: a `.map` silently no-ops when its own target is absent, so a single
+  // check on the resulting array's length cannot see a failed rename the way
+  // it can see a failed removal (removing nothing changes the length; a
+  // no-op rename does not). Each message leads with the fact this function
+  // actually observed: the path is not in the tree buildSeedTree produced.
+  // Only then does it name a likely cause. That inference is sound here,
+  // where it would not have been for a bare length check: clientCount is
+  // guarded on both sides above (MINIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT and
+  // MAXIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT), and both planted months are
+  // fixed at 1, always within throughMonth's 1..12 range, so neither plant's
+  // client nor its month can be why its path is missing. What is left is a
+  // disagreement between the profile's naming template and this seed's
+  // planted set.
+  if (!base.filePaths.includes(replacedFrom)) {
+    throw new Error(
+      `${replacedFrom} is not in the tree buildSeedTree produced, so the misnamed-file plant for ` +
+        `${MISNAMED_FILE_CLIENT} cannot rename it to ${replacedTo}. clientCount and month are both guaranteed in ` +
+        "range here, so the profile's naming template and this seed's planted set must have diverged.",
+    );
+  }
+  if (!base.filePaths.includes(omitted)) {
+    throw new Error(
+      `${omitted} is not in the tree buildSeedTree produced, so the missing-file plant for ${MISSING_FILE_CLIENT} ` +
+        "cannot remove it. clientCount and month are both guaranteed in range here, so the profile's naming " +
+        "template and this seed's planted set must have diverged.",
+    );
+  }
+
+  const filePaths = base.filePaths
+    .filter((path) => path !== omitted)
+    .map((path) => (path === replacedFrom ? replacedTo : path));
+
+  return {
+    clients,
+    workbookClients: [...clients, ABSENT_CLIENT],
+    year: options.year,
+    throughMonth: options.throughMonth,
+    includeQuarterly: options.includeQuarterly,
+    tree: { folderPaths: base.folderPaths, filePaths },
+  };
+}
+
+function plantedPath(
+  profile: SeedProfileInput,
+  year: string,
+  client: string,
+  month: number,
+  deliverable: string,
+): string {
+  const monthNumber = String(month).padStart(2, "0");
+  const monthName = MONTH_NAMES[month - 1] as string;
+  const values = { year, client, monthNumber, monthName };
+  let cursor = "";
+  for (const segment of profile.taxonomy.segments) {
+    const rendered = substituteTokens(segment, values);
+    cursor = cursor === "" ? rendered : `${cursor}/${rendered}`;
+  }
+  return `${cursor}/${substituteTokens(profile.naming.template, { ...values, deliverable })}`;
+}
+
 // resolveDrive (src/graph/drive.ts) issues exactly two GET requests: one to
 // resolve the site, one to list its drives. This constant mirrors that count
 // rather than measuring it, so if resolveDrive's own request shape ever
@@ -325,21 +543,56 @@ export function buildSeedTree(profile: SeedProfileInput, options: SeedOptions): 
 // between the two.
 const RESOLVE_DRIVE_REQUEST_COUNT = 2;
 
+// createSeedWorkbook (scripts/seed/workbook.ts) issues five requests once the
+// workbook's parent folder exists: the blank upload, the range write, the
+// Onboarded column's number format, the table add, and the table rename. This
+// constant mirrors that count rather than measuring it, so if
+// createSeedWorkbook's own call sequence ever changes, this estimate silently
+// drifts from it; there is no automated link between the two.
+const WORKBOOK_FIXED_REQUEST_COUNT = 5;
+
+/**
+ * The workbook's ancestor folders, root to leaf, the same walk
+ * createSeedWorkbook performs before its own five fixed calls: one
+ * createFolder per segment of the path above the workbook file itself. A
+ * workbook sitting directly at the library root has no ancestor to create, so
+ * this returns an empty array rather than a "-1" that would have to be
+ * special-cased at every call site.
+ */
+function workbookAncestorSegments(workbookPath: string): string[] {
+  const { parentPath } = splitPath(workbookPath.replace(/^\/+/, ""));
+  return parentPath === "" ? [] : parentPath.split("/").filter((segment) => segment.length > 0);
+}
+
+/**
+ * Derived from workbookPath rather than a flat constant, because the cost
+ * this function estimates is not fixed: createSeedWorkbook walks the path's
+ * own ancestor chain before its five fixed calls, so a workbook nested
+ * several folders deep costs more than one at the library root. See
+ * WORKBOOK_FIXED_REQUEST_COUNT above for why the five is a mirror, not a
+ * measurement, of createSeedWorkbook's own call count.
+ */
+function estimateWorkbookRequests(workbookPath: string): number {
+  return WORKBOOK_FIXED_REQUEST_COUNT + workbookAncestorSegments(workbookPath).length;
+}
+
 /**
  * Derived from the same tree the execution layer walks, not computed
  * separately: RESOLVE_DRIVE_REQUEST_COUNT aside, this is exactly
  * folderPaths.length POSTs plus filePaths.length PUTs, one request each,
  * because that is what executeSeed below actually issues, unconditionally,
- * with no existence check before it. It is still an estimate, not a measured
- * cost, because it assumes nothing is retried. It is not, however, an
- * estimate a re-run "beats": executeSeed issues the same request for every
- * tree entry whether or not that entry already exists, so a re-run against a
- * partially built tree costs the same number of requests as a fresh one.
- * What changes on a re-run is the side effect at each already-existing path,
- * not the request count.
+ * with no existence check before it, plus estimateWorkbookRequests above for
+ * the workbook createSeedWorkbook replaces afterward. It is still an
+ * estimate, not a measured cost, because it assumes nothing is retried. It is
+ * not, however, an estimate a re-run "beats": executeSeed issues the same
+ * request for every tree entry whether or not that entry already exists, and
+ * createSeedWorkbook always replaces the workbook outright, so a re-run
+ * against a partially built tree costs the same number of requests as a
+ * fresh one. What changes on a re-run is the side effect at each
+ * already-existing path, not the request count.
  */
-export function estimateGraphRequests(tree: SeedTree): number {
-  return RESOLVE_DRIVE_REQUEST_COUNT + tree.folderPaths.length + tree.filePaths.length;
+export function estimateGraphRequests(tree: SeedTree, workbookPath: string): number {
+  return RESOLVE_DRIVE_REQUEST_COUNT + tree.folderPaths.length + tree.filePaths.length + estimateWorkbookRequests(workbookPath);
 }
 
 // ---------------------------------------------------------------------------
@@ -357,13 +610,21 @@ export interface SeedArguments {
   year: number;
   includeQuarterly: boolean;
   confirm: boolean;
+  throughMonth: number;
 }
 
 export function parseSeedArguments(argv: readonly string[], options: { now?: () => Date } = {}): SeedArguments {
   const now = options.now ?? (() => new Date());
   let profilePath: string | undefined;
   let clientCount = DEFAULT_CLIENT_COUNT;
-  let year = now().getFullYear();
+  // UTC, matching the month cap below and asOfFromClock, which is the Period
+  // the expected report is computed against. A local reading disagrees with a
+  // UTC one for a few hours around New Year in every time zone behind UTC,
+  // and the disagreement is not cosmetic: the year would not equal
+  // currentYear, throughMonth would fall back to 12, and the seeder would
+  // write twelve months of a year asOf sits outside, which is the orphan
+  // noise the cap exists to prevent.
+  let year = now().getUTCFullYear();
   let includeQuarterly = true;
   let confirm = false;
 
@@ -405,7 +666,15 @@ export function parseSeedArguments(argv: readonly string[], options: { now?: () 
   }
 
   if (profilePath === undefined) throw new Error(`--profile is required. ${USAGE}`);
-  return { profilePath, clientCount, year, includeQuarterly, confirm };
+
+  // A deliverable for a month that has not happened yet is not a realistic
+  // synthetic library, and against a rolling window the engine reports each
+  // one as an unexpected orphan: with twelve clients seeded in September that
+  // is thirty-six findings burying the three this seed plants on purpose.
+  const currentYear = now().getUTCFullYear();
+  const throughMonth = year === currentYear ? now().getUTCMonth() + 1 : 12;
+
+  return { profilePath, clientCount, year, includeQuarterly, confirm, throughMonth };
 }
 
 // ---------------------------------------------------------------------------
@@ -414,20 +683,37 @@ export function parseSeedArguments(argv: readonly string[], options: { now?: () 
 // number that was not actually derived from the tree or the run.
 // ---------------------------------------------------------------------------
 
-export function formatDryRunReport(tree: SeedTree, args: SeedArguments): string[] {
-  const estimate = estimateGraphRequests(tree);
+/**
+ * Takes the validated profile rather than a workbook path, for two reasons.
+ * The path this report names and the path the expected report is built from
+ * have to be one value, not two reads of the same field. And holding a
+ * `Profile` at all is evidence that ProfileSchema accepted the raw profile,
+ * which is what lets the dry run say so without asserting an outcome it did
+ * not observe.
+ */
+export function formatDryRunReport(tree: SeedTree, args: SeedArguments, profile: Profile): string[] {
+  const workbookPath = profile.identity.workbookPath;
+  const estimate = estimateGraphRequests(tree, workbookPath);
   return [
     "Dry run: nothing was created. Pass --confirm to create this tree.",
     `Profile: ${args.profilePath}. Clients: ${args.clientCount}. Year: ${args.year}. ` +
       `Quarterly deliverable: ${args.includeQuarterly ? "included" : "excluded"}.`,
     `Folders that would be created: ${tree.folderPaths.length}.`,
     `Files that would be created: ${tree.filePaths.length}.`,
-    `Estimated Graph requests to build this tree: ${estimate}. This is an estimate, not a measured cost: it ` +
-      "assumes one request per folder, one per file, and the two requests resolveDrive issues to find the site " +
-      "and the library. A re-run costs the same number of requests, not fewer: executeSeed issues one request " +
-      "per tree entry regardless of whether that item already exists. What a re-run changes is the side effect, " +
-      "not the count: an existing folder is left alone rather than recreated or erroring, and an existing file " +
-      "is overwritten with the same placeholder content it already had.",
+    `Workbook that would be replaced, not updated: ${workbookPath}.`,
+    "This profile parsed against the full profile schema in src/domain/profile/schema.ts, the same schema the " +
+      "reconciliation engine requires. That check runs before the tree is written rather than after, so a " +
+      "confirmed run cannot seed a whole library and then fail it.",
+    `Estimated Graph requests to build this tree and replace the workbook: ${estimate}. This is an estimate, ` +
+      "not a measured cost: it assumes one request per folder, one per file, the two requests resolveDrive " +
+      "issues to find the site and the library, and the fixed calls createSeedWorkbook issues to replace the " +
+      "workbook (one createFolder per ancestor folder in its path, plus five to upload the blank file, write its " +
+      "rows, format its date column, add its table, and name it). A re-run costs the same number of requests, " +
+      "not fewer: executeSeed issues one request per tree entry regardless of whether that item already exists, " +
+      "and createSeedWorkbook always replaces the workbook outright. What a re-run changes is the side effect, " +
+      "not the count: an existing folder is left alone rather than recreated or erroring, an existing file is " +
+      "overwritten with the same placeholder content it already had, and the workbook is overwritten with a " +
+      "freshly built one either way.",
   ];
 }
 
@@ -439,11 +725,24 @@ export interface SeedExecutionResult {
   elapsedMs: number;
 }
 
-export function formatExecutionReport(result: SeedExecutionResult): string[] {
+// workbookRequests is kept off SeedExecutionResult itself and carried as an
+// intersection here instead, because executeSeed above never learns it:
+// createSeedWorkbook runs after executeSeed returns, against the driveId
+// executeSeed resolved, so the caller has to combine the two before this
+// function ever sees them.
+//
+// Printed as its own line rather than folded into graphRequests, on purpose.
+// graphRequests is the number this whole script exists to let an operator
+// measure against the recursive-enumeration baseline Pain-Points.txt
+// complains about; the workbook's calls have nothing to do with that
+// comparison, and adding them into the same total would make that number
+// stop meaning what it is supposed to mean.
+export function formatExecutionReport(result: SeedExecutionResult & { workbookRequests: number }): string[] {
   return [
     `Seed complete against drive ${result.driveId}.`,
     `Folders processed: ${result.foldersProcessed}. Files processed: ${result.filesProcessed}.`,
-    `Graph requests issued: ${result.graphRequests}.`,
+    `Graph requests issued to build the tree: ${result.graphRequests}.`,
+    `Graph requests issued to replace the workbook: ${result.workbookRequests}.`,
     `Elapsed: ${result.elapsedMs}ms.`,
   ];
 }
@@ -464,6 +763,8 @@ export function splitPath(path: string): { parentPath: string; name: string } {
 export interface SeedGraphClient extends GraphClient {
   createFolder(driveId: string, parentPath: string, name: string): Promise<{ status: number }>;
   createFile(driveId: string, parentPath: string, name: string, content: string): Promise<{ status: number }>;
+  putBytes(driveId: string, path: string, bytes: Uint8Array, contentType: string): Promise<{ status: number }>;
+  patch<T>(path: string, body?: unknown): Promise<T>;
 }
 
 export async function executeSeed(
@@ -546,6 +847,8 @@ interface RawGraphResponse {
   body: string;
 }
 
+type SendBody = { text: string; contentType: string } | { bytes: Uint8Array; contentType: string };
+
 export function createSeedGraphClient(options: {
   tokenProvider: TokenProvider;
   fetchImpl?: typeof fetch;
@@ -553,7 +856,7 @@ export function createSeedGraphClient(options: {
   const fetchImpl = options.fetchImpl ?? fetch;
   let requestCount = 0;
 
-  async function send(path: string, method: string, body?: { text: string; contentType: string }): Promise<RawGraphResponse> {
+  async function send(path: string, method: string, body?: SendBody): Promise<RawGraphResponse> {
     const token = await options.tokenProvider.getToken();
     requestCount += 1;
     const response = await fetchImpl(`${GRAPH_BASE}${path}`, {
@@ -562,7 +865,10 @@ export function createSeedGraphClient(options: {
         authorization: `Bearer ${token}`,
         ...(body === undefined ? {} : { "content-type": body.contentType }),
       },
-      ...(body === undefined ? {} : { body: body.text }),
+      // A workbook is binary, so its body cannot go through the text branch:
+      // encoding those bytes as a UTF-8 string would corrupt every byte above
+      // 0x7f and produce a file Graph refuses to open.
+      ...(body === undefined ? {} : { body: "text" in body ? body.text : body.bytes }),
     });
     return { status: response.status, body: await response.text() };
   }
@@ -655,6 +961,31 @@ export function createSeedGraphClient(options: {
       }
       return { status: response.status };
     },
+
+    async putBytes(driveId, filePath, bytes, contentType) {
+      const path = `${driveItemPath(driveId, filePath)}/content`;
+      const response = await send(path, "PUT", { bytes, contentType });
+      if (response.status < 200 || response.status >= 300) {
+        throw new GraphRequestError({ method: "PUT", path, status: response.status, body: response.body });
+      }
+      return { status: response.status };
+    },
+
+    async patch<T>(path: string, body?: unknown): Promise<T> {
+      const response = await send(path, "PATCH", body === undefined ? undefined : { text: JSON.stringify(body), contentType: "application/json" });
+      if (response.status < 200 || response.status >= 300) {
+        throw new GraphRequestError({ method: "PATCH", path, status: response.status, body: response.body });
+      }
+      if (response.body.length === 0) return undefined as T;
+      try {
+        return JSON.parse(response.body) as T;
+      } catch {
+        throw new Error(
+          `Graph PATCH ${path} returned ${response.status} with a body that is not JSON. Something other than ` +
+            "Graph answered this request.",
+        );
+      }
+    },
   };
 }
 
@@ -670,24 +1001,61 @@ export interface SeedDependencies {
   log: (line: string) => void;
 }
 
+/**
+ * Converts the injected clock to the Period reconcile takes as asOf, in UTC,
+ * the same offset parseSeedArguments already uses to cap throughMonth at the
+ * current month. Not exported: nothing outside this orchestration needs it,
+ * and it stays a plain { year, month } literal rather than importing
+ * src/domain/reconcile's Period type, because this file's only sanctioned
+ * path into src/domain/ is through scripts/seed/expected.ts, per this file's
+ * own header comment. Structural typing satisfies expectedReport's asOf
+ * parameter without an import.
+ */
+function asOfFromClock(now: () => Date): { year: number; month: number } {
+  const date = now();
+  return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1 };
+}
+
 export async function runSeed(argv: readonly string[], dependencies: SeedDependencies): Promise<void> {
   const args = parseSeedArguments(argv, { now: dependencies.now });
   const rawProfile = await dependencies.readProfileFile(args.profilePath);
-  const profile = loadSeedProfile(rawProfile);
-  const tree = buildSeedTree(profile, {
+  // Both readings of the same raw profile, and both taken here, before the
+  // --confirm branch. The full schema is what the reconciliation engine
+  // requires, including workbookMapping, window and every recognizer, and it
+  // used to be parsed inside expectedReport, which runs after the library and
+  // the workbook are already written: a profile that passed loadSeedProfile
+  // and failed ProfileSchema therefore cost a complete seed against a live
+  // tenant and then died with a zod error, printing no expectation at all.
+  // Parsing it here also makes the dry run a real precondition check rather
+  // than a partial one.
+  const profile = parseProfile(rawProfile);
+  const seedProfile = loadSeedProfile(rawProfile);
+  const plan = buildSeedPlan(seedProfile, {
     clientCount: args.clientCount,
     year: args.year,
     includeQuarterly: args.includeQuarterly,
+    throughMonth: args.throughMonth,
   });
 
   if (!args.confirm) {
-    for (const line of formatDryRunReport(tree, args)) dependencies.log(line);
+    for (const line of formatDryRunReport(plan.tree, args, profile)) dependencies.log(line);
     return;
   }
 
   const client = dependencies.createGraphClient();
-  const result = await executeSeed(client, profile.identity, tree);
-  for (const line of formatExecutionReport(result)) dependencies.log(line);
+  const result = await executeSeed(client, seedProfile.identity, plan.tree);
+  // profile.identity.workbookPath, the same field expectedReport predicts the
+  // orphan from, so the file this run writes and the file the expectation
+  // describes cannot be two different paths.
+  const workbookPath = profile.identity.workbookPath;
+  const workbook = await createSeedWorkbook(client, result.driveId, workbookPath, plan);
+  for (const line of formatExecutionReport({ ...result, workbookRequests: workbook.requests })) {
+    dependencies.log(line);
+  }
+  const expected = expectedReport(profile, plan, asOfFromClock(dependencies.now));
+  for (const line of formatExpectedReport(expected, workbookPath)) {
+    dependencies.log(line);
+  }
 }
 
 function presentEnv(value: string | undefined): value is string {
