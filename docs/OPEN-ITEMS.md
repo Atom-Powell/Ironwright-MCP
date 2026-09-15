@@ -719,27 +719,32 @@ design, so its correctness rests on the real runs recorded against the built ser
 on a suite. An express upgrade should re-check this mechanism by hand, against the file and line
 range above, before trusting it again.
 
-## CLOSED: the no-dash style rule was documented as enforced while nothing enforced it
+## CLOSED: the no-dash style rule was undocumented and unenforced until this branch
 
-**CLOSED 2026-09-14.** Found during review of Task 9's documentation pass. CLAUDE.md's working
-agreement states that this repo's prose avoids em dashes and en dashes entirely, and the project's
-own task framing described a hygiene test as enforcing that rule across every tracked text file.
-`tests/source-hygiene.test.ts` had exactly two cases: one confirming files exist to check, and one
-checking each tracked text file for a NUL byte. Nothing anywhere checked for a dash. This is the
-same defect class already recorded above against phase 2a, a guardrail the documentation claims
-exists and does not.
+**CLOSED 2026-09-14.** Found during review of Task 9's documentation pass. This slice's own task
+framing asserted that CLAUDE.md's working agreement already stated the no-dash rule and that a
+hygiene test already enforced it across every tracked text file. Neither was true. Before this
+branch, CLAUDE.md said nothing about dashes at all, the only in-repo statement of the rule lived
+in `docs/superpowers/plans/2026-09-14-reconcile-tool-wiring.md`, which CLAUDE.md itself classes
+as executed-plan history rather than a live reference, and the rule was enforced by no test:
+`tests/source-hygiene.test.ts` had exactly two cases, one confirming files exist to check and one
+checking each tracked text file for a NUL byte. Nothing anywhere checked for a dash.
 
-`tests/source-hygiene.test.ts` now adds one case per tracked text file, reusing the same
-`git ls-files -z` listing the NUL-byte check already builds, asserting the file contains neither
-an em dash (U+2014) nor an en dash (U+2013). Of 197 tracked text files, exactly two are exempt by
-name: `competitive-landscape.md` and `iw-mcp(research).md`, both imported research source
-material that predates the style rule and that CLAUDE.md itself describes as an input to this
-project rather than as its own prose. Every other tracked text file was already clean, so closing
-the gap needed a check, not a rewrite pass.
+Two things were fixed together, because a committed test enforcing a rule written down nowhere in
+the repository is worse than either gap alone. CLAUDE.md's Non-Negotiable Engineering Principles
+now state the rule beside the existing emoji and US English line: this repo's prose avoids em
+dashes and en dashes, including inside string literals. `tests/source-hygiene.test.ts` now adds
+one case per tracked text file, reusing the same `git ls-files -z` listing the NUL-byte check
+already builds, asserting the file contains neither an em dash (U+2014) nor an en dash (U+2013).
+Of 196 tracked text files matching the suite's own pattern, exactly two are exempt by name:
+`competitive-landscape.md` and `iw-mcp(research).md`, both imported research source material that
+predates the style rule and that CLAUDE.md itself describes as an input to this project rather
+than as its own prose. Every other tracked text file was already clean, so closing the gap needed
+a rule to point the check at and a check to enforce the rule, not a rewrite pass.
 
-The emoji half of the same working-agreement sentence remains unenforced. A correct check needs a
-character range confident enough to avoid both a miss, a genuine emoji the range does not cover,
-and a false flag, an ordinary symbol or CJK character the range wrongly catches, once variation
-selectors, zero-width-joiner sequences, and skin-tone modifiers are accounted for. That is more
-than a few lines to get right with confidence, so it was left open rather than shipped as a check
-nobody can vouch for.
+The emoji half of the same principle remains unenforced. A correct check needs a character range
+confident enough to avoid both a miss, a genuine emoji the range does not cover, and a false flag,
+an ordinary symbol or CJK character the range wrongly catches, once variation selectors,
+zero-width-joiner sequences, and skin-tone modifiers are accounted for. That is more than a few
+lines to get right with confidence, so it was left open rather than shipped as a check nobody can
+vouch for.

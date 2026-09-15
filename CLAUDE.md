@@ -146,6 +146,10 @@ registry, so a tool added later inherits every check.
 - **Modular over monolithic.** The Graph-access layer is a standalone library the tool layer
   consumes.
 - **No emojis or icons anywhere**, including logs and docs. **US English throughout.**
+- **This repo's prose avoids em dashes and en dashes**, including inside string literals, in
+  code, docs, and commit messages alike. As of this branch a test enforces it for every tracked
+  text file, except the two imported research documents that predate the rule and are named as
+  exempt in the test itself.
 
 ## Working Agreement
 

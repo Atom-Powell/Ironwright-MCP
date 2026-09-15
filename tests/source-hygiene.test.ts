@@ -37,13 +37,11 @@ describe("tracked text sources", () => {
 });
 
 /**
- * CLAUDE.md states plainly that this repo's prose avoids em dashes and en
- * dashes entirely and that a hygiene test enforces it. Until this case
- * existed, that sentence was false: the suite above checked only for a NUL
- * byte, and nothing anywhere caught a dash. That is the same defect class
- * already recorded in docs/OPEN-ITEMS.md against phase 2a, a guardrail the
- * documentation claims exists and does not, so it is worth closing rather
- * than leaving as a second instance of it.
+ * CLAUDE.md's Non-Negotiable Engineering Principles state that this repo's
+ * prose avoids em dashes and en dashes, including inside string literals.
+ * Before this case existed, nothing enforced that: the suite above checked
+ * only for a NUL byte, and nothing anywhere caught a dash. See
+ * docs/OPEN-ITEMS.md for how that gap was found and closed.
  *
  * The forbidden characters are written as escapes, not as literal em and en
  * dashes, so that this file does not fail the very check it defines.
