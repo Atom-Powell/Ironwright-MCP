@@ -50,6 +50,22 @@ async function main(): Promise<void> {
 
   const profileCount = profiles.ids().length;
   const server = app.listen(config.port, () => {
+    // Express calls this callback on failure as well as on success, so it
+    // cannot assume it is being called because the port was bound. Its
+    // `app.listen` registers the callback as `server.once("error", done)`
+    // alongside the listening handler (express 5.2.1,
+    // node_modules/express/lib/application.js:598-606), which is why a plain
+    // `http.Server` behaves differently here: against an occupied port a plain
+    // server never calls this at all, and express calls it with the error.
+    //
+    // Measured against an occupied port, `server.listening` is false at this
+    // point and true on a real bind, so the callback has an observable for the
+    // thing it is about to claim. This is a suppression rather than a
+    // retraction on purpose: the line never prints falsely, so there is nothing
+    // to take back, and the error handler below is left as the only account of
+    // what went wrong.
+    if (!server.listening) return;
+
     console.log(
       `listening on port ${config.port}, writes ${config.allowWrites ? "enabled" : "disabled"}, ` +
         `${profileCount} ${profileCount === 1 ? "profile" : "profiles"} from ${config.profileDir}, ` +
@@ -57,22 +73,27 @@ async function main(): Promise<void> {
     );
   });
 
-  // A bind failure arrives as an event rather than as a rejection, so the catch
-  // below cannot see it, and Node's default action for an unhandled "error"
-  // event is an uncaught exception. A port already in use is a startup failure
-  // like any other and the operator gets the same one-line treatment.
+  // Without this, a bind failure was silent and the process exited 0: a
+  // container that never bound its port reporting success to the platform that
+  // was about to route traffic to it. Measured, not inferred. The failure is
+  // not an uncaught exception, which is what an unhandled "error" event would
+  // normally be, because express has already registered a listener for it by
+  // the mechanism described above, and that listener only logs the optimistic
+  // line.
   //
-  // The retraction is not defensive padding. A dual-stack listen binds each
-  // address family separately, and a run against an occupied port was observed
-  // to emit "listening" for the family that bound and only then EADDRINUSE for
-  // the one that did not, so the line above really can claim a server that is
-  // about to exit. The callback that printed it could not have known; this
-  // handler did observe the outcome, so correcting the record is its job.
+  // `server.listening` separates the two kinds of error this one handler sees.
+  // Before the bind, an error means the server never started and the process
+  // must fail. After it, `net.Server` still emits "error" for accept failures
+  // such as EMFILE, and those say nothing about startup: the server did listen,
+  // it is still running, and setting `exitCode` there would do nothing but
+  // stain a later clean shutdown with a failure that had already been survived.
   server.on("error", (error: Error) => {
-    console.error(
-      `the server could not listen on port ${config.port}: ${error.message}. ` +
-        "Disregard any line above reporting that it is listening: this process is exiting.",
-    );
+    if (server.listening) {
+      console.error(`the server hit an error on port ${config.port}: ${error.message}`);
+      return;
+    }
+
+    console.error(`the server could not listen on port ${config.port}: ${error.message}`);
     process.exitCode = 1;
   });
 

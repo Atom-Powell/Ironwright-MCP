@@ -28,15 +28,11 @@ export const SERVER_VERSION = "0.1.0";
 export function buildServer(opts: BuildServerOptions): McpServer {
   const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
 
-  // The write gate applies to a caller-supplied list as well as to the
-  // registry's own. A test list is still a list of tools this server would
-  // serve, and a gate that only held for the default source would leave the one
-  // code path that hides write tools untested by every suite that supplies its
-  // own definitions.
-  const tools =
-    opts.tools === undefined
-      ? selectTools(opts.allowWrites)
-      : opts.tools.filter((tool) => opts.allowWrites || tool.kind !== "write");
+  // Both branches go through `selectTools`, so the write gate has exactly one
+  // definition. A caller-supplied list chooses which tools exist, never whether
+  // the gate applies to them, and repeating the predicate here would give a
+  // security boundary a second copy to drift from.
+  const tools = selectTools(opts.allowWrites, opts.tools);
 
   for (const tool of tools) {
     const message = `${tool.name} is registered but not implemented yet.`;
