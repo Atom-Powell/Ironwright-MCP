@@ -665,6 +665,8 @@ export function splitPath(path: string): { parentPath: string; name: string } {
 export interface SeedGraphClient extends GraphClient {
   createFolder(driveId: string, parentPath: string, name: string): Promise<{ status: number }>;
   createFile(driveId: string, parentPath: string, name: string, content: string): Promise<{ status: number }>;
+  putBytes(driveId: string, path: string, bytes: Uint8Array, contentType: string): Promise<{ status: number }>;
+  patch<T>(path: string, body?: unknown): Promise<T>;
 }
 
 export async function executeSeed(
@@ -747,6 +749,8 @@ interface RawGraphResponse {
   body: string;
 }
 
+type SendBody = { text: string; contentType: string } | { bytes: Uint8Array; contentType: string };
+
 export function createSeedGraphClient(options: {
   tokenProvider: TokenProvider;
   fetchImpl?: typeof fetch;
@@ -754,7 +758,7 @@ export function createSeedGraphClient(options: {
   const fetchImpl = options.fetchImpl ?? fetch;
   let requestCount = 0;
 
-  async function send(path: string, method: string, body?: { text: string; contentType: string }): Promise<RawGraphResponse> {
+  async function send(path: string, method: string, body?: SendBody): Promise<RawGraphResponse> {
     const token = await options.tokenProvider.getToken();
     requestCount += 1;
     const response = await fetchImpl(`${GRAPH_BASE}${path}`, {
@@ -763,7 +767,10 @@ export function createSeedGraphClient(options: {
         authorization: `Bearer ${token}`,
         ...(body === undefined ? {} : { "content-type": body.contentType }),
       },
-      ...(body === undefined ? {} : { body: body.text }),
+      // A workbook is binary, so its body cannot go through the text branch:
+      // encoding those bytes as a UTF-8 string would corrupt every byte above
+      // 0x7f and produce a file Graph refuses to open.
+      ...(body === undefined ? {} : { body: "text" in body ? body.text : body.bytes }),
     });
     return { status: response.status, body: await response.text() };
   }
@@ -855,6 +862,31 @@ export function createSeedGraphClient(options: {
         throw new GraphRequestError({ method: "PUT", path, status: response.status, body: response.body });
       }
       return { status: response.status };
+    },
+
+    async putBytes(driveId, filePath, bytes, contentType) {
+      const path = `${driveItemPath(driveId, filePath)}/content`;
+      const response = await send(path, "PUT", { bytes, contentType });
+      if (response.status < 200 || response.status >= 300) {
+        throw new GraphRequestError({ method: "PUT", path, status: response.status, body: response.body });
+      }
+      return { status: response.status };
+    },
+
+    async patch<T>(path: string, body?: unknown): Promise<T> {
+      const response = await send(path, "PATCH", body === undefined ? undefined : { text: JSON.stringify(body), contentType: "application/json" });
+      if (response.status < 200 || response.status >= 300) {
+        throw new GraphRequestError({ method: "PATCH", path, status: response.status, body: response.body });
+      }
+      if (response.body.length === 0) return undefined as T;
+      try {
+        return JSON.parse(response.body) as T;
+      } catch {
+        throw new Error(
+          `Graph PATCH ${path} returned ${response.status} with a body that is not JSON. Something other than ` +
+            "Graph answered this request.",
+        );
+      }
     },
   };
 }

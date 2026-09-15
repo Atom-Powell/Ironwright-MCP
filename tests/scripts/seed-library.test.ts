@@ -370,6 +370,8 @@ function fakeSeedClient(driveName: string): { client: SeedGraphClient; calls: st
       return { status: 201 };
     },
     post: async () => { throw new Error("this fake does not implement post"); },
+    putBytes: async () => { throw new Error("this fake does not implement putBytes"); },
+    patch: async () => { throw new Error("this fake does not implement patch"); },
   };
   return { client, calls };
 }
