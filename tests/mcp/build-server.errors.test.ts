@@ -5,6 +5,7 @@ import { z } from "zod";
 import { buildServer } from "../../src/mcp/build-server.js";
 import { createFakeToolContext } from "../tools/fake-context.js";
 import type { ToolDefinition } from "../../src/tools/types.js";
+import { SAFETY_SENTENCES } from "../../src/tools/kinds.js";
 
 const FAILING: ToolDefinition = {
   name: "failing_tool",
@@ -43,7 +44,7 @@ const WRITE_TOOL: ToolDefinition = {
   name: "writing_tool",
   kind: "write",
   title: "Writing",
-  description: "Would change the repository. Not read-only: this tool saves a plan for review.",
+  description: `Would change the repository. ${SAFETY_SENTENCES.destructiveWrite}`,
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   inputSchema: { any: z.string().describe("Ignored, for example \"x\".") },
   outputSchema: { done: z.boolean().describe("Always true, for example true.") },

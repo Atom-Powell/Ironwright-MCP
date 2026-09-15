@@ -52,11 +52,23 @@ describe("runReconcile", () => {
   });
 
   it("reads the workbook before scanning, so a bad mapping costs no enumeration", async () => {
-    const order: string[] = [];
+    // A plain order log does not distinguish "workbook awaited, then scan
+    // started" from "workbook and scan both started together, with the
+    // workbook's callback merely invoked first in source order." Both fakes
+    // that only push a marker resolve synchronously, so a
+    // `Promise.all([readWorkbook(...), scans.run(...)])` mutation would call
+    // the workbook fake first regardless, and an order-only assertion would
+    // not notice. What proves sequencing is whether the scan starts only
+    // after the workbook promise has genuinely settled, so the workbook fake
+    // yields a real microtask before resolving and the scan fake records
+    // whether that flag was already set at the moment it started.
+    let workbookSettled = false;
+    let workbookSettledWhenScanStarted: boolean | undefined;
+
     const context = contextWith({
       scans: {
         run: async () => {
-          order.push("scan");
+          workbookSettledWhenScanStarted = workbookSettled;
           return {
             result: {
               snapshot: { files: [], folderPaths: [], scannedAt: "2026-09-14T09:00:00Z", searchCrossCheckIncluded: false },
@@ -77,11 +89,12 @@ describe("runReconcile", () => {
     });
 
     await runReconcile({ profileId: "example" }, context, async () => {
-      order.push("workbook");
+      await Promise.resolve();
+      workbookSettled = true;
       return WORKBOOK;
     });
 
-    expect(order).toEqual(["workbook", "scan"]);
+    expect(workbookSettledWhenScanStarted).toBe(true);
   });
 
   it("reports the Graph cost this call actually paid", async () => {
