@@ -363,9 +363,15 @@ copy of production.
    boundaries and partial-failure semantics against guesses about a consumer that does not exist.
 3. **Domain engine.** Expected-state derivation, renderers, matcher, diff. Pure and
    fixture-tested. Has no dependency on phase 2 and can be built in parallel with it.
-4. **Read tools.** `inventory_tree`, `describe_workbook`,
-   `reconcile_workbook_vs_repository`, `query_repository`, `validate_structure`.
-   MVP checkpoint: the highest-value capability is usable here, before any write tool exists.
+4. **Read tools**, sliced on 2026-09-14 because wiring the first tool forces an execution layer
+   with no prior consumer to build against. `2026-09-14-reconcile-tool-wiring-design.md` is
+   **4a**: the handler contract, the per-process `ToolContext`, the profile registry, the
+   in-process single-flight scan coordinator, and `reconcile_workbook_vs_repository` wired end to
+   end. `inventory_tree`, `describe_workbook`, `query_repository`, and `validate_structure`
+   inherit the layer as stubs, with no retrofit. MVP checkpoint: the highest-value capability is
+   usable here, before any write tool exists, and it is reached when this slice's tool is
+   confirmed against real read-only data, not when the slice merges, since nothing in it has run
+   against a tenant yet.
 5. **Hosting.** Container Apps at min replicas 1, managed identity or Key Vault for the
    client credential, CI/CD, and Graph call volume telemetry, which is the before-and-after
    evidence for the recursive-inventory pain point that started the project.

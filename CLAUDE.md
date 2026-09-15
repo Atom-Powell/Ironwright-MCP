@@ -68,8 +68,13 @@ the wrong method. The sequential single-flight queue per workbook is deferred, n
 assumes a long-lived process holding sessions across calls, and this server builds a fresh
 `McpServer` per request, statelessly, which is itself a locked decision, so two concurrent
 requests cannot share a session and there is nothing to serialize. This is not a YAGNI deferral
-of something that would work; the mechanism does not fit the architecture. If a later phase adds
-a shared session cache, the queue returns with it and that phase owns the decision.
+of something that would work; the mechanism does not fit the architecture. Amended 2026-09-14 for
+scans, not for Excel. The mechanism is now adopted in `src/scan/coordinator.ts`, where it does
+fit: concurrent scans do not share a session, they share a process-level store client and a
+persisted `deltaLink`, both of which outlive the request. It exists for one failure: `runScan`
+answers a delta resync by clearing the inventory and re-enumerating, and a concurrent call
+reading it inside that window would report every file in the library as missing. The Excel
+deferral stands unchanged.
 
 **State store.** Azure Table Storage for per-drive `deltaLink`s, inventory snapshots, plans, and
 reversal logs.
@@ -188,10 +193,17 @@ The spec carries the full phase descriptions. Status as of 2026-09-14:
    and a client who owes nothing. The engine enforces two input contracts phase 2 must satisfy:
    one workbook row per client, and repository files collapsed by path. This is the MVP
    checkpoint.
-4. **Read tools wired**, then **hosting**, then **write tools**, then **Copilot Studio
-   integration and governance**, then the **evaluation suite**, whose questions are
-   already written in `docs/EVALUATION-QUESTIONS.md`. They exist early on purpose, so phase 3
-   has a concrete target rather than inventing its own test afterward.
+4. **Read tools**, sliced. **4a: the tool execution layer and the first wired tool.** Complete,
+   covered by fakes only. The handler contract and the per-process `ToolContext`, the profile
+   registry loaded and validated at startup from `IW_PROFILE_DIR`, the in-process single-flight
+   scan coordinator, and `reconcile_workbook_vs_repository` wired end to end with a real output
+   schema. The other four read tools are still honest stubs and inherit the layer with no
+   retrofit. No Graph call, no Excel call and no Azure Storage call has been made by this code,
+   so the composed tool has never returned a report against a tenant. Then **hosting**, then
+   **write tools**, then **Copilot Studio integration and governance**, then the **evaluation
+   suite**, whose questions are already written in `docs/EVALUATION-QUESTIONS.md`. They exist
+   early on purpose, so phase 3 has a concrete target rather than inventing its own test
+   afterward.
 
 Of the three decisions the parent spec required before phase 2, two are settled and recorded in
 `docs/OPEN-ITEMS.md`: the per-site grant does not accept a delegated token, and the MCP endpoint

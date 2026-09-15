@@ -631,3 +631,90 @@ taken up, is small: `purgeDeletedApplication` already exists on `SetupGraph`
 (`src/setup/adapter.ts`), built for `runDeleteServerApp`'s own teardown, so `runDeleteBootstrap`
 would only need to call it after `deleteApplication` succeeds, the same way `runDeleteServerApp`
 already does.
+
+## Phase 4a: covered only by fakes, 2026-09-14
+
+Phase 4a, the tool execution layer and `reconcile_workbook_vs_repository`, has not run against a
+real tenant. No Graph call, no Excel call and no Azure Storage call has been made by this code.
+It composes three layers that are each themselves verified against fakes only: phase 2a's Graph
+and scan layer, phase 2b-1's Excel and workbook layer, and phase 3's reconciliation engine. A
+report this tool produces is exactly as unproven as those three inputs, and nothing in this slice
+changes that.
+
+**What is covered.** The handler contract and dispatch in `src/mcp/build-server.ts`. The profile
+registry's validation, duplicate-`profileId` detection, and unknown-id message, in
+`src/profiles/registry.ts`. The scan coordinator's join behavior, its zeroed Graph cost for a
+joiner, and that a failed scan does not poison its key, in `src/scan/coordinator.ts`. The output
+shaping's omission and truncation rules and the `clients` filter, in
+`src/tools/reconciliation/shape.ts`. The text block, asserted sentence by sentence against a
+shaped output that contradicts it. The failure-to-message mapping in `src/tools/errors.ts`. All
+of it against fixtures or a fake Graph transport, all of it green, none of it against Graph,
+Excel, or Azure Table Storage.
+
+**Why this matters beyond the usual disclaimer.** The tenant sitting that phase 2a and phase
+2b-1 are both waiting on now gates a third thing: whether the composed tool returns a report at
+all. Until that sitting happens, the claim that a caller can ask this server a compliance
+question and get a real answer is a design argument, not evidence.
+
+## The cross-replica scan coordination gap
+
+`ScanCoordinator` (`src/scan/coordinator.ts`) is a process-lifetime map keyed on `profileId`. It
+stops two concurrent calls within one replica from racing a delta resync, where `runScan` clears
+the inventory and re-enumerates and a concurrent call reading `listInventory` inside that window
+would report every file in the library as missing. It coordinates within a replica and not
+across them, because the map lives in the process's own memory.
+
+Two replicas can both resync the same drive at the same time, and a call landing on either one
+can read a half-rebuilt inventory and report every file as missing, which is the exact failure
+the in-process coordinator exists to prevent, just at a scope it cannot see. Hosting stays at one
+replica, consistent with the existing Decision Record entry, until phase 5 decides this.
+
+The option that fixes it at any replica count is a lease held in Azure Table, with renewal,
+expiry, and crash recovery, plus a matching implementation in the in-memory store used by tests
+and local runs. That is genuine distributed-systems work, and it was judged too much for a slice
+whose job was wiring one tool end to end, not building a distributed lock. Settle it when phase 5
+decides how many replicas this server actually runs.
+
+## Settled by observation: an `isError` result is exempt from output-schema validation
+
+The design spec for phase 4a's tool wiring deliberately refused to assume the answer to this:
+does a tool that declares an `outputSchema` and returns `{ isError: true }` with no
+`structuredContent` fail output-schema validation? Settled by experiment rather than by
+assumption, against the installed `@modelcontextprotocol/sdk` **1.30.0**, confirmed from
+`node_modules/@modelcontextprotocol/sdk/package.json` rather than from the `^1.30.0` range in
+`package.json`: it does not fail. The SDK exempts an `isError` result from output-schema
+validation entirely.
+
+This is an early return in the installed SDK's source
+(`dist/esm/server/mcp.js`: `if (result.isError) { return; }`, ahead of the branch that would
+otherwise throw on missing `structuredContent`), not a documented guarantee. It was checked
+against being a false positive, not merely observed: a non-`isError` result that fails
+validation comes back with the SDK's own text replacing the handler's, so a green assertion that
+the handler's own message survived is evidence the exemption ran rather than evidence the SDK
+substituted its own error for a different one. `tests/mcp/build-server.errors.test.ts` pins the
+observed behavior. An SDK upgrade must re-run that test before relying on the exemption again; if
+it ever stops holding, the recorded fallback is a discriminated output schema whose error branch
+is valid.
+
+## CLOSED: a failed startup reported success and exited zero
+
+**CLOSED 2026-09-14 by `49fa1e7`, "fix(server): suppress the startup line when the port was
+never bound".** Found while building `src/server/main.ts` into phase 4a's composition root.
+Express 5.2.1's `app.listen` wraps the listen callback in `once()` and also registers it as
+`server.once("error", done)` (`node_modules/express/lib/application.js`, lines 598 to 606), so a
+bind failure invokes the success callback with the error rather than skipping it, unlike a plain
+`http.Server`, which never calls that callback at all on a failed bind. Measured against an
+occupied port before the fix: the success line printed, no error line printed, and the process
+exited **0**. A container that never bound its port would have reported itself healthy to the
+platform about to route traffic to it.
+
+Fixed on this branch. The listen callback now returns early unless `server.listening` is true, so
+the success line is never printed falsely instead of being printed and then contradicted. A
+separate `error` listener distinguishes a startup failure, which sets `exitCode = 1`, from a
+post-listen error such as an accept failure, which must not claim the server is exiting, since it
+is still running.
+
+This is unpinned by any test. `src/server/main.ts` is a composition root with no test seam by
+design, so its correctness rests on the real runs recorded against the built server rather than
+on a suite. An express upgrade should re-check this mechanism by hand, against the file and line
+range above, before trusting it again.
