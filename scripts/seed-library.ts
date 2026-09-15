@@ -11,12 +11,18 @@
  * exists to make the difference visible, not to prove the mechanism works
  * again.
  *
- * Imports exactly one thing from src/domain/: the reconciliation engine's
- * front door, used by scripts/seed/expected.ts to predict the report this
- * seed should produce. That is what the front door is for, and the
- * alternative is a second implementation of the rolling window, the quarterly
- * anchor and the effective-date rule, which is the duplication the
- * single-entry rule exists to prevent.
+ * Imports exactly two things from src/domain/, both by scripts/seed/expected.ts,
+ * and both legitimate for the same underlying reason: a caller of the engine
+ * should not have to re-derive what the engine already derives. The
+ * reconciliation engine's front door, src/domain/reconcile/index.js, predicts
+ * the report this seed should produce; that is what the front door is for,
+ * and the alternative is a second implementation of the rolling window, the
+ * quarterly anchor and the effective-date rule, which is the duplication the
+ * single-entry rule exists to prevent. And the profile schema,
+ * src/domain/profile/schema.js, because reconcile takes a validated Profile
+ * while this script starts from raw JSON, so something has to parse and
+ * validate it, and writing a second validator by hand would be the same
+ * duplication in a different place.
  *
  * The token substitution below is still a local reimplementation of just
  * enough of naming.template's placeholder syntax, not a second copy of the
