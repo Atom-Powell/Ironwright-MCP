@@ -11,12 +11,17 @@
  * exists to make the difference visible, not to prove the mechanism works
  * again.
  *
- * Deliberately does not import anything from src/domain/: that layer is pure
- * and has one enforced entry point (the reconciliation engine), and a fixture
- * generator run against a live tenant is not a legitimate consumer of it. The
- * token substitution below is a small, local reimplementation of just enough
- * of naming.template's placeholder syntax to build file and folder names, not
- * a second copy of the domain's own renderer.
+ * Imports exactly one thing from src/domain/: the reconciliation engine's
+ * front door, used by scripts/seed/expected.ts to predict the report this
+ * seed should produce. That is what the front door is for, and the
+ * alternative is a second implementation of the rolling window, the quarterly
+ * anchor and the effective-date rule, which is the duplication the
+ * single-entry rule exists to prevent.
+ *
+ * The token substitution below is still a local reimplementation of just
+ * enough of naming.template's placeholder syntax, not a second copy of the
+ * domain's renderer, and that stays deliberate: a fixture generator is not a
+ * legitimate consumer of the renderer the engine uses to decide compliance.
  *
  * Authenticates as the grant issuer (IW_BOOTSTRAP_CLIENT_ID and
  * IW_BOOTSTRAP_CLIENT_SECRET), the same application docs/SETUP.md's
