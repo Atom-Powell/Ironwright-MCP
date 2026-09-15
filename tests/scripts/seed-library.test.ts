@@ -270,6 +270,33 @@ describe("buildSeedPlan", () => {
     // template, which is exactly the false blame this guard exists to avoid.
     expect(() => buildSeedPlan(exampleProfile(), { ...options, clientCount: 8 })).toThrow(/clientCount/);
   });
+
+  it("refuses a clientCount at or above ABSENT_CLIENT's index", () => {
+    // ABSENT_CLIENT is Client13. At clientCount 13, buildSeedTree builds a
+    // folder for it, which is exactly the client this plant needs to stay
+    // absent from the repository so the reconciliation report has a missing
+    // client finding to make.
+    expect(() => buildSeedPlan(exampleProfile(), { ...options, clientCount: 13 })).toThrow(/clientCount/);
+  });
+
+  it("names the misnamed-file plant when its rename target is absent from the tree", () => {
+    // throughMonth 2 excludes both planted months (misnamed's month 3 and
+    // missing's month 7), so both plants would fail here: this asserts the
+    // misnamed check is the one that actually fires and that its message
+    // names the misnamed plant, not the missing one.
+    expect(() =>
+      buildSeedPlan(exampleProfile(), { ...options, throughMonth: 2 }),
+    ).toThrow(/misnamed-file plant/);
+  });
+
+  it("names the missing-file plant when only its target is absent from the tree", () => {
+    // throughMonth 5 includes the misnamed plant's month (3) but excludes the
+    // missing plant's month (7): the misnamed check passes on its own, and
+    // the missing-file check is the one that fires, independently of it.
+    expect(() =>
+      buildSeedPlan(exampleProfile(), { ...options, throughMonth: 5 }),
+    ).toThrow(/missing-file plant/);
+  });
 });
 
 describe("formatExecutionReport", () => {

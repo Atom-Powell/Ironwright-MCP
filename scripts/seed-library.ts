@@ -374,6 +374,15 @@ const MINIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT = Math.max(
   clientIndexFromPlantedName(MISNAMED_FILE_CLIENT),
 );
 
+// The highest clientCount that leaves ABSENT_CLIENT out of the tree. At or
+// above it, buildSeedTree builds a folder for the very client this plant
+// means to report as missing from the repository, and workbookClients below
+// would then list it twice: once from the built clients array, once from the
+// explicit ABSENT_CLIENT append. Derived from the constant above, not
+// hardcoded, so a future edit to ABSENT_CLIENT cannot leave this ceiling
+// behind.
+const MAXIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT = clientIndexFromPlantedName(ABSENT_CLIENT) - 1;
+
 export interface SeedPlan {
   clients: string[];
   workbookClients: string[];
@@ -393,6 +402,17 @@ export function buildSeedPlan(profile: SeedProfileInput, options: SeedOptions): 
       `clientCount must be at least ${MINIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT} to plant this seed's fixed ` +
         `discrepancy set, which names ${MISSING_FILE_CLIENT} and ${MISNAMED_FILE_CLIENT}. Got ` +
         `${options.clientCount}.`,
+    );
+  }
+  if (options.clientCount > MAXIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT) {
+    // Refused for the same reason as the floor guard above, from the other
+    // direction: at clientCount 13 or higher, buildSeedTree would build a
+    // folder for Client13, the client this plant means to report as absent
+    // from the repository, and this function would list it twice in
+    // workbookClients without ever noticing.
+    throw new Error(
+      `clientCount must be at most ${MAXIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT} so ${ABSENT_CLIENT} stays absent ` +
+        `from the tree, which is what this plant needs it to be. Got ${options.clientCount}.`,
     );
   }
 
@@ -419,20 +439,30 @@ export function buildSeedPlan(profile: SeedProfileInput, options: SeedOptions): 
   const replacedFrom = plantedPath(profile, year, MISNAMED_FILE_CLIENT, MISNAMED_FILE_MONTH, monthlyToken);
   const replacedTo = plantedPath(profile, year, MISNAMED_FILE_CLIENT, MISNAMED_FILE_MONTH, MISNAMED_DELIVERABLE_TOKEN);
 
+  // Checked individually, by path presence, and before the filter/map below
+  // runs: a `.map` silently no-ops when its own target is absent, so a single
+  // check on the resulting array's length cannot see a failed rename the way
+  // it can see a failed removal (removing nothing changes the length; a
+  // no-op rename does not). Each message names its own plant, since an
+  // operator reading one needs to know which of the two to look at.
+  if (!base.filePaths.includes(replacedFrom)) {
+    throw new Error(
+      `The misnamed-file plant for ${MISNAMED_FILE_CLIENT} expected to find ${replacedFrom} in the tree, to ` +
+        `rename it to ${replacedTo}, but the tree does not contain that path. The profile's naming template and ` +
+        "this seed's planted set have diverged.",
+    );
+  }
+  if (!base.filePaths.includes(omitted)) {
+    throw new Error(
+      `The missing-file plant for ${MISSING_FILE_CLIENT} expected to find ${omitted} in the tree, to remove it, ` +
+        "but the tree does not contain that path. The profile's naming template and this seed's planted set have " +
+        "diverged.",
+    );
+  }
+
   const filePaths = base.filePaths
     .filter((path) => path !== omitted)
     .map((path) => (path === replacedFrom ? replacedTo : path));
-
-  if (filePaths.length !== base.filePaths.length - 1) {
-    // The planted paths are built from the same profile and tokens the tree
-    // used, so a mismatch means the naming template changed underneath this
-    // function. Refused rather than silently seeding a library whose planted
-    // drift is not where the printed expectation says it is.
-    throw new Error(
-      `Planting expected to remove exactly one file at ${omitted}, but the tree does not contain that path. ` +
-        "The profile's naming template and this seed's planted set have diverged.",
-    );
-  }
 
   return {
     clients,
