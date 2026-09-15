@@ -124,8 +124,12 @@ An `.xlsx` is a ZIP of XML parts, and the Excel API cannot open a zero-byte file
 is generated rather than committed as a binary, so the artifact is reviewable in a diff and
 testable, and so the repository stays text.
 
-Five parts are enough for an empty single-sheet workbook: `[Content_Types].xml`, `_rels/.rels`,
-`xl/workbook.xml`, `xl/_rels/workbook.xml.rels`, and `xl/worksheets/sheet1.xml`. They are written
+Six parts: `[Content_Types].xml`, `_rels/.rels`, `xl/workbook.xml`, `xl/_rels/workbook.xml.rels`,
+`xl/worksheets/sheet1.xml`, and `xl/styles.xml`. Five of them make a workbook that opens. The sixth
+is there because the `Onboarded` column needs a date number format, and a workbook carrying no style
+table at all is the case most likely to make that call fail for a reason unrelated to anything this
+project owns. Including a minimal style table costs a few hundred bytes and removes the question.
+They are written
 into a ZIP with stored entries, no compression, which keeps the container to local file headers, a
 central directory and an end-of-central-directory record, with CRCs from `zlib.crc32`. Node 22 is
 the floor in `engines` and `zlib.crc32` exists from 22 onward, so this needs no dependency.
@@ -199,13 +203,33 @@ which is the same standing as every other phase in this repository.
 - The expected report: asserted against a fixture, so a change to the planted set cannot silently
   change what the sitting is told to expect.
 
-## For the implementation plan to verify, not assume
+## Two things checked rather than assumed
 
-The engine's single-entry lint fence in `eslint.config.js` is written for `src/`. Importing
-`reconcile` from `scripts/seed/expected.ts` uses the sanctioned entry point, but whether the fence's
-globs reach `scripts/` at all has not been checked. The plan confirms this with a lint run before
-building on it, and if the fence needs an explicit allowance for `scripts/`, that is a one-line
-config change with a comment, not a reason to duplicate the engine.
+**The lint fence already allows this.** `eslint.config.js` applies its rules to
+`src/**`, `tests/**` and `scripts/**` together, and the only restriction outside the domain layer is
+`RECONCILE_ENTRY_POINT_PATTERN`, which refuses reaching past `domain/reconcile/index.js` into a
+stage module. Importing `reconcile` from that entry point, and `ProfileSchema` from
+`src/domain/profile/schema.js`, is exactly what the fence permits. No config change is needed. The
+config's own comment already names `scripts/` as "a fixture generator held to the same
+import-boundary standard as the rest of the repo".
+
+**The seeder's header comment becomes false and must change with it.** `scripts/seed-library.ts`
+opens by stating that it deliberately imports nothing from `src/domain/`, on the reasoning that a
+fixture generator is not a legitimate consumer of the engine. That reasoning was about the token
+substitution below it, which reimplements just enough of the naming template rather than reusing the
+domain's renderer, and it stays true of that. It is not true of `reconcile`: predicting the report is
+what the front door is for, and the alternative is a second implementation of the window, the
+anchor and the effective-date rule, which is the duplication the single-entry rule exists to
+prevent. The comment is rewritten to say which import is legitimate and why, because a comment that
+is no longer true is the same defect class as a message that is no longer true.
+
+## Sequencing against phase 4a
+
+This work branches from `main` and depends on nothing in phase 4a. The seeder, the engine and the
+workbook reader it targets are all on `main` already.
+
+The sitting it serves does depend on phase 4a, because the tool whose report gets compared is the one
+PR #10 wires. So this can be built and merged in either order, and the sitting needs both.
 
 ## Out of scope
 
