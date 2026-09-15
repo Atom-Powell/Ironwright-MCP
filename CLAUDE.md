@@ -87,6 +87,9 @@ latency reason.
 `Sites.ReadWrite.All`. This is the real least-privilege boundary, because Copilot Studio's DLP
 governance is per-server rather than per-tool and cannot substitute for it.
 
+**Name.** The product is officially Ironwright MCP. Settled 2026-09-15, closing the last item
+that was carried as open. Use that spelling in prose, with the repo staying `Ironwright-MCP`.
+
 **Product shape.** An Ironwright product under Elastic License 2.0, not an internal tool. One
 server instance per customer tenant. Recurring-deliverable compliance is the fixed domain shape,
 with taxonomy, filename standard, workbook mapping, and per-client cadence as declarative
@@ -215,13 +218,6 @@ authenticates through Container Apps built-in Entra auth. The third, which deleg
 setup command's device-code sign-in must request, is still open, but it governs that sign-in
 rather than the server's own Graph access, so it did not block phase 2b-1 and does not block
 2c.
-
-## Still open
-
-The product name. The repo is `Ironwright-MCP` and the README calls it Ironwright MCP, but no
-distinct product name has been chosen, and the reconciliation and stewardship framing suggests
-better options exist. Not urgent, and cheaper to change now than after a Copilot Studio
-connector carries it.
 
 ## Reference
 
