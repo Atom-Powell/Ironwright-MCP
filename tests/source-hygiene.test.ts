@@ -35,3 +35,36 @@ describe("tracked text sources", () => {
     expect(readFileSync(path).includes(0)).toBe(false);
   });
 });
+
+/**
+ * CLAUDE.md states plainly that this repo's prose avoids em dashes and en
+ * dashes entirely and that a hygiene test enforces it. Until this case
+ * existed, that sentence was false: the suite above checked only for a NUL
+ * byte, and nothing anywhere caught a dash. That is the same defect class
+ * already recorded in docs/OPEN-ITEMS.md against phase 2a, a guardrail the
+ * documentation claims exists and does not, so it is worth closing rather
+ * than leaving as a second instance of it.
+ *
+ * The forbidden characters are written as escapes, not as literal em and en
+ * dashes, so that this file does not fail the very check it defines.
+ */
+const EM_DASH = "\u2014";
+const EN_DASH = "\u2013";
+
+/**
+ * Both are imported research source material that predates the style rule.
+ * CLAUDE.md itself describes them as inputs to this project rather than as
+ * its own prose: rewriting someone else's document to match our house style
+ * would misrepresent what that document says and who wrote it.
+ */
+const DASH_EXEMPT = new Set(["competitive-landscape.md", "iw-mcp(research).md"]);
+
+describe("tracked text sources, dash style", () => {
+  const files = trackedTextFiles().filter((path) => !DASH_EXEMPT.has(path));
+
+  it.each(files)("%s contains no em dash or en dash", (path) => {
+    const content = readFileSync(path, "utf8");
+    expect(content.includes(EM_DASH)).toBe(false);
+    expect(content.includes(EN_DASH)).toBe(false);
+  });
+});
