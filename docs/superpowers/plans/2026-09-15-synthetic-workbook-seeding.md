@@ -345,9 +345,9 @@ export interface SeedPlan {
 }
 export const ABSENT_CLIENT = "Client13";
 export const MISSING_FILE_CLIENT = "Client04";
-export const MISSING_FILE_MONTH = 7;
+export const MISSING_FILE_MONTH = 1;
 export const MISNAMED_FILE_CLIENT = "Client09";
-export const MISNAMED_FILE_MONTH = 3;
+export const MISNAMED_FILE_MONTH = 1;
 export function buildSeedPlan(profile: SeedProfileInput, options: SeedOptions): SeedPlan;
 ```
 
@@ -387,21 +387,21 @@ describe("buildSeedPlan", () => {
 
   it("omits exactly one monthly file, for the planted client and month", () => {
     const plan = buildSeedPlan(exampleProfile(), options);
-    const omitted = `2026/${MISSING_FILE_CLIENT}/07-July/2026-07_${MISSING_FILE_CLIENT}_MonthlyTraining.xlsx`;
+    const omitted = `2026/${MISSING_FILE_CLIENT}/01-January/2026-01_${MISSING_FILE_CLIENT}_MonthlyTraining.xlsx`;
     expect(plan.tree.filePaths).not.toContain(omitted);
     // The folder still exists: a missing artifact and a missing client are
     // different findings, and this row is meant to produce the first.
-    expect(plan.tree.folderPaths).toContain(`2026/${MISSING_FILE_CLIENT}/07-July`);
-    expect(MISSING_FILE_MONTH).toBe(7);
+    expect(plan.tree.folderPaths).toContain(`2026/${MISSING_FILE_CLIENT}/01-January`);
+    expect(MISSING_FILE_MONTH).toBe(1);
   });
 
   it("writes the planted misnamed file in the vendor-token shape", () => {
     const plan = buildSeedPlan(exampleProfile(), options);
-    const compliant = `2026/${MISNAMED_FILE_CLIENT}/03-March/2026-03_${MISNAMED_FILE_CLIENT}_MonthlyTraining.xlsx`;
-    const misnamed = `2026/${MISNAMED_FILE_CLIENT}/03-March/2026-03_${MISNAMED_FILE_CLIENT}_VendorTraining.xlsx`;
+    const compliant = `2026/${MISNAMED_FILE_CLIENT}/01-January/2026-01_${MISNAMED_FILE_CLIENT}_MonthlyTraining.xlsx`;
+    const misnamed = `2026/${MISNAMED_FILE_CLIENT}/01-January/2026-01_${MISNAMED_FILE_CLIENT}_VendorTraining.xlsx`;
     expect(plan.tree.filePaths).not.toContain(compliant);
     expect(plan.tree.filePaths).toContain(misnamed);
-    expect(MISNAMED_FILE_MONTH).toBe(3);
+    expect(MISNAMED_FILE_MONTH).toBe(1);
   });
 
   it("is identical across two builds with the same arguments", () => {
@@ -460,9 +460,15 @@ and carry `throughMonth` on `SeedArguments`.
  */
 export const ABSENT_CLIENT = "Client13";
 export const MISSING_FILE_CLIENT = "Client04";
-export const MISSING_FILE_MONTH = 7;
+export const MISSING_FILE_MONTH = 1;
 export const MISNAMED_FILE_CLIENT = "Client09";
-export const MISNAMED_FILE_MONTH = 3;
+export const MISNAMED_FILE_MONTH = 1;
+
+// Corrected 2026-09-15. Both months were 7 and 3 in the original plan, which was
+// a defect: throughMonth caps the tree at the current month, so the guard below
+// would refuse the whole seed for any run from January through June. January is
+// reachable for every throughMonth and is on or after the January 1 effective
+// date, so the window still expects it. Leave this at 1.
 
 /**
  * The misnamed file uses the example profile's vendor-token recognizer, not
@@ -1073,13 +1079,13 @@ describe("expectedReport", () => {
   it("reports exactly one missing artifact for the planted client and month", () => {
     const missing = report().artifacts.filter((a) => a.client === MISSING_FILE_CLIENT && a.state === "missing");
     expect(missing).toHaveLength(1);
-    expect(missing[0]?.period).toEqual({ year: 2026, month: 7 });
+    expect(missing[0]?.period).toEqual({ year: 2026, month: 1 });
   });
 
   it("reports the planted file as misnamed rather than unrecognized", () => {
     const misnamed = report().artifacts.filter((a) => a.client === MISNAMED_FILE_CLIENT && a.state === "misnamed");
     expect(misnamed).toHaveLength(1);
-    expect(misnamed[0]?.period).toEqual({ year: 2026, month: 3 });
+    expect(misnamed[0]?.period).toEqual({ year: 2026, month: 1 });
   });
 
   it("finds no orphans at all, which is what the month cap is for", () => {

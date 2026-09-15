@@ -54,14 +54,19 @@ Three discrepancies, chosen to put one of each interesting kind into the live re
 | Planted | Where | What the report should say |
 |---|---|---|
 | `Client13` | A workbook row with no folder anywhere in the tree | Every period that client owes is missing |
-| `Client04`, `2026-07` | The monthly file is not written | That one artifact is missing |
-| `Client09`, `2026-03` | The monthly file is written as `2026-03_Client09_VendorTraining.xlsx` | That artifact is present and misnamed |
+| `Client04`, `2026-01` | The monthly file is not written | That one artifact is missing |
+| `Client09`, `2026-01` | The monthly file is written as `2026-01_Client09_VendorTraining.xlsx` | That artifact is present and misnamed |
 
 The misnamed form is the example profile's `vendor-token` recognizer, not `legacy-spaced`.
 `legacy-spaced` anchors its client capture on `[A-Z0-9]+`, which cannot match `Client09`, so a file
 in that shape would land as an `unrecognized` orphan and exercise the recognizer path not at all.
 `vendor-token` captures the client as `[^_]+` and carries `verdict: "misnamed"`, which is the
 finding this row is meant to produce.
+
+Both plants sit in January, corrected 2026-09-15 from July and March. The month cap below stops the
+tree at the current month, so a plant in a later month is simply absent for part of the year, and
+the guard that refuses a plant it cannot place would refuse the whole seed with it. January is
+reachable for every possible cap and is on or after the effective date every client gets.
 
 Nothing else is planted. There is no `--with-drift` flag and no drift-free mode: two runbooks means
 two expected reports to keep true, and the sitting needs one.
