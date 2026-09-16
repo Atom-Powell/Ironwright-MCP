@@ -6,6 +6,7 @@ import { createApp } from "../../src/server/app.js";
 import { buildServer } from "../../src/mcp/build-server.js";
 import { requiredSentence } from "../../src/tools/kinds.js";
 import { ALL_TOOLS } from "../../src/tools/registry.js";
+import { createFakeToolContext } from "./fake-context.js";
 
 /**
  * The registry-level contract test asserts over the definition objects, which
@@ -27,7 +28,7 @@ const listed = new Map<string, ListedTool>();
 beforeAll(async () => {
   // Writes enabled, because the write tools carry the annotations that matter
   // most and are absent from a default deployment.
-  const app = createApp({ serverFactory: () => buildServer({ allowWrites: true }) });
+  const app = createApp({ serverFactory: () => buildServer({ allowWrites: true, context: createFakeToolContext() }) });
   httpServer = await new Promise<Server>((resolve) => {
     const listener = app.listen(0, () => resolve(listener));
   });

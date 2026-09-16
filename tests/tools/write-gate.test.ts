@@ -20,37 +20,37 @@ describe("selectTools", () => {
 
 describe("loadConfig port", () => {
   it("defaults to 3000 when PORT is absent", () => {
-    expect(loadConfig({}).port).toBe(3000);
+    expect(loadConfig({ IW_PROFILE_DIR: "profiles" }).port).toBe(3000);
   });
 
   it("reads a valid PORT", () => {
-    expect(loadConfig({ PORT: "8080" }).port).toBe(8080);
+    expect(loadConfig({ PORT: "8080", IW_PROFILE_DIR: "profiles" }).port).toBe(8080);
   });
 
   it.each(["3000abc", "3000 ", " 3000", "80.5", "0x1f", "", "eighty"])(
     "rejects the malformed port %j rather than reading a number out of the front of it",
     (value) => {
-      expect(() => loadConfig({ PORT: value })).toThrow(/PORT/);
+      expect(() => loadConfig({ PORT: value, IW_PROFILE_DIR: "profiles" })).toThrow(/PORT/);
     },
   );
 
   it.each(["0", "65536", "-1"])("rejects the out-of-range port %j", (value) => {
-    expect(() => loadConfig({ PORT: value })).toThrow(/PORT/);
+    expect(() => loadConfig({ PORT: value, IW_PROFILE_DIR: "profiles" })).toThrow(/PORT/);
   });
 });
 
 describe("loadConfig write gate", () => {
   it("disables writes when the variable is absent", () => {
-    expect(loadConfig({}).allowWrites).toBe(false);
+    expect(loadConfig({ IW_PROFILE_DIR: "profiles" }).allowWrites).toBe(false);
   });
 
   it("disables writes for any value other than the exact string true", () => {
     for (const value of ["false", "1", "yes", "TRUE", "True", ""]) {
-      expect(loadConfig({ IW_ALLOW_WRITES: value }).allowWrites, `value "${value}"`).toBe(false);
+      expect(loadConfig({ IW_ALLOW_WRITES: value, IW_PROFILE_DIR: "profiles" }).allowWrites, `value "${value}"`).toBe(false);
     }
   });
 
   it("enables writes only for the exact string true", () => {
-    expect(loadConfig({ IW_ALLOW_WRITES: "true" }).allowWrites).toBe(true);
+    expect(loadConfig({ IW_ALLOW_WRITES: "true", IW_PROFILE_DIR: "profiles" }).allowWrites).toBe(true);
   });
 });

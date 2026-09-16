@@ -430,6 +430,36 @@ Running the command again after a rollback is how you retry, since the rollback 
 behind. Running it again after a run that kept its application is not a repair: it would create
 a second app registration with a second secret rather than fixing the first one.
 
+## Running the server
+
+`npm start` runs the MCP server itself, `dist/server/main.js`, after `npm run build`. It reads
+its own environment at startup and fails before the port is bound rather than on the first tool
+call, because a misconfigured deployment should refuse to come up rather than report itself
+healthy and then fail the first request it receives.
+
+- `IW_PROFILE_DIR` is required. It names a directory, and every `*.json` file in it is read and
+  validated once at startup, indexed by the `profileId` field inside the file rather than by the
+  filename. A profile that fails validation, or two files claiming the same `profileId`, fails
+  the deployment. Profiles are deployment configuration and are never committed, so there is no
+  default to fall back to.
+- `IW_TENANT_ID`, `IW_CLIENT_ID`, and `IW_CLIENT_SECRET` are required. These are the server
+  application's own client-credentials identity, the same three values the normal setup run above
+  prints as `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and `AZURE_CLIENT_SECRET`, and the same three
+  `npm run scan` already reads under their `IW_` names, described below.
+- `IW_TABLE_CONNECTION_STRING` is required for anything but a local run. Without it the server
+  falls back to an in-memory state store, the same fallback `npm run scan` uses: nothing persists
+  across a restart, and every tool call that triggers a scan performs a full enumeration rather
+  than an incremental one, since there is no `deltaLink` from an earlier run to resume from.
+- `PORT` defaults to 3000 if unset.
+- `IW_ALLOW_WRITES` stays unset, and writes stay disabled, until an operator opts a deployment in
+  by setting it to `true`, regardless of the site permission granted by the normal setup run.
+
+Until phase 4a wired the first tool, none of this was read by the server itself: only
+`npm run scan` read the Graph credentials and the store connection string, and nothing read
+`IW_PROFILE_DIR` at all. As of this branch the server requires these variables at startup and
+will not come up without them. See `src/server/config.ts` and `src/config.ts` for what is
+actually checked.
+
 ## Running a scan
 
 `npm run scan` runs the server's own reconciliation scan by hand, against a real tenant, ahead

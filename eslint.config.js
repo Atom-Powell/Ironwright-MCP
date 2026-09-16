@@ -52,8 +52,30 @@ const PURITY_PATTERNS = [
 // it resolves to, so the `domain/` segment is deliberately not required: a
 // sibling of the package writes `../reconcile/match.js` and would otherwise
 // walk straight past a pattern anchored to the longer path.
+//
+// The fixtures are exempt for the same reason the engine's own tests are.
+// A golden report on disk and the loader that reads it compute no part of
+// the compliance answer, so a caller reaching them cannot produce the
+// second, drifting answer this rule exists to prevent. Tools are pinned
+// against that report, and the alternative is every tool test declaring its
+// own fixture, which is how two fixtures start disagreeing.
+//
+// Both the directory and its contents are negated. The underlying matcher
+// follows gitignore semantics, where a parent directory excluded by one
+// pattern cannot be re-included by a later pattern that only un-ignores its
+// contents; the directory itself has to be un-ignored too, or the negation
+// silently does nothing.
 const RECONCILE_ENTRY_POINT_PATTERN = {
-  group: ["**/reconcile/**", "./reconcile/**", "!**/reconcile/index.js", "!./reconcile/index.js"],
+  group: [
+    "**/reconcile/**",
+    "./reconcile/**",
+    "!**/reconcile/index.js",
+    "!./reconcile/index.js",
+    "!**/reconcile/fixtures",
+    "!./reconcile/fixtures",
+    "!**/reconcile/fixtures/**",
+    "!./reconcile/fixtures/**",
+  ],
   message:
     "The reconciliation engine has one entry point: import reconcile and the report types from domain/reconcile/index.js, never a stage module directly.",
 };
