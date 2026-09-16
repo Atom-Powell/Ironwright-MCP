@@ -554,6 +554,172 @@ Until those numbers exist, this phase's central claim, that delta plus a persist
 link bounds the Graph request count, is unverified. The numbers belong in this file when they
 exist, not before.
 
+## The first live tenant sitting, 2026-09-16
+
+Run against the `helloironwright` developer tenant, site `IronwrightTest`, library `Documents`,
+profile `profiles/synthetic.json` derived from `examples/profiles/example.json`. Every number
+below was read off a command's own output on the day, not reconstructed afterward. The sitting
+did not complete: step 7 is blocked and step 9 was not run. Both are named as such below rather
+than left to be inferred from silence.
+
+**Setup, steps 1 and 2. Both succeeded.** `--create-bootstrap` created the grant issuer, and the
+normal run created the server application and issued the per-site grant. The run printed the
+confirmed arm of `describeGrantIssuerTeardownNote`, which only prints when `verifyAppAccess` has
+positively reached the site with the new application's own token, so site access was verified
+rather than merely not-errored. The server application was granted read-only, no `--write`,
+because nothing in this sitting needs it to write.
+
+This answers the question left open on 2026-09-12, when the per-site grant was refused with 403
+`accessDenied` on a delegated token held by a Global Administrator. The separate grant-issuer
+design was built for that refusal and this is the first live evidence that it works.
+
+**Repository scanning, steps 5 and 6. The phase 2a claim is verified.**
+
+| | Mode | Files | Folders | Graph requests | Delta pages | Changes applied | Write ops |
+|---|---|---|---|---|---|---|---|
+| Cold | full | 144 | 122 | **4** | 2 | 321 | 4 |
+| Immediate re-scan | incremental | 144 | 122 | **3** | 1 | 0 | 0 |
+
+Both ran with `Store: azure-table` against Azurite. The founding complaint in `Pain-Points.txt`
+is that recursive enumeration costs hundreds of operations; a recursive walk of this tree would
+issue at least one request per folder, so at least 122. Delta enumerated the same 266 items in 4.
+The re-scan reused the persisted `deltaLink`, reported `incremental`, triggered no resync, and
+issued no writes because nothing had changed. Until today that reduction was a design argument.
+It is now a measurement, on one tree of this size on one tenant.
+
+**`tableStateStoreFromConnectionString` is no longer unproven.** The `as unknown as
+TableClientLike` cast in `src/store/table.ts` was recorded as the one line no fake could check.
+Both scans above ran through the real `@azure/data-tables` `TableClient` against Azurite,
+created their tables, and persisted and re-read a `deltaLink` across process boundaries. The cast
+holds. This is Azurite rather than Azure Table Storage proper, which is a real difference and is
+not claimed away here.
+
+**Perturbations, step 8. All four tracked correctly.**
+
+| Perturbation | Files after | Changes applied | Write ops | Graph requests |
+|---|---|---|---|---|
+| Add a file | 145 | 4 | 1 | 3 |
+| Rename it | 145 | 4 | 1 | 3 |
+| Move it to another client folder | 145 | 4 | 1 | 3 |
+| Delete it | 144 | 1 | 1 | 3 |
+
+No ghost row survived the move, which is the check the runbook asked for specifically. A surviving
+row would have raised the count to 146 after the move and left it at 145 after the delete; it was
+145 and then 144, back to the seeded baseline.
+
+**Step 7 did not run, and cannot.** `reconcile_workbook_vs_repository` needs the workbook snapshot,
+and the Excel API refuses this server's tokens. See the blocking entry below. The seeder's printed
+prediction was therefore never compared against a live report, so nothing in this sitting says
+anything about whether the composed tool returns the right answer. Phase 4a remains verified
+against fakes only.
+
+**Step 9 did not run.** The server application, the grant issuer, and a throwaway `WAC probe`
+registration created for the permission testing below are all still present in the tenant. The
+probe application holds tenant-wide `Files.ReadWrite.All` and `Files.Read.All` and should be
+deleted. Teardown, and the two questions it exists to answer, whether the purge really empties
+**Deleted applications** and whether a service principal survives the application delete, are
+still unanswered.
+
+**Two seeder defects the sitting exposed, neither of them yet fixed.**
+
+The failure message blames the wrong thing. `scripts/seed/workbook.ts` attributes a failed range
+write to the bytes it uploaded, on the reasoning that this is the first call requiring Graph to
+open the file as a workbook. The reasoning about call ordering is correct and the conclusion is
+still wrong: the bytes were fine, confirmed by downloading them back and by opening them in Excel
+for the web. The message names the one cause the code cannot distinguish from the real one, which
+is the message-audit failure this project has a whole spec section about.
+
+A workbook failure discards the execution report for work that succeeded. `runSeed` in
+`scripts/seed-library.ts` calls `executeSeed`, then `createSeedWorkbook`, and only then prints
+`formatExecutionReport`. The tree was built, 121 folders and 143 files and roughly 264 Graph
+requests of real work, and the operator was told nothing about any of it, only that the workbook
+step failed. The count was recovered afterward by probing the library.
+
+**What is still verified only against fakes.** Everything about the workbook, the reconciliation
+engine's behavior on live data, the composed tool's output, and the whole write-tool surface,
+which does not exist yet. The Microsoft Search cross-check is phase 2c and has not been started,
+so both scans above correctly reported themselves as degraded.
+
+## BLOCKING: the Graph Excel API refuses app-only tokens, so phase 2b-1 cannot run as built
+
+Found 2026-09-16, on the first live tenant sitting, by the seed command's workbook step. This is
+the first finding in this project that invalidates a locked decision rather than a message or an
+assumption, and it was unreachable by any fake: every Excel test to date has run against a fake
+transport that answered as though the call had been accepted.
+
+**What was observed.** `npm run seed-library --confirm` built the tree and uploaded the tracking
+workbook, then failed on its first `/workbook/` call with 403 `AccessDenied` and the message
+"Could not obtain a WAC access token." WAC is Office Online, which Graph delegates every
+`/workbook/` call to.
+
+Four application permissions were tested against the same file in the same tenant, each with an
+admin-consented app-only client-credentials token, and each verified by reading the `roles` claim
+off the token rather than by trusting the portal:
+
+| Identity | Roles on the token | `GET /workbook/worksheets` | `GET` metadata | `GET /content` |
+|---|---|---|---|---|
+| Grant issuer | `Sites.FullControl.All` | 403 WAC | 200 | 200 |
+| Server application | `Sites.Selected` | 403 WAC | 200 | 200 |
+| Throwaway probe | `Files.Read.All` | 403 WAC | 200 | 200 |
+| Throwaway probe | `Files.ReadWrite.All`, `Files.Read.All` | 403 WAC | 200 | 200 |
+
+**What was ruled out, and how.** Not the uploaded bytes: the file was downloaded back and is a
+valid xlsx, zip magic `504b0304`, carrying `[Content_Types].xml`, `xl/workbook.xml` and
+`xl/worksheets/sheet1.xml`, and the operator opened it in Excel for the web, which rendered it.
+Not the tenant lacking Office Online: that same interactive open proves WAC works there. Not a
+write restriction: a plain read of `/workbook/worksheets` fails identically. Not an insufficient
+SharePoint role: `Sites.FullControl.All` is the maximum and fails the same as `Sites.Selected`.
+
+**The mechanism that explains every row above.** WAC issues its token for a user, and an
+app-only token carries no user. No application permission can supply an identity that is not
+there. Microsoft's Excel reference is consistent with this: it lists exactly two scopes,
+`Files.Read` and `Files.ReadWrite`, which are the delegated spellings, and names no application
+permission at all.
+
+**What it invalidates.** The Decision Record's "Excel as a database" entry, and with it the whole
+of phase 2b-1: the non-persistent session manager, the mapped range read, and
+`readWorkbookSnapshot`. The reasoning recorded for non-persistent sessions is still sound on its
+own terms; the problem is that no session of either kind can be opened by this server at all. The
+reconciliation engine's second input therefore has no supplier, which blocks
+`reconcile_workbook_vs_repository` end to end even though phase 4a wired it.
+
+**What is not affected.** Everything that reaches a file rather than a workbook. Path addressing,
+delta, the repository snapshot and `/content` download all work app-only under `Sites.Selected`,
+confirmed live in the same sitting.
+
+**DECIDED 2026-09-16: option 1, download and parse, with the rejection rule as a condition.**
+The operator chose it on the day the finding was made. Option 2 was disqualified by the stateless
+app-only model being itself a locked decision; option 3 was already rejected on 2026-09-11 and
+nothing about that reasoning changed.
+
+The condition is load-bearing and is part of the decision rather than an implementation detail.
+Any mapped cell whose value cannot be read confidently from the bytes, a formula whose cached
+result is absent or stale above all, must surface as a rejected row on the report. It must not
+return a substituted value of any kind. Phase 2b-1 already built the rejected-row path and the
+engine already carries a rejection onto the report, so this reuses existing machinery rather than
+adding a mechanism. A parser that returns an empty string or a zero for an unevaluable cell
+produces a wrong compliance finding with no error raised anywhere, which is the failure mode this
+project holds to be the most expensive of all.
+
+The replacement for phase 2b-1 is its own design session and has not been written. What is settled
+is the direction and its condition, not the shape of the reader.
+
+**Options as considered.**
+
+1. Download the `.xlsx` through `/content`, proven to work app-only, and parse the bytes in
+   process. Keeps `Sites.Selected` intact and adds no permission. Costs a parsing dependency and
+   means reimplementing what Excel evaluates: shared strings, date serials behind `numFmt`, the
+   table definition in `xl/tables/`, and cached formula results. A steelman of this option
+   identified the failure mode that matters: a formula cell whose cached value is stale or absent
+   yields a wrong compliance finding rather than an error. Any implementation must route such a
+   cell to the existing rejected-row path rather than returning a value for it.
+2. Give the server a delegated identity. Restores the Excel API exactly as designed and costs the
+   stateless app-only model, which is itself a locked decision, plus a signed-in user whose token
+   must be refreshed and whose conditional-access policies now sit in the request path.
+3. Change where expected state comes from, for example a SharePoint list rather than a workbook.
+   Rejected once already, on 2026-09-11, because requiring customers to restructure their live
+   tracking workbook was judged unacceptable, and that reasoning has not changed.
+
 ## A tracking workbook inside the library it describes is always an orphan
 
 Observed 2026-09-15, during the whole-branch review of the synthetic workbook seeding work, and
