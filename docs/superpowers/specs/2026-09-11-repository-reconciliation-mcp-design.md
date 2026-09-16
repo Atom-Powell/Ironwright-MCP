@@ -33,6 +33,17 @@ sessions with deferred single-flight queueing; Azure Table Storage for state; Az
 Apps for hosting; Entra confidential client scoped via `Sites.Selected`;
 plan-then-execute for every mutating operation with dry run as the default.
 
+
+> **Amended 2026-09-16.** The non-persistent Excel session named in this paragraph is void. A live
+> tenant run proved the Graph Excel API refuses app-only tokens at every application permission
+> tested, so no session of either kind can be opened by this server. The workbook is read by
+> downloading the `.xlsx` through `/content` and parsing the bytes in process, under the condition
+> that an unevaluable cell becomes a rejected row rather than a substituted value. The reasoning
+> the original decision rested on, that this server must be structurally incapable of writing to
+> the customer's operational authority, is not weakened by the change; a downloaded copy cannot
+> write back at all. See `docs/OPEN-ITEMS.md` for the evidence and `CLAUDE.md` for the current
+> Decision Record entry.
+
 Decided in this session:
 
 **This is an Ironwright product, not an internal tool.** Built off-hours on personal

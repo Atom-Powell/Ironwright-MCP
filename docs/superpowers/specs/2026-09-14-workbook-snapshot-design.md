@@ -1,7 +1,22 @@
 # Design: the workbook snapshot
 
+> **SUPERSEDED 2026-09-16, in its Graph half only.** A live tenant run proved the Graph Excel API
+> refuses this server's app-only tokens at every application permission tested, returning 403
+> `AccessDenied`, "Could not obtain a WAC access token". The Excel session manager and the mapped
+> range read specified below therefore address an endpoint this server cannot reach, and
+> `readWorkbookSnapshot` as designed here cannot run. The evidence is in `docs/OPEN-ITEMS.md`.
+>
+> What this document still governs is everything downstream of the grid. The mapping layer, the
+> record-and-rejection contract, the decision that one bad row does not abort the reconciliation,
+> and where rejections live on the report are all unaffected, because none of them touched Graph.
+> The replacement reader, which downloads the `.xlsx` through `/content` and parses the bytes, must
+> satisfy the same contract this spec defines and inherits its condition: a cell that cannot be
+> read confidently becomes a rejection, never a substituted value.
+>
+> Read it for the grid contract. Do not read it for how the grid is obtained.
+
 Date: 2026-09-14
-Status: Approved (design only)
+Status: Superseded in part (see the banner above)
 Extends: `2026-09-11-repository-reconciliation-mcp-design.md`, which settles the profile schema, the
 Excel decisions and the phase sequence. This addendum settles what phase 2b left open or got wrong:
 how 2b is sliced, what an Excel session is allowed to do, how a hand-maintained workbook's bad rows

@@ -58,23 +58,35 @@ rather than ahead of any consumer, which is why phase 2b was split on 2026-09-14
 to phase 6, where the write tools are its first real caller, and the Microsoft Search cross-check
 becomes phase 2c.
 
-**Excel as a database.** Non-persistent workbook sessions, the session header on every call, and
-explicit detection and recreation of expired sessions. Amended 2026-09-14. Sessions are
-non-persistent because `persistChanges` is the flag that makes a session write-capable, and this
-server only reads a document the spec calls the customer's live operational authority; a
-non-persistent session gives the same speed and the same consistent view across calls and cannot
-commit a change, so the read-only guarantee is structural rather than a matter of nobody calling
-the wrong method. The sequential single-flight queue per workbook is deferred, not adopted: it
-assumes a long-lived process holding sessions across calls, and this server builds a fresh
-`McpServer` per request, statelessly, which is itself a locked decision, so two concurrent
-requests cannot share a session and there is nothing to serialize. This is not a YAGNI deferral
-of something that would work; the mechanism does not fit the architecture. Amended 2026-09-14 for
-scans, not for Excel. The mechanism is now adopted in `src/scan/coordinator.ts`, where it does
-fit: concurrent scans do not share a session, they share a process-level store client and a
-persisted `deltaLink`, both of which outlive the request. It exists for one failure: `runScan`
-answers a delta resync by clearing the inventory and re-enumerating, and a concurrent call
-reading it inside that window would report every file in the library as missing. The Excel
-deferral stands unchanged.
+**Reading the workbook. Rewritten 2026-09-16 by a live tenant run; the previous entry is void.**
+The Graph Excel API is unreachable from this server. `/workbook/` calls are refused with 403
+`AccessDenied`, "Could not obtain a WAC access token", for an app-only token carrying any of
+`Sites.FullControl.All`, `Sites.Selected`, `Files.Read.All` or `Files.ReadWrite.All`, while those
+same tokens read the driveItem and download its content. WAC issues its token for a user and a
+client-credentials token has no user, which no application permission can repair, and Microsoft's
+Excel reference names only the delegated scopes. The workbook is therefore read by downloading the
+`.xlsx` through `/content` and parsing the bytes in process.
+
+One condition rides with that and is part of the decision rather than an implementation detail: a
+mapped cell whose value cannot be read confidently from the bytes, above all a formula whose cached
+result is absent or stale, surfaces as a rejected row and never as a substituted value. The engine
+already carries a rejection onto the report, so this reuses the path phase 2b-1 built rather than
+adding a mechanism. A parser that returns an empty string for an unevaluable cell produces a wrong
+compliance finding with nothing raised anywhere, which this project holds to be the most expensive
+failure it can have.
+
+What the void entry got right and what it got wrong are both worth keeping. Its reasoning, that the
+server must be structurally incapable of writing to the customer's live operational authority rather
+than merely not calling the wrong method, still governs: a downloaded copy cannot write back at all,
+so the guarantee is stronger than a non-persistent session gave. What it got wrong was assuming the
+mechanism existed. It had never been run. The evidence is in `docs/OPEN-ITEMS.md`; the replacement
+reader has no design yet, and writing one is its own session.
+
+**Single-flight scan coordination.** Adopted 2026-09-14 for scans in `src/scan/coordinator.ts`, where
+concurrent scans share a process-level store client and a persisted `deltaLink` that outlive the
+request. It exists for one failure: `runScan` answers a delta resync by clearing the inventory and
+re-enumerating, and a concurrent call reading it inside that window would report every file in the
+library as missing.
 
 **State store.** Azure Table Storage for per-drive `deltaLink`s, inventory snapshots, plans, and
 reversal logs.
@@ -175,22 +187,29 @@ registry, so a tool added later inherits every check.
 
 ## Build Sequence
 
-The spec carries the full phase descriptions. Status as of 2026-09-14:
+The spec carries the full phase descriptions. Status as of 2026-09-16:
 
 1. **Foundation.** Complete and merged. Stateless transport, all ten tools registered as honest
    stubs behind the contract test, the pure profile schema, the two-layer write gate, and a
    scripted per-tenant setup verified end to end against a live tenant.
 2. **Graph performance layer**, split into 2a, 2b-1 and 2c because it is more work than one
    implementation plan should carry.
-   - **2a: the Graph layer and the repository snapshot.** Complete, pending live verification.
+   - **2a: the Graph layer and the repository snapshot. Complete and verified live on 2026-09-16.**
      The token provider, `Retry-After`-aware retry, path addressing, the delta client, both
      `StateStore` implementations, the snapshot assembler, and the `scan` command, over plain
-     `fetch`. Verified against fakes; not yet run against a live tenant.
-   - **2b-1: the Excel session and the workbook snapshot.** Complete, covered by fakes only. The
-     non-persistent Excel session manager, the mapped range read, the pure workbook reader that
-     turns a grid into records and rejections, and `readWorkbookSnapshot`, which assembles the
-     `WorkbookSnapshot` that is the engine's second input. No Excel call has ever been made against a
-     real workbook, by this code or any other, so nothing here is verified against a tenant.
+     `fetch`. A cold scan enumerated 144 files and 122 folders in 4 Graph requests and an immediate
+     re-scan in 3, reusing the persisted `deltaLink` with no resync, against a tree a recursive walk
+     would have cost at least 122 requests. The `as unknown as TableClientLike` cast, recorded as
+     the one line no fake could check, held against the real `@azure/data-tables` client on Azurite.
+     This phase's central claim is now a measurement rather than a design argument.
+   - **2b-1: the Excel session and the workbook snapshot. INVALIDATED 2026-09-16 by the live run.**
+     The Graph Excel API refuses this server's app-only tokens at every application permission
+     tested, so the session manager and the mapped range read have no reachable endpoint and
+     `readWorkbookSnapshot` cannot run. The engine's second input has no supplier, which blocks the
+     centerpiece tool end to end. What survives the invalidation is the pure half: the reader that
+     turns a grid into records and rejections never touched Graph, and the rejection path it built
+     is what the replacement depends on. **2b-2**, a reader that downloads the `.xlsx` through
+     `/content` and parses the bytes, is the replacement and has no design yet.
    - **2c: the Microsoft Search cross-check.** Not started, and its own spec is still to write.
      Until it exists every report carries `searchCrossCheckIncluded: false`.
    - The `$batch` builder left this phase on 2026-09-14 for phase 6. A delta-driven inventory
@@ -209,8 +228,10 @@ The spec carries the full phase descriptions. Status as of 2026-09-14:
    registry loaded and validated at startup from `IW_PROFILE_DIR`, the in-process single-flight
    scan coordinator, and `reconcile_workbook_vs_repository` wired end to end with a real output
    schema. The other four read tools are still honest stubs and inherit the layer with no
-   retrofit. No Graph call, no Excel call and no Azure Storage call has been made by this code,
-   so the composed tool has never returned a report against a tenant. Then **hosting**, then
+   retrofit. Graph and Azure Table Storage have both been exercised live as of 2026-09-16, but the
+   composed tool has still never returned a report against a tenant, because it needs the workbook
+   snapshot that 2b-1's invalidation removed. It is blocked on 2b-2, not on its own wiring. Then
+   **hosting**, then
    **write tools**, then **Copilot Studio integration and governance**, then the **evaluation
    suite**, whose questions are already written in `docs/EVALUATION-QUESTIONS.md`. They exist
    early on purpose, so phase 3 has a concrete target rather than inventing its own test
@@ -222,6 +243,15 @@ authenticates through Container Apps built-in Entra auth. The third, which deleg
 setup command's device-code sign-in must request, is still open, but it governs that sign-in
 rather than the server's own Graph access, so it did not block phase 2b-1 and does not block
 2c.
+
+A fourth question, which nobody thought to ask, was settled the hard way on 2026-09-16: whether the
+Excel API accepts an app-only token at all. It does not. The lesson is recorded here rather than
+only in `docs/OPEN-ITEMS.md` because it generalizes past Excel. Phase 2b-1 was built, reviewed
+across six tasks, and merged without one call ever reaching the endpoint it was written for, and
+every fake in the suite answered as though the call had been accepted. A fake proves the code does
+what the author believed the API would do. When a phase depends on an API surface this project has
+never actually called, the cheapest possible live probe against that surface comes first, before
+the design that assumes it.
 
 ## Reference
 
