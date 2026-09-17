@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseWorkbookGrid } from "../../src/workbook/xlsx.js";
-import { WorkbookFileError, WorkbookMappingError } from "../../src/workbook/errors.js";
+import { WorkbookFileError, WorkbookMappingError, WorkbookUnreadableError } from "../../src/workbook/errors.js";
 import { buildWorkbook } from "./xlsx-fixture.js";
 
 describe("parseWorkbookGrid failures", () => {
@@ -117,15 +117,18 @@ describe("parseWorkbookGrid failures", () => {
     expect(call).toThrow(/xl\/_rels\/workbook\.xml\.rels/);
   });
 
-  it("refuses a workbook with no xl/workbook.xml at all, as a file failure", () => {
+  it("refuses a workbook with no xl/workbook.xml at all, as unreadable rather than a file failure", () => {
+    // A .docx is a zip too, so a profile's workbookPath naming the wrong
+    // file and a genuinely truncated xlsx both produce exactly this absence,
+    // and nothing observed here tells them apart.
     const bytes = buildWorkbook({
       sheets: [{ name: "Sheet1", rowsXml: '<row r="1"><c r="A1"><v>1</v></c></row>' }],
       omitParts: ["xl/workbook.xml"],
     });
 
     const call = (): unknown => parseWorkbookGrid(bytes, { kind: "worksheet", name: "Sheet1" });
-    expect(call).toThrow(WorkbookFileError);
-    expect(call).toThrow(/xl\/workbook\.xml/);
+    expect(call).toThrow(WorkbookUnreadableError);
+    expect(call).toThrow(/The workbook archive has no xl\/workbook\.xml, so it does not open as a workbook\./);
   });
 
   it("refuses a worksheet whose relationship names a part the archive does not contain, as a file failure", () => {

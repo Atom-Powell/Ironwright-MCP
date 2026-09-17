@@ -3,7 +3,7 @@ import { attribute, parseSharedStrings } from "./cells.js";
 import type { SheetBounds } from "./sheet.js";
 import { columnLabelToIndex, sheetToGrid } from "./sheet.js";
 import { readZipParts } from "./zip.js";
-import { WorkbookFileError, WorkbookMappingError } from "./errors.js";
+import { WorkbookFileError, WorkbookMappingError, WorkbookUnreadableError } from "./errors.js";
 
 /**
  * Names a range the same way a profile's workbookMapping names one: either a
@@ -24,14 +24,31 @@ function describeSource(source: WorkbookSource): string {
   return source.kind === "table" ? `The table "${source.name}"` : `The worksheet "${source.name}"`;
 }
 
-function requirePart(parts: Map<string, string>, partName: string, neededFor: string): string {
+/**
+ * Neither part this is called for, xl/workbook.xml and
+ * xl/_rels/workbook.xml.rels, is named by anything a profile configures, but
+ * their absence is not the same kind of failure. xl/workbook.xml is the part
+ * that makes an archive an xlsx workbook at all: a zip that lacks it could be
+ * a truncated xlsx just as easily as a profile's workbookPath naming a file
+ * that was never a workbook -- a .docx is a zip too -- and this code has not
+ * opened anything that tells those two apart, so `onMissing: "unreadable"`
+ * throws the kind that does not pick one. xl/_rels/workbook.xml.rels is only
+ * ever requested after xl/workbook.xml above was already found and parsed,
+ * so reaching that check means the archive is confirmed xlsx-shaped; its
+ * absence there is the archive's own required parts being incomplete, which
+ * is `onMissing: "fileError"`, the default.
+ */
+function requirePart(
+  parts: Map<string, string>,
+  partName: string,
+  neededFor: string,
+  onMissing: "fileError" | "unreadable" = "fileError",
+): string {
   const part = parts.get(partName);
   if (part === undefined) {
-    // Neither of the two parts this is called for, xl/workbook.xml and
-    // xl/_rels/workbook.xml.rels, is named by anything a profile configures;
-    // both are needed to resolve any sheet or table at all. Their absence is
-    // the archive itself being incomplete, not a mismatch between the
-    // profile and an otherwise readable workbook.
+    if (onMissing === "unreadable") {
+      throw new WorkbookUnreadableError(`The workbook archive has no ${partName}, so it does not open as a workbook.`);
+    }
     throw new WorkbookFileError(
       `The workbook archive has no ${partName}, which is needed for ${neededFor}. Either the file is not a ` +
         "well formed xlsx workbook, or the download was truncated.",
@@ -252,7 +269,7 @@ export function parseWorkbookGrid(
       name.startsWith("xl/tables/"),
   );
 
-  const workbookXml = requirePart(parts, "xl/workbook.xml", "resolving any sheet or table by name");
+  const workbookXml = requirePart(parts, "xl/workbook.xml", "resolving any sheet or table by name", "unreadable");
   const workbookRelsXml = requirePart(
     parts,
     "xl/_rels/workbook.xml.rels",

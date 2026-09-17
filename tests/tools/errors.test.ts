@@ -44,8 +44,15 @@ describe("describeToolFailure", () => {
     // The opposite attribution from the mapping case above: the profile
     // named a real table in a real worksheet, and the archive itself is
     // what cannot be trusted, so the message must not send an operator to
-    // edit a mapping that is not the problem.
-    const original = "The workbook archive has no xl/workbook.xml, which is needed for resolving any sheet or table.";
+    // edit a mapping that is not the problem. This is xlsx.ts's actual
+    // message for xl/_rels/workbook.xml.rels being absent, which is reached
+    // only after xl/workbook.xml was already found and parsed, so this
+    // archive is confirmed xlsx-shaped and the failure is squarely the
+    // file's, not a candidate for the wrong-file ambiguity below.
+    const original =
+      "The workbook archive has no xl/_rels/workbook.xml.rels, which is needed for mapping a sheet's r:id to " +
+      "the worksheet part that holds it. Either the file is not a well formed xlsx workbook, or the download " +
+      "was truncated.";
 
     const message = describeToolFailure(new WorkbookFileError(original), SUBJECT);
 
@@ -56,6 +63,23 @@ describe("describeToolFailure", () => {
 
   it("names both possibilities for an unreadable workbook without asserting either", () => {
     const original = "The downloaded file is not a zip archive, so it is not an xlsx workbook.";
+
+    const message = describeToolFailure(new WorkbookUnreadableError(original), SUBJECT);
+
+    expect(message).toContain(original);
+    expect(message).toContain('profile "example"\'s workbookPath naming a file that was never a workbook');
+    expect(message).toContain("truncated or corrupted in transit");
+    expect(message).toContain("Open the file at that path to see which");
+  });
+
+  it("names both possibilities for a workbook missing xl/workbook.xml, the same as any other unreadable archive", () => {
+    // xl/workbook.xml is the part that makes an archive an xlsx workbook at
+    // all, so its absence is exactly as ambiguous as bytes that do not open
+    // as a zip: a profile's workbookPath naming a file that was never a
+    // workbook -- a .docx is a zip too -- and a truncated xlsx download both
+    // produce it, and xlsx.ts's requirePart cannot tell them apart either,
+    // so it throws this same kind with this same attribution.
+    const original = "The workbook archive has no xl/workbook.xml, so it does not open as a workbook.";
 
     const message = describeToolFailure(new WorkbookUnreadableError(original), SUBJECT);
 
