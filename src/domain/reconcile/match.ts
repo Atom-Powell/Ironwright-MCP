@@ -88,6 +88,14 @@ function folderOf(path: string): string {
  * one; comparing against the slot's expected path instead would make every
  * misplaced file look compliant, since the slot's expected path is by
  * definition where a compliant file for that slot would sit.
+ *
+ * A file carrying `parsed.file.library` came from the Microsoft Search
+ * cross-check, not the profile's own library, and is in the wrong location
+ * by definition, whatever its rendered folder looks like: a library-relative
+ * path cannot express which library it is relative to, so an identical path
+ * in another library is not the same location as that path in the profile's
+ * own library. The folder comparison is skipped for it rather than trusted
+ * to happen to disagree.
  */
 function computeState(profile: Profile, parsed: ParsedFileRecognized): CandidateState {
   const nameCorrect = parsed.nameVerdict === "canonical" || parsed.nameVerdict === "compliant";
@@ -96,7 +104,7 @@ function computeState(profile: Profile, parsed: ParsedFileRecognized): Candidate
   const context = { period: parsed.period, client: parsed.client, deliverable: token };
   const parsedFolder = renderPath(profile.taxonomy.segments, context);
   const actualFolder = folderOf(parsed.file.path);
-  const locationCorrect = actualFolder === parsedFolder;
+  const locationCorrect = parsed.file.library === undefined && actualFolder === parsedFolder;
 
   if (nameCorrect && locationCorrect) return "compliant";
   if (nameCorrect) return "misplaced";
@@ -162,7 +170,18 @@ export function matchArtifacts(profile: Profile, expected: ArtifactFinding[], pa
 
   for (const file of parsed) {
     if (!file.recognized) {
-      orphans.push({ path: file.file.path, name: file.file.name, kind: "unrecognized" });
+      // A file qualified with a library came from the Microsoft Search
+      // cross-check, not the profile's own library, and is never reported as
+      // an orphan: it participates only as a candidate for an expected slot
+      // it might match, and is discarded, not reported, when it matches
+      // none. Without this exclusion, every unrelated file in every other
+      // library of the site -- HR documents, meeting notes, scanned invoices
+      // -- would arrive in a compliance report as an orphan, making the tool
+      // unusable at exactly the customers who have more than one library,
+      // which is most of them.
+      if (file.file.library === undefined) {
+        orphans.push({ path: file.file.path, name: file.file.name, kind: "unrecognized" });
+      }
       continue;
     }
 
@@ -174,7 +193,14 @@ export function matchArtifacts(profile: Profile, expected: ArtifactFinding[], pa
       // no slot. An artifact nobody owes and an artifact owed for a period
       // outside the window are the same absent key here, so the finding says
       // what was seen and not why; see the OrphanKind note in types.ts.
-      orphans.push({ path: file.file.path, name: file.file.name, kind: "unexpected", parsed: slot });
+      //
+      // Same library exclusion as above, and just as load bearing here: a
+      // file from another library that happens to parse cleanly (its name
+      // coincidentally matches the naming template) but names a slot nobody
+      // owes is still not this repository's business to report.
+      if (file.file.library === undefined) {
+        orphans.push({ path: file.file.path, name: file.file.name, kind: "unexpected", parsed: slot });
+      }
       continue;
     }
 

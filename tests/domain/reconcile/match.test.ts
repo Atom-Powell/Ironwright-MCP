@@ -261,6 +261,35 @@ describe("matchArtifacts: orphans", () => {
   });
 });
 
+describe("matchArtifacts: the library qualifier", () => {
+  it("treats a correctly named file in another library as misplaced, not compliant", () => {
+    // Its path inside that other library is identical to the expected one.
+    // The location is wrong because the library is wrong, and a library
+    // relative path alone cannot express that.
+    const file: RepositoryFile = { ...repoFile(expectedName, expectedPath, "2026-06-01T00:00:00Z", "etag-lib-1"), library: "Archive" };
+    const result = matchArtifacts(profile, [finding("CLIENTA", period, expectedPath, expectedName)], [parse(file)]);
+
+    expect(result.artifacts[0]?.state).toBe("misplaced");
+  });
+
+  it("treats a misnamed file in another library as misnamed and misplaced", () => {
+    const name = "CLIENTB Monthly - May 2026.xlsx";
+    const file: RepositoryFile = { ...repoFile(name, expectedPath.replace("CLIENTA", "CLIENTB"), "2026-06-01T00:00:00Z", "etag-lib-2"), library: "Archive" };
+    const findings = [finding("CLIENTB", period, expectedPath.replace("CLIENTA", "CLIENTB"), expectedName.replace("CLIENTA", "CLIENTB"))];
+
+    const result = matchArtifacts(profile, findings, [parse(file)]);
+
+    expect(result.artifacts[0]?.state).toBe("misnamed_and_misplaced");
+  });
+
+  it("keeps today's meaning for a file with no library qualifier", () => {
+    const file = repoFile(expectedName, expectedPath, "2026-06-01T00:00:00Z", "etag-lib-3");
+    const result = matchArtifacts(profile, [finding("CLIENTA", period, expectedPath, expectedName)], [parse(file)]);
+
+    expect(result.artifacts[0]?.state).toBe("compliant");
+  });
+});
+
 describe("matchArtifacts: accepted alias", () => {
   it("marks a file recognized as a compliant alias, correctly filed, as compliant", () => {
     const name = "CLIENTJ-202605-Training.xlsx";

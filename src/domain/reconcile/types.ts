@@ -58,6 +58,17 @@ export interface RepositoryFile {
   modified: string;
   /** Captured now because a later rename or move plan needs it as an If-Match precondition. */
   etag: string;
+  /**
+   * The document library this file was found in, when it is not the
+   * profile's own library. Absent means the profile's own library, which is
+   * exactly today's meaning, so every file the ordinary inventory scan
+   * produces is unqualified. Present names a library the Microsoft Search
+   * cross-check found the file in instead: a library-relative path alone
+   * cannot express which library it is relative to, so a qualified file can
+   * never be compared against a slot's expected path as if it were filed
+   * correctly.
+   */
+  library?: string;
 }
 
 export interface RepositorySnapshot {
