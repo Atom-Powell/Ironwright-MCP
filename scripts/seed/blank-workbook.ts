@@ -195,7 +195,15 @@ const WORKSHEET_RELS_PART_NAME = "xl/worksheets/_rels/sheet1.xml.rels";
 
 const POPULATED_SHEET_RELATIONSHIP_ID = "rId1";
 
-/** Escapes the three characters that are not literal inside XML element or attribute content. */
+/**
+ * Escapes the four characters this writer cannot leave literal in the XML it
+ * produces: `&` and `<`, which XML never allows literal in element or
+ * attribute content, plus `>` and `"`, escaped here even where the format
+ * would tolerate them literal, because every value this function receives
+ * can end up inside a double-quoted attribute value (a table's `name` and
+ * `displayName`) as well as element content, and only escaping both keeps
+ * one function safe for both call sites rather than one per context.
+ */
 function escapeXmlText(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
