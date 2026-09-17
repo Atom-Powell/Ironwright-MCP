@@ -60,9 +60,10 @@ describe("readWorkbookGrid failures", () => {
       PROFILE,
     );
 
-    // headerRow 1, one good row, so the bad one is row 3 of the range. The
-    // sheet may number it differently: a table's range starts where the table
-    // does, and nothing here reads that offset from Graph.
+    // headerRow 1, one good row, so the bad one is row 3 of the range. This
+    // pins the default rowOffset of 1, which reproduces that range-relative
+    // numbering for a caller with no sheet row to give; the row-offset test
+    // below pins the sheet-relative numbering a real offset produces.
     expect(result.rejectedRows).toHaveLength(1);
     expect(result.rejectedRows[0]?.row).toBe(3);
   });

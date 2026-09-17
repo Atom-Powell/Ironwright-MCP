@@ -234,6 +234,15 @@ export function readWorkbookGrid(grid: unknown[][], profile: Profile, rowOffset 
         // candidate unset and the row is rejected only when respectEffectiveFrom
         // is on, exactly as a malformed value is. Only the message differs,
         // below, because this layer never learns why the cell was unreadable.
+        //
+        // This is deliberate, not inherited by accident: the reasoning above
+        // the respectEffectiveFrom constant, for why a malformed date is only
+        // worth a rejection when something reads the field, applies unchanged
+        // to an unreadable one. The rejection rule exists to stop a wrong
+        // value reaching the engine, and a column the engine never consults
+        // cannot produce a wrong finding, so keeping the row is not the same
+        // silent substitution the UNEVALUABLE rejections elsewhere in this
+        // function exist to prevent.
 
         // One screen over both shapes a date arrives in, against the engine's
         // own predicate rather than a pattern of this module's, because a
