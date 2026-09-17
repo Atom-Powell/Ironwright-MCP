@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { describeToolFailure } from "../../src/tools/errors.js";
 import { UnknownProfileError } from "../../src/profiles/registry.js";
 import { LibraryNotFoundError } from "../../src/graph/drive.js";
-import { WorkbookMappingError } from "../../src/workbook/read.js";
+import { WorkbookFileError, WorkbookMappingError } from "../../src/workbook/errors.js";
 import { GraphRequestError } from "../../src/graph/errors.js";
 import { TokenRequestError } from "../../src/graph/token.js";
 
@@ -38,6 +38,20 @@ describe("describeToolFailure", () => {
 
     expect(message).toContain(original);
     expect(message).toContain('workbook mapping in profile "example"');
+  });
+
+  it("passes a workbook file message through unchanged and says it is not about the profile", () => {
+    // The opposite attribution from the mapping case above: the profile
+    // named a real table in a real worksheet, and the archive itself is
+    // what cannot be trusted, so the message must not send an operator to
+    // edit a mapping that is not the problem.
+    const original = "The workbook archive has no xl/workbook.xml, which is needed for resolving any sheet or table.";
+
+    const message = describeToolFailure(new WorkbookFileError(original), SUBJECT);
+
+    expect(message).toContain(original);
+    expect(message).toContain("about the workbook file itself");
+    expect(message).not.toContain("workbook mapping in profile");
   });
 
   it("reports a Graph failure by status, code and request, and guesses at no cause", () => {

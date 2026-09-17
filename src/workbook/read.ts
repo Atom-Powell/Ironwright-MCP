@@ -2,19 +2,13 @@ import type { Profile } from "../domain/profile/schema.js";
 import { isIsoEffectiveFrom } from "../domain/reconcile/index.js";
 import type { ClientRecord, RejectedWorkbookRow } from "../domain/reconcile/index.js";
 import { UNEVALUABLE } from "./cells.js";
-
-/**
- * A mapping failure, not a data failure. The distinction is the load-bearing
- * rule of this module: a header the mapping names and the sheet does not have
- * makes every row wrong, so reporting fifty rejected rows would bury the real
- * cause, which is that the mapping is stale against a renamed column.
- */
-export class WorkbookMappingError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "WorkbookMappingError";
-  }
-}
+// WorkbookMappingError is defined in ./errors.js, shared with zip.ts, sheet.ts
+// and xlsx.ts: a mapping failure, not a data failure. The distinction is the
+// load-bearing rule of this module. A header the mapping names and the sheet
+// does not have makes every row wrong, so reporting fifty rejected rows would
+// bury the real cause, which is that the mapping is stale against a renamed
+// column.
+import { WorkbookMappingError } from "./errors.js";
 
 export interface ReadResult {
   rows: ClientRecord[];

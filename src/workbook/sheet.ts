@@ -1,5 +1,6 @@
 import type { CellValue } from "./cells.js";
 import { decodeCell } from "./cells.js";
+import { WorkbookFileError } from "./errors.js";
 
 /**
  * A 1 based, inclusive rectangle on a worksheet. 1 based because that is how
@@ -24,11 +25,37 @@ export interface SheetBounds {
 export const MAX_GRID_ROWS = 1_048_576;
 export const MAX_GRID_COLUMNS = 16_384;
 
+/**
+ * The largest rectangle this server will materialize into a grid, independent
+ * of the two per-axis caps above.
+ *
+ * Each axis is already capped at Excel's own sheet maximum, but their product
+ * is not, and Excel readily produces a sheet holding a cell at both corners:
+ * type into A1, then into the real last cell XFD1048576, and the file that
+ * results declares a bounding box of 1,048,576 by 16,384, tens of gigabytes
+ * of grid slots. A declared table `ref` can claim the same box in a file of a
+ * few kilobytes. Both reach this same check, because both compute a
+ * rectangle from a firstRow/lastRow/firstColumn/lastColumn before either
+ * allocates anything.
+ *
+ * The tracking workbook this server is built to read is one row per client
+ * against a few dozen mapped columns: a profile with 5,000 clients, an
+ * implausibly large customer base for this product, and 50 columns is
+ * 250,000 cells. 4,000,000 sits two orders of magnitude above that, which is
+ * headroom for a genuinely large real workbook, while keeping the worst case
+ * this server will ever allocate a few tens of megabytes of grid slots rather
+ * than the tens of gigabytes an unchecked corner-to-corner sheet would ask
+ * for. Not profile configuration, for the same reason the two caps above are
+ * not: there is no real customer workbook yet to tune it against, so a knob
+ * would be a guess at a shape nobody has seen.
+ */
+export const MAX_GRID_CELLS = 4_000_000;
+
 /** Reads a single cell reference such as "B12" into row and column. */
 function parseCellReference(ref: string): { row: number; column: number } {
   const match = /^([A-Za-z]+)([0-9]+)$/.exec(ref);
   if (!match) {
-    throw new Error(
+    throw new WorkbookFileError(
       `The cell reference "${ref}" is not a column letter followed by a row number, so its position on ` +
         "the sheet cannot be determined.",
     );
@@ -38,13 +65,13 @@ function parseCellReference(ref: string): { row: number; column: number } {
   const row = Number(digits);
 
   if (column > MAX_GRID_COLUMNS) {
-    throw new Error(
+    throw new WorkbookFileError(
       `The cell reference "${ref}" names column ${String(column)}, past the ${String(MAX_GRID_COLUMNS)} ` +
         "columns a worksheet can have.",
     );
   }
   if (row > MAX_GRID_ROWS) {
-    throw new Error(
+    throw new WorkbookFileError(
       `The cell reference "${ref}" names row ${String(row)}, past the ${String(MAX_GRID_ROWS)} rows a ` +
         "worksheet can have.",
     );
@@ -86,10 +113,14 @@ function readCells(sheetXml: string, sharedStrings: string[]): PlacedCell[] {
   const cells: PlacedCell[] = [];
   for (const match of sheetXml.matchAll(CELL_PATTERN)) {
     const cellXml = match[0];
-    const openTag = /^<c\b[^>]*/.exec(cellXml)?.[0] ?? cellXml;
+    // Matches cells.ts's own open-tag pattern for the same element: `\b`
+    // after `c` keeps this from matching `<col>`, and the trailing `>` is
+    // included so both files bound the open tag identically rather than one
+    // stopping short of it.
+    const openTag = /^<c\b[^>]*>/.exec(cellXml)?.[0] ?? cellXml;
     const ref = /\sr="([^"]*)"/.exec(openTag)?.[1];
     if (ref === undefined) {
-      throw new Error(
+      throw new WorkbookFileError(
         "A cell has no r attribute, so its row and column cannot be read from its position in the file.",
       );
     }
@@ -133,14 +164,14 @@ export function sheetToGrid(
 ): { grid: CellValue[][]; firstRow: number; hadFormula: boolean } {
   if (bounds) {
     if (bounds.lastRow < bounds.firstRow || bounds.lastColumn < bounds.firstColumn) {
-      throw new Error(
+      throw new WorkbookFileError(
         `The requested range (rows ${String(bounds.firstRow)} to ${String(bounds.lastRow)}, columns ` +
           `${String(bounds.firstColumn)} to ${String(bounds.lastColumn)}) has a last row or column before ` +
           "its first, which names no rectangle to read.",
       );
     }
     if (bounds.lastRow > MAX_GRID_ROWS || bounds.lastColumn > MAX_GRID_COLUMNS) {
-      throw new Error(
+      throw new WorkbookFileError(
         `The requested range's last row ${String(bounds.lastRow)} or last column ${String(bounds.lastColumn)} ` +
           `is past the ${String(MAX_GRID_ROWS)} rows or ${String(MAX_GRID_COLUMNS)} columns a worksheet can ` +
           "have.",
@@ -170,6 +201,22 @@ export function sheetToGrid(
 
   const rowCount = lastRow - firstRow + 1;
   const columnCount = lastColumn - firstColumn + 1;
+  const area = rowCount * columnCount;
+
+  // Refused here, before the allocation below, rather than left to fail
+  // during it: an area past MAX_GRID_CELLS is tens of gigabytes of grid
+  // slots for the worst case this cap exists to name, and an allocation of
+  // that size is a memory exhaustion this process may not survive, on a host
+  // that runs a minimum of one replica. A refusal is a clean, reviewable
+  // failure for one request; running out of memory takes the whole replica
+  // and every request in flight on it down with it.
+  if (area > MAX_GRID_CELLS) {
+    throw new WorkbookFileError(
+      `The range to read is ${String(rowCount)} rows by ${String(columnCount)} columns, ${String(area)} cells, ` +
+        `past the ${String(MAX_GRID_CELLS)} cell limit this server will materialize into a grid.`,
+    );
+  }
+
   const grid: CellValue[][] = Array.from({ length: rowCount }, () => Array<CellValue>(columnCount).fill(null));
 
   let hadFormula = false;

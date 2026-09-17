@@ -37,6 +37,13 @@ describe("cells that cannot be read", () => {
     expect(decodeCell("<c r=\"A1\" t=\"s\"><v></v></c>", ["Client", "CLIENTA"])).toBe(UNEVALUABLE);
   });
 
+  it("refuses an empty cached value on a boolean cell", () => {
+    // The empty-value guard is type independent by construction: it fires
+    // before the type-specific branches below it ever see the value. This is
+    // the one type that guard reaches which had no test of its own.
+    expect(decodeCell('<c r="A1" t="b"><v></v></c>', [])).toBe(UNEVALUABLE);
+  });
+
   it("refuses an unknown entity reference rather than expanding it", () => {
     // Resolving a declared entity is how OOXML parsing becomes an XXE vector.
     // This server holds SharePoint credentials, so an entity outside the five

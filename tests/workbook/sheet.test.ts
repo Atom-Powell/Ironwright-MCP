@@ -112,6 +112,20 @@ describe("sheetToGrid", () => {
     expect(result.firstRow).toBe(1);
   });
 
+  it("places a self-closing cell by its own r attribute, not by falling through the whole tag", () => {
+    // decodeCell's own open-tag pattern and this one must agree on where a
+    // self-closing cell's open tag ends; this pins that readCells still
+    // finds the r attribute correctly for the self-closing form, not just
+    // the open/close form every other case here uses.
+    const sheet =
+      '<worksheet><sheetData><row r="2"><c r="A2"/><c r="B2" t="inlineStr"><is><t>Client</t></is></c></row>' +
+      "</sheetData></worksheet>";
+
+    const result = sheetToGrid(sheet, []);
+
+    expect(result.grid).toEqual([[null, "Client"]]);
+  });
+
   it("reads an empty worksheet as an empty grid", () => {
     const result = sheetToGrid("<worksheet><sheetData></sheetData></worksheet>", []);
 

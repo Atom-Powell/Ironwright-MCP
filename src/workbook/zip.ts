@@ -1,4 +1,5 @@
 import { unzipSync, strFromU8 } from "fflate";
+import { WorkbookMappingError } from "./errors.js";
 
 /**
  * Refused by inspection rather than discovered by exhausting memory. A zip
@@ -43,7 +44,15 @@ export function readZipParts(
     // running total, because the cap is about what the archive claims it would
     // cost to inflate, not about what this caller happens to read.
     if (error instanceof ArchiveSizeExceededError) throw error;
-    throw new Error(
+    // A profile's own workbookPath is what named this file in the first
+    // place, and the most common way to reach this branch is that path
+    // resolving to something that was never a workbook, such as a
+    // spreadsheet renamed alongside a report and left in the folder the
+    // profile still points at. A truncated download can produce the same
+    // symptom, which is why the message names both rather than asserting
+    // one: this function only observed that fflate could not read a zip
+    // directory out of the bytes, not why.
+    throw new WorkbookMappingError(
       "The downloaded file is not a zip archive, so it is not an xlsx workbook. The profile's workbookPath " +
         "may name a file that is not a workbook, or the download was truncated.",
       { cause: error },

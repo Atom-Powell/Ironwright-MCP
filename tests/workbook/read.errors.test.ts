@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { readWorkbookGrid, WorkbookMappingError } from "../../src/workbook/read.js";
+import { readWorkbookGrid } from "../../src/workbook/read.js";
+import { WorkbookMappingError } from "../../src/workbook/errors.js";
 import { UNEVALUABLE } from "../../src/workbook/cells.js";
 import { loadProfile } from "../../src/domain/profile/load.js";
 import { readFileSync } from "node:fs";

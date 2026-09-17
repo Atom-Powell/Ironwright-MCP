@@ -1,7 +1,7 @@
 import { GraphRequestError } from "../graph/errors.js";
 import { LibraryNotFoundError } from "../graph/drive.js";
 import { TokenRequestError } from "../graph/token.js";
-import { WorkbookMappingError } from "../workbook/read.js";
+import { WorkbookFileError, WorkbookMappingError } from "../workbook/errors.js";
 import { UnknownProfileError } from "../profiles/registry.js";
 
 /**
@@ -44,6 +44,16 @@ export function describeToolFailure(error: unknown, subject: FailureSubject): st
     // would produce a second, worse description of the same thing. The
     // attribution is a separate sentence for that reason.
     return `${error.message} This came from the workbook mapping in profile "${subject.profileId}".`;
+  }
+
+  if (error instanceof WorkbookFileError) {
+    // The opposite attribution from the mapping case above, and just as
+    // load bearing: this profile's own workbookPath and workbookMapping
+    // could both be exactly right and this failure would still happen,
+    // because it is the downloaded archive itself that cannot be trusted.
+    // Sending an operator to edit a profile that is not wrong wastes the
+    // one thing this message can usefully spend, which is where to look.
+    return `${error.message} This is about the workbook file itself, not about how profile "${subject.profileId}" is configured.`;
   }
 
   if (error instanceof TokenRequestError) {

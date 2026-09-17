@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { runReconcile } from "../../../src/tools/reconciliation/run.js";
 import { createFakeToolContext } from "../../tools/fake-context.js";
-import { WorkbookMappingError } from "../../../src/workbook/read.js";
+import { WorkbookMappingError } from "../../../src/workbook/errors.js";
 import { GraphRequestError } from "../../../src/graph/errors.js";
 
 function textOf(result: Awaited<ReturnType<typeof runReconcile>>): string {

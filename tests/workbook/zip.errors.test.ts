@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { zipSync, strToU8 } from "fflate";
 import { readZipParts, MAX_INFLATED_BYTES, ArchiveSizeExceededError } from "../../src/workbook/zip.js";
+import { WorkbookMappingError } from "../../src/workbook/errors.js";
 
 describe("readZipParts failures", () => {
-  it("refuses bytes that are not a zip", () => {
-    expect(() => readZipParts(new Uint8Array([1, 2, 3, 4]), () => true)).toThrow(
-      /is not a zip archive, so it is not an xlsx workbook/,
-    );
+  it("refuses bytes that are not a zip, as a mapping failure rather than a file one", () => {
+    // A profile's own workbookPath named this file, and the most likely
+    // cause is that path resolving to something that was never a workbook,
+    // which is a configuration mismatch rather than a corrupt archive.
+    const call = (): unknown => readZipParts(new Uint8Array([1, 2, 3, 4]), () => true);
+
+    expect(call).toThrow(WorkbookMappingError);
+    expect(call).toThrow(/is not a zip archive, so it is not an xlsx workbook/);
   });
 
   it("refuses an archive whose declared inflated size exceeds the cap", () => {

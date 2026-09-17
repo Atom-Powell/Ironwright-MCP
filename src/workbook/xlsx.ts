@@ -1,9 +1,9 @@
 import type { CellValue } from "./cells.js";
-import { parseSharedStrings } from "./cells.js";
+import { attribute, parseSharedStrings } from "./cells.js";
 import type { SheetBounds } from "./sheet.js";
 import { columnLabelToIndex, sheetToGrid } from "./sheet.js";
 import { readZipParts } from "./zip.js";
-import { WorkbookMappingError } from "./read.js";
+import { WorkbookFileError, WorkbookMappingError } from "./errors.js";
 
 /**
  * Names a range the same way a profile's workbookMapping names one: either a
@@ -20,11 +20,6 @@ const SHEET_ENTRY_PATTERN = /<sheet\b[^>]*\/>|<sheet\b[^>]*>[\s\S]*?<\/sheet>/g;
 const CALC_PR_PATTERN = /<calcPr\b[^>]*\/>|<calcPr\b[^>]*>/;
 const TABLE_ROOT_PATTERN = /<table\b[^>]*>|<table\b[^>]*\/>/;
 
-/** Reads one attribute's value out of a tag's own text, such as `<sheet name="X" r:id="rId1"/>`. */
-function attribute(tag: string, name: string): string | undefined {
-  return new RegExp(`\\s${name}="([^"]*)"`).exec(tag)?.[1];
-}
-
 function describeSource(source: WorkbookSource): string {
   return source.kind === "table" ? `The table "${source.name}"` : `The worksheet "${source.name}"`;
 }
@@ -32,7 +27,12 @@ function describeSource(source: WorkbookSource): string {
 function requirePart(parts: Map<string, string>, partName: string, neededFor: string): string {
   const part = parts.get(partName);
   if (part === undefined) {
-    throw new WorkbookMappingError(
+    // Neither of the two parts this is called for, xl/workbook.xml and
+    // xl/_rels/workbook.xml.rels, is named by anything a profile configures;
+    // both are needed to resolve any sheet or table at all. Their absence is
+    // the archive itself being incomplete, not a mismatch between the
+    // profile and an otherwise readable workbook.
+    throw new WorkbookFileError(
       `The workbook archive has no ${partName}, which is needed for ${neededFor}. Either the file is not a ` +
         "well formed xlsx workbook, or the download was truncated.",
     );
@@ -107,7 +107,11 @@ function resolveWorksheet(
 
   const target = parseRelationships(workbookRelsXml).get(rId);
   if (target === undefined) {
-    throw new WorkbookMappingError(
+    // The worksheet named here is real: it was just found by name in the
+    // sheet list. What is broken is the workbook's own cross-reference from
+    // that sheet entry to a relationship id, which no profile setting
+    // controls.
+    throw new WorkbookFileError(
       `The worksheet "${source.name}" points at relationship "${rId}", which xl/_rels/workbook.xml.rels does ` +
         "not define. The workbook's own internal relationships are inconsistent.",
     );
@@ -116,7 +120,7 @@ function resolveWorksheet(
   const partName = resolveRelativeTarget("xl/workbook.xml", target);
   const sheetXml = parts.get(partName);
   if (sheetXml === undefined) {
-    throw new WorkbookMappingError(
+    throw new WorkbookFileError(
       `The worksheet "${source.name}" resolves to ${partName}, which is missing from the archive. The ` +
         "workbook's own internal relationships name a part the file does not actually contain.",
     );
@@ -165,7 +169,9 @@ function findOwningWorksheetPart(parts: Map<string, string>, tablePartName: stri
 function parseCellRef(cellRef: string, wholeRef: string, tableName: string): { row: number; column: number } {
   const match = /^([A-Za-z]+)([0-9]+)$/.exec(cellRef);
   if (!match) {
-    throw new WorkbookMappingError(
+    // The table was found by the name the mapping gave; what is wrong is the
+    // shape of its own ref attribute, which the profile never writes.
+    throw new WorkbookFileError(
       `The table "${tableName}" has ref "${wholeRef}", which contains "${cellRef}", not a column letter ` +
         "followed by a row number. The table's range cannot be determined.",
     );
@@ -177,7 +183,7 @@ function parseCellRef(cellRef: string, wholeRef: string, tableName: string): { r
 function parseTableRange(ref: string, tableName: string): SheetBounds {
   const [startRef, endRef] = ref.split(":");
   if (startRef === undefined || endRef === undefined) {
-    throw new WorkbookMappingError(
+    throw new WorkbookFileError(
       `The table "${tableName}" has ref "${ref}", which is not an "A1:D10" style range, so the rows and ` +
         "columns it covers cannot be determined.",
     );
@@ -203,7 +209,10 @@ function resolveTable(
 
   const owningWorksheetPart = findOwningWorksheetPart(parts, table.partName);
   if (owningWorksheetPart === undefined) {
-    throw new WorkbookMappingError(
+    // The table itself was found by the name the mapping gave. What is
+    // missing is the reverse link from some worksheet's own relationships
+    // back to it, which is the archive's own internal wiring.
+    throw new WorkbookFileError(
       `The table "${source.name}" is defined in ${table.partName}, but no worksheet's relationships point at ` +
         "that part, so which worksheet holds it cannot be determined.",
     );
@@ -211,7 +220,7 @@ function resolveTable(
 
   const sheetXml = parts.get(owningWorksheetPart);
   if (sheetXml === undefined) {
-    throw new WorkbookMappingError(
+    throw new WorkbookFileError(
       `The table "${source.name}" belongs to ${owningWorksheetPart}, which is missing from the archive. The ` +
         "workbook's own internal relationships name a part the file does not actually contain.",
     );

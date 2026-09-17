@@ -40,12 +40,22 @@ export function parseSharedStrings(xml: string): string[] {
   return items;
 }
 
-function attribute(tag: string, name: string): string | undefined {
+/**
+ * Reads one attribute's value out of a tag's own text, such as
+ * `t="s"` out of `<c r="A1" t="s">`. Shared with xlsx.ts, which reads
+ * attributes off a different set of tags (`<sheet>`, `<Relationship>`,
+ * `<table>`, `<calcPr>`) with the same shape, so one implementation serves
+ * both rather than two copies risking a silent divergence.
+ */
+export function attribute(tag: string, name: string): string | undefined {
   return new RegExp(`\\s${name}="([^"]*)"`).exec(tag)?.[1];
 }
 
 export function decodeCell(cellXml: string, sharedStrings: string[]): CellValue {
-  const openTag = /^<c[^>]*>/.exec(cellXml)?.[0] ?? cellXml;
+  // `\b` after `c` keeps this from matching an element such as `<col>`,
+  // consistent with the same boundary sheet.ts's own cell-matching pattern
+  // already requires.
+  const openTag = /^<c\b[^>]*>/.exec(cellXml)?.[0] ?? cellXml;
   const type = attribute(openTag, "t");
   const hasFormula = /<f[\s>/]/.test(cellXml);
   const rawValue = /<v[^>]*>([\s\S]*?)<\/v>/.exec(cellXml)?.[1];
