@@ -67,6 +67,15 @@ describe("ProfileSchema", () => {
     };
     expect(ProfileSchema.parse(withoutRecognizers).naming.recognizers).toEqual([]);
   });
+
+  it("accepts a profile carrying a search region", () => {
+    const profile = { ...validProfile, identity: { ...validProfile.identity, searchRegion: "NAM" } };
+    expect(ProfileSchema.parse(profile).identity.searchRegion).toBe("NAM");
+  });
+
+  it("accepts a profile with no search region, because the cross-check is optional", () => {
+    expect(ProfileSchema.parse(validProfile).identity.searchRegion).toBeUndefined();
+  });
 });
 
 describe("examples/profiles/example.json", () => {

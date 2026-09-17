@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveDrive, siteLookupPath } from "../../src/graph/drive.js";
+import { listDrives, resolveDrive, siteLookupPath } from "../../src/graph/drive.js";
 import type { GraphClient } from "../../src/graph/client.js";
 
 function fakeClient(responses: Record<string, unknown>): GraphClient {
@@ -71,5 +71,43 @@ describe("resolveDrive", () => {
       siteId: "site-1",
       driveId: "drive-exact",
     });
+  });
+});
+
+describe("listDrives", () => {
+  it("lists every drive on the site with its id and name", async () => {
+    const client = {
+      get: (async (path: string) => {
+        if (path.includes("/drives")) {
+          return { value: [{ id: "d1", name: "Documents" }, { id: "d2", name: "Archive" }] };
+        }
+        return { id: "site-1" };
+      }) as never,
+    };
+
+    const result = await listDrives(client, "https://contoso.sharepoint.com/sites/Example");
+
+    expect(result.siteId).toBe("site-1");
+    expect(result.drives).toEqual([
+      { id: "d1", name: "Documents" },
+      { id: "d2", name: "Archive" },
+    ]);
+  });
+
+  it("still resolves one library by name through the extracted enumeration", async () => {
+    // Pins that the extraction did not change resolveDrive's own behavior,
+    // including the exact-before-case-insensitive rule.
+    const client = {
+      get: (async (path: string) => {
+        if (path.includes("/drives")) {
+          return { value: [{ id: "d1", name: "documents" }, { id: "d2", name: "Documents" }] };
+        }
+        return { id: "site-1" };
+      }) as never,
+    };
+
+    const result = await resolveDrive(client, "https://contoso.sharepoint.com/sites/Example", "Documents");
+
+    expect(result.driveId).toBe("d2");
   });
 });

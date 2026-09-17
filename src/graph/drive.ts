@@ -46,18 +46,31 @@ interface DriveListing {
   value?: Array<{ id?: unknown; name?: unknown }>;
 }
 
+export interface SiteDrive {
+  id: string;
+  name: string;
+}
+
 /**
  * Narrowed to `get` alone, which is the only member this function calls (the
  * site lookup and the drive listing, both below). A caller whose own client
  * cannot download content, such as the seeder's write-only client, still has
  * a library to resolve, and a parameter typed as the full `GraphClient` would
  * force it to carry a `getBytes` it never uses just to call this function.
+ *
+ * `resolveDrive` and the Microsoft Search cross-check both need a site's
+ * libraries, so the enumeration lives here once rather than once per caller.
+ *
+ * `rawCount` rides alongside `drives` for `resolveDrive`'s own use below: it is
+ * how many entries the listing carried before the shape filter, which is what
+ * `LibraryNotFoundError` needs to tell a site with no libraries apart from a
+ * site whose libraries arrived in a shape this code could not read. A caller
+ * that only wants the libraries, such as the search cross-check, can ignore it.
  */
-export async function resolveDrive(
+export async function listDrives(
   client: Pick<GraphClient, "get">,
   siteUrl: string,
-  library: string,
-): Promise<DriveLocation> {
+): Promise<{ siteId: string; drives: SiteDrive[]; rawCount: number }> {
   const site = await client.get<{ id?: unknown }>(siteLookupPath(siteUrl));
   if (typeof site.id !== "string" || site.id.length === 0) {
     // Without this the site id interpolates as the literal text "undefined" into
@@ -71,6 +84,16 @@ export async function resolveDrive(
     typeof drive.id === "string" && typeof drive.name === "string" ? [{ id: drive.id, name: drive.name }] : [],
   );
 
+  return { siteId: site.id, drives, rawCount: rawValue.length };
+}
+
+export async function resolveDrive(
+  client: Pick<GraphClient, "get">,
+  siteUrl: string,
+  library: string,
+): Promise<DriveLocation> {
+  const { siteId, drives, rawCount } = await listDrives(client, siteUrl);
+
   // Exact first. SharePoint permits two libraries whose names differ only in
   // case, so falling straight to a case-insensitive match could pick the wrong one.
   const exact = drives.find((drive) => drive.name === library);
@@ -81,9 +104,9 @@ export async function resolveDrive(
     throw new LibraryNotFoundError(
       library,
       drives.map((drive) => drive.name).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
-      rawValue.length,
+      rawCount,
     );
   }
 
-  return { siteId: site.id, driveId: matched.id };
+  return { siteId, driveId: matched.id };
 }
