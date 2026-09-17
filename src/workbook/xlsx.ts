@@ -36,13 +36,19 @@ function describeSource(source: WorkbookSource): string {
  * ever requested after xl/workbook.xml above was already found and parsed,
  * so reaching that check means the archive is confirmed xlsx-shaped; its
  * absence there is the archive's own required parts being incomplete, which
- * is `onMissing: "fileError"`, the default.
+ * is `onMissing: "fileError"`.
  */
 function requirePart(
   parts: Map<string, string>,
   partName: string,
   neededFor: string,
-  onMissing: "fileError" | "unreadable" = "fileError",
+  // Required, not defaulted: every call site must state what it knows about
+  // the failure. A default reproduces the bug this parameter was added to
+  // fix, where a silent classifier was assigned rather than stated. Future
+  // callers that should classify a failure as indeterminate will silently
+  // get the file-error default by omission, and the defect returns in a new
+  // place. Required means the compiler enforces intent.
+  onMissing: "fileError" | "unreadable",
 ): string {
   const part = parts.get(partName);
   if (part === undefined) {
@@ -274,6 +280,7 @@ export function parseWorkbookGrid(
     parts,
     "xl/_rels/workbook.xml.rels",
     "mapping a sheet's r:id to the worksheet part that holds it",
+    "fileError",
   );
 
   // Absent entirely, rather than an empty <sst/>, is ordinary for a workbook
