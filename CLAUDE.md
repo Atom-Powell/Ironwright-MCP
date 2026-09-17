@@ -52,11 +52,15 @@ request, which Copilot Studio requires and which prevents cross-request state le
 
 **Graph access, in priority order.** Path-based `driveItem` addressing over ID addressing.
 `$batch` for combining requests, respecting the 20-request and 4 MB caps. Delta query with a
-persisted `deltaLink`. Microsoft Search as the cross-check for files outside the expected
-taxonomy. ETags with `If-Match` on every write. Each is built with the caller that exercises it
-rather than ahead of any consumer, which is why phase 2b was split on 2026-09-14: `$batch` moves
-to phase 6, where the write tools are its first real caller, and the Microsoft Search cross-check
-becomes phase 2c.
+persisted `deltaLink`. Microsoft Search as the cross-check for a correctly named file filed into a
+different document library of the same site. ETags with `If-Match` on every write. Each is built
+with the caller that exercises it rather than ahead of any consumer, which is why phase 2b was
+split on 2026-09-14: `$batch` moves to phase 6, where the write tools are its first real caller,
+and the Microsoft Search cross-check becomes phase 2c. Amended 2026-09-17: the cross-check's
+original target, a file outside the taxonomy, was already covered by phase 2a's delta scan and the
+matcher's `misplaced` finding; the real gap is a second document library of the same site.
+Cross-site is out of reach on the same grant, since `Sites.Selected` trims Search results to the
+one granted site.
 
 **Reading the workbook. Rewritten 2026-09-16 by a live tenant run; the previous entry is void.**
 The Graph Excel API is unreachable from this server. `/workbook/` calls are refused with 403
@@ -187,13 +191,14 @@ registry, so a tool added later inherits every check.
 
 ## Build Sequence
 
-The spec carries the full phase descriptions. Status as of 2026-09-16:
+The spec carries the full phase descriptions. Status as of 2026-09-17:
 
 1. **Foundation.** Complete and merged. Stateless transport, all ten tools registered as honest
    stubs behind the contract test, the pure profile schema, the two-layer write gate, and a
    scripted per-tenant setup verified end to end against a live tenant.
-2. **Graph performance layer**, split into 2a, 2b-1 and 2c because it is more work than one
-   implementation plan should carry.
+2. **Graph performance layer. Complete.** Split into 2a, 2b and 2c because it was more work than
+   one implementation plan should carry; 2b split again into 2b-1 and 2b-2 when the live run
+   invalidated the first attempt.
    - **2a: the Graph layer and the repository snapshot. Complete and verified live on 2026-09-16.**
      The token provider, `Retry-After`-aware retry, path addressing, the delta client, both
      `StateStore` implementations, the snapshot assembler, and the `scan` command, over plain
@@ -205,13 +210,21 @@ The spec carries the full phase descriptions. Status as of 2026-09-16:
    - **2b-1: the Excel session and the workbook snapshot. INVALIDATED 2026-09-16 by the live run.**
      The Graph Excel API refuses this server's app-only tokens at every application permission
      tested, so the session manager and the mapped range read have no reachable endpoint and
-     `readWorkbookSnapshot` cannot run. The engine's second input has no supplier, which blocks the
-     centerpiece tool end to end. What survives the invalidation is the pure half: the reader that
-     turns a grid into records and rejections never touched Graph, and the rejection path it built
-     is what the replacement depends on. **2b-2**, a reader that downloads the `.xlsx` through
-     `/content` and parses the bytes, is the replacement and has no design yet.
-   - **2c: the Microsoft Search cross-check.** Not started, and its own spec is still to write.
-     Until it exists every report carries `searchCrossCheckIncluded: false`.
+     `readWorkbookSnapshot` cannot run. What survives the invalidation is the pure half: the reader
+     that turns a grid into records and rejections never touched Graph, and the rejection path it
+     built is what the replacement depends on.
+   - **2b-2: the workbook bytes reader. Complete and verified live on 2026-09-17.** Downloads the
+     `.xlsx` through `/content` under the same `Sites.Selected` grant and parses the bytes in
+     process, supplying the engine's second input without an Excel session.
+   - **2c: the Microsoft Search cross-check. Complete and verified live on 2026-09-17.** Finds a
+     correctly named deliverable filed into a different document library of the same site. A
+     deliverable moved into a second library moved from `missing` to `misplaced` naming that
+     library, a copy left at the same relative path in both libraries did not erase the local
+     file, and the other library contributed no orphans. Cross-site is structurally impossible
+     rather than merely out of scope: Microsoft Search is trimmed to the `Sites.Selected` grant,
+     confirmed by a live probe. A report no longer necessarily declares itself degraded; it carries
+     one of four distinguishable reasons when the cross-check did not complete, and says nothing
+     when it did.
    - The `$batch` builder left this phase on 2026-09-14 for phase 6. A delta-driven inventory
      has no use for it and a range read is one call either way, so its first real caller is the
      write tools.
@@ -228,9 +241,9 @@ The spec carries the full phase descriptions. Status as of 2026-09-16:
    registry loaded and validated at startup from `IW_PROFILE_DIR`, the in-process single-flight
    scan coordinator, and `reconcile_workbook_vs_repository` wired end to end with a real output
    schema. The other four read tools are still honest stubs and inherit the layer with no
-   retrofit. Graph and Azure Table Storage have both been exercised live as of 2026-09-16, but the
-   composed tool has still never returned a report against a tenant, because it needs the workbook
-   snapshot that 2b-1's invalidation removed. It is blocked on 2b-2, not on its own wiring. Then
+   retrofit. Graph, Azure Table Storage and the workbook bytes reader have all been exercised
+   live, and `reconcile_workbook_vs_repository` returned a report against a real library on
+   2026-09-17 once phase 2b-2 supplied the workbook snapshot. Then
    **hosting**, then
    **write tools**, then **Copilot Studio integration and governance**, then the **evaluation
    suite**, whose questions are already written in `docs/EVALUATION-QUESTIONS.md`. They exist
