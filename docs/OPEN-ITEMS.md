@@ -762,7 +762,21 @@ in prose that the seeder's own workbook is the orphan it lists. That was the rig
 branch whose scope was the seeder, and it settles nothing about the product question. Step 7 of
 the phase 2a checklist above is where an operator meets this for the first time.
 
-## Phase 2b-1: covered only by fakes, 2026-09-14
+## SUPERSEDED: Phase 2b-1 covered only by fakes, 2026-09-14
+
+**SUPERSEDED 2026-09-16 by the workbook-bytes-reader phase (commits `8827fd5` through `b242ab2`),
+following from the BLOCKING finding above that the Graph Excel API refuses this server's app-only
+tokens.** The Excel session layer this entry describes, `src/graph/excel.ts`, is deleted along
+with its tests. Opening a non-persistent session, reading a table's range or a worksheet's used
+range through it, retrying once on an expired session, and closing it are none of them things
+this server does any more, or can do under the app-only identity model the Decision Record
+requires. `src/workbook/read.ts` still turns a grid into records and rejections the way this
+entry describes, but the grid now comes from parsing downloaded bytes rather than from a Graph
+range read, and `readWorkbookSnapshot` in `src/scan/workbook.ts` is recomposed onto that path. See
+the entry below for what is verified about the replacement.
+
+Original entry follows, describing a layer that no longer exists, kept for the history of how
+phase 2b was first built and then abandoned rather than as a current account of anything.
 
 Phase 2b-1, the workbook snapshot, has not been run against a real tenant. No Excel call has been
 made by this code, against a real workbook or otherwise. Everything below is verified against
@@ -789,6 +803,45 @@ layer's retry and close behavior against Graph's actual responses rather than a 
 Until that run happens, this phase's session-layer behavior, its rejection handling, and the
 snapshot assembly are known from reading the code and from tests against fakes only. None of it
 has been proven by use.
+
+## Phase 2b-2: covered only by fakes and hand-written fixtures, 2026-09-16
+
+The workbook-bytes reader that replaced phase 2b-1, per the design at
+`docs/superpowers/specs/2026-09-16-workbook-bytes-reader-design.md`, has not been run against a
+real tenant or a real Excel-produced workbook either. Everything below is verified against
+in-process fixtures, and nothing more should be read into it than that.
+
+**What is covered.** `src/graph/content.ts`'s `downloadDriveItem`, following the driveItem
+content redirect and dropping the bearer token before the second request, against a fake
+transport. `src/workbook/zip.ts`'s `readZipParts`, refusing an archive whose declared inflated
+size exceeds its cap by inspection, before inflating it. `src/workbook/cells.ts`'s `decodeCell`,
+the rejection rule itself: a formula with no cached value, an error cell, and a cell whose cached
+value is present but empty, all refuse rather than substitute. `src/workbook/sheet.ts`'s
+`sheetToGrid`, building a grid from cells by their own reference rather than position, and, since
+this branch's own whole-branch review, refusing a bounding box or a declared range whose area
+exceeds a fixed cell cap before allocating it. `src/workbook/xlsx.ts`'s `parseWorkbookGrid`,
+resolving a named table or worksheet through the workbook's own internal relationships and
+failing the read when `fullCalcOnLoad` is set over a range holding a formula. `readWorkbookGrid`
+in `src/workbook/read.ts`, unchanged in what it does, now fed by this path instead of a Graph
+range read. All of it against fixtures, all of it green, none of it against a real Excel workbook.
+
+**What the fixtures cannot show.** Every fixture the parser is tested against is hand-written XML
+in this repository's own test files, and the seeder's bytes in `scripts/seed/blank-workbook.ts`
+are hand-written too. The suite proves the reader agrees with what this repository believes Excel
+emits, and nothing more: a wrong assumption shared by the reader and every fixture author would
+pass every test here and still be wrong against a real workbook. Task 8 of the phase 2b-2 plan, a
+binary fixture Excel itself produced, carrying a table, a formula, an `#N/A` and a date, is the one
+artifact that would catch that. It has not landed; `tests/workbook/fixtures/real-excel.xlsx` does
+not exist, and the operator has been asked for it. This is a blocker on live-run sign-off, not on
+merge: the design explicitly scoped it as the one task requiring a human-supplied artifact rather
+than something an implementing session could produce itself.
+
+**Why the live run has not happened.** The same synthetic tracking workbook `npm run seed-library`
+places in the site is now written directly as bytes (`scripts/seed/workbook.ts`, using
+`src/workbook/xlsx.ts`'s own `parseWorkbookGrid` to read its output back before upload) rather
+than built through Graph Excel calls, since those calls are what phase 2b-1 proved unreachable.
+Downloading that file and parsing it through `readWorkbookSnapshot` against a real tenant is the
+live verification this phase needs, and it has not happened in any implementing session to date.
 
 ## Neither teardown mode can recover from its own partial purge failure
 
