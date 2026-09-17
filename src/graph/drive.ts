@@ -43,12 +43,21 @@ export function siteLookupPath(siteUrl: string): string {
 }
 
 interface DriveListing {
-  value?: Array<{ id?: unknown; name?: unknown }>;
+  value?: Array<{ id?: unknown; name?: unknown; webUrl?: unknown }>;
 }
 
 export interface SiteDrive {
   id: string;
   name: string;
+  /**
+   * Optional because id and name are the only fields the shape filter below
+   * requires; a listing entry that is otherwise usable but happens to lack a
+   * webUrl should still resolve for `resolveDrive`, which never reads it.
+   * The Microsoft Search cross-check is the one caller that needs it, to
+   * search a library and to strip its own root back off a hit's webUrl, and
+   * it is positioned to decide what an absent webUrl means for its own job.
+   */
+  webUrl?: string;
 }
 
 /**
@@ -78,10 +87,12 @@ export async function listDrives(
     throw new Error(`Resolving the site "${siteUrl}" returned a response with no id.`);
   }
 
-  const listing = await client.get<DriveListing>(`/sites/${site.id}/drives?$select=id,name`);
+  const listing = await client.get<DriveListing>(`/sites/${site.id}/drives?$select=id,name,webUrl`);
   const rawValue = listing.value ?? [];
   const drives = rawValue.flatMap((drive) =>
-    typeof drive.id === "string" && typeof drive.name === "string" ? [{ id: drive.id, name: drive.name }] : [],
+    typeof drive.id === "string" && typeof drive.name === "string"
+      ? [{ id: drive.id, name: drive.name, ...(typeof drive.webUrl === "string" ? { webUrl: drive.webUrl } : {}) }]
+      : [],
   );
 
   return { siteId: site.id, drives, rawCount: rawValue.length };

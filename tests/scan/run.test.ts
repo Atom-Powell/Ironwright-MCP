@@ -25,7 +25,7 @@ function scriptedClient(responses: Record<string, unknown>): GraphClient {
 }
 
 const SITE = "/sites/contoso.sharepoint.com:/sites/Example";
-const DRIVES = "/sites/site-1/drives?$select=id,name";
+const DRIVES = "/sites/site-1/drives?$select=id,name,webUrl";
 
 function baseResponses(delta: unknown): Record<string, unknown> {
   return {

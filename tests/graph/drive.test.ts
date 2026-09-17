@@ -30,7 +30,7 @@ describe("resolveDrive", () => {
   it("resolves the site then the named library", async () => {
     const client = fakeClient({
       "/sites/contoso.sharepoint.com:/sites/Example": { id: "site-1" },
-      "/sites/site-1/drives?$select=id,name": {
+      "/sites/site-1/drives?$select=id,name,webUrl": {
         value: [
           { id: "drive-a", name: "Documents" },
           { id: "drive-b", name: "Compliance Reports" },
@@ -47,7 +47,7 @@ describe("resolveDrive", () => {
   it("matches a library name case-insensitively when nothing matches exactly", async () => {
     const client = fakeClient({
       "/sites/contoso.sharepoint.com:/sites/Example": { id: "site-1" },
-      "/sites/site-1/drives?$select=id,name": { value: [{ id: "drive-b", name: "Compliance Reports" }] },
+      "/sites/site-1/drives?$select=id,name,webUrl": { value: [{ id: "drive-b", name: "Compliance Reports" }] },
     });
 
     await expect(resolveDrive(client, "https://contoso.sharepoint.com/sites/Example", "compliance reports")).resolves.toEqual({
@@ -59,7 +59,7 @@ describe("resolveDrive", () => {
   it("prefers an exact match over a case-insensitive one when both are present", async () => {
     const client = fakeClient({
       "/sites/contoso.sharepoint.com:/sites/Example": { id: "site-1" },
-      "/sites/site-1/drives?$select=id,name": {
+      "/sites/site-1/drives?$select=id,name,webUrl": {
         value: [
           { id: "drive-lower", name: "compliance reports" },
           { id: "drive-exact", name: "Compliance Reports" },
@@ -92,6 +92,39 @@ describe("listDrives", () => {
       { id: "d1", name: "Documents" },
       { id: "d2", name: "Archive" },
     ]);
+  });
+
+  it("carries a drive's webUrl when the listing includes one", async () => {
+    const client = {
+      get: (async (path: string) => {
+        if (path.includes("/drives")) {
+          return {
+            value: [{ id: "d1", name: "Documents", webUrl: "https://contoso.sharepoint.com/sites/Example/Documents" }],
+          };
+        }
+        return { id: "site-1" };
+      }) as never,
+    };
+
+    const result = await listDrives(client, "https://contoso.sharepoint.com/sites/Example");
+
+    expect(result.drives).toEqual([
+      { id: "d1", name: "Documents", webUrl: "https://contoso.sharepoint.com/sites/Example/Documents" },
+    ]);
+  });
+
+  it("still resolves a drive with no webUrl, since resolveDrive never reads it", async () => {
+    const client = {
+      get: (async (path: string) => {
+        if (path.includes("/drives")) return { value: [{ id: "d1", name: "Documents" }] };
+        return { id: "site-1" };
+      }) as never,
+    };
+
+    const result = await listDrives(client, "https://contoso.sharepoint.com/sites/Example");
+
+    expect(result.drives).toEqual([{ id: "d1", name: "Documents" }]);
+    expect("webUrl" in (result.drives[0] ?? {})).toBe(false);
   });
 
   it("still resolves one library by name through the extracted enumeration", async () => {

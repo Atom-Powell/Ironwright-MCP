@@ -11,7 +11,7 @@ const PROFILE = loadProfile(
 );
 const NOW = () => new Date("2026-09-13T12:00:00Z");
 const SITE = "/sites/contoso.sharepoint.com:/sites/Example";
-const DRIVES = "/sites/site-1/drives?$select=id,name";
+const DRIVES = "/sites/site-1/drives?$select=id,name,webUrl";
 
 describe("runScan when the stored deltaLink is rejected", () => {
   it("clears the inventory, re-enumerates, and reports that it resynced", async () => {
