@@ -123,7 +123,7 @@ describe("createGraphClient failures", () => {
       fetchImpl: (async () => new Response(JSON.stringify({ error: { code: "itemNotFound" } }), { status: 404 })) as typeof fetch,
     });
 
-    await expect(client.post("/drives/d1/items/i1/workbook/createSession", {})).rejects.toMatchObject({
+    await expect(client.post("/drives/d1/items/i1/copy", {})).rejects.toMatchObject({
       name: "GraphRequestError",
       method: "POST",
       status: 404,
@@ -141,7 +141,7 @@ describe("createGraphClient failures", () => {
       }) as typeof fetch,
     });
 
-    await expect(client.post("/drives/d1/items/i1/workbook/createSession", {})).rejects.toThrow(/fetch failed/);
+    await expect(client.post("/drives/d1/items/i1/copy", {})).rejects.toThrow(/fetch failed/);
     expect(attempts).toBe(1);
   });
 
@@ -151,7 +151,7 @@ describe("createGraphClient failures", () => {
       fetchImpl: (async () => new Response("<html>proxy</html>", { status: 200 })) as typeof fetch,
     });
 
-    await expect(client.post("/drives/d1/items/i1/workbook/createSession", {})).rejects.toThrow(/Graph POST/);
+    await expect(client.post("/drives/d1/items/i1/copy", {})).rejects.toThrow(/Graph POST/);
   });
 
   it("still retries a POST that returns a retriable status", async () => {
@@ -167,7 +167,7 @@ describe("createGraphClient failures", () => {
       }) as typeof fetch,
     });
 
-    await client.post("/drives/d1/items/i1/workbook/createSession", {});
+    await client.post("/drives/d1/items/i1/copy", {});
 
     expect(client.requests()).toBe(2);
   });

@@ -61,19 +61,19 @@ describe("createGraphClient", () => {
       tokenProvider: TOKEN,
       fetchImpl: (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
         seen.push(new Request(input as string, init));
-        return new Response(JSON.stringify({ id: "session-1" }), { status: 200 });
+        return new Response(JSON.stringify({ id: "copy-job-1" }), { status: 200 });
       }) as typeof fetch,
     });
 
-    const value = await client.post<{ id: string }>("/drives/d1/items/i1/workbook/createSession", {
-      persistChanges: false,
+    const value = await client.post<{ id: string }>("/drives/d1/items/i1/copy", {
+      name: "renamed.txt",
     });
 
-    expect(value.id).toBe("session-1");
+    expect(value.id).toBe("copy-job-1");
     expect(seen[0]?.method).toBe("POST");
     expect(seen[0]?.headers.get("authorization")).toBe("Bearer token-1");
     expect(seen[0]?.headers.get("content-type")).toBe("application/json");
-    await expect(seen[0]?.text()).resolves.toBe(JSON.stringify({ persistChanges: false }));
+    await expect(seen[0]?.text()).resolves.toBe(JSON.stringify({ name: "renamed.txt" }));
   });
 
   it("sends per-call headers alongside the ones it always sets", async () => {
@@ -86,9 +86,9 @@ describe("createGraphClient", () => {
       }) as typeof fetch,
     });
 
-    await client.get("/drives/d1/items/i1/workbook/tables/T/range", { "workbook-session-id": "s-1" });
+    await client.get("/drives/d1/items/i1/thumbnails", { "x-test-trace-id": "trace-1" });
 
-    expect(seen[0]?.headers.get("workbook-session-id")).toBe("s-1");
+    expect(seen[0]?.headers.get("x-test-trace-id")).toBe("trace-1");
     expect(seen[0]?.headers.get("authorization")).toBe("Bearer token-1");
   });
 
@@ -143,7 +143,7 @@ describe("createGraphClient", () => {
       }) as typeof fetch,
     });
 
-    await client.post("/drives/d1/items/i1/workbook/closeSession", undefined, { "workbook-session-id": "s-1" });
+    await client.post("/drives/d1/items/i1/checkin", undefined, { "x-test-trace-id": "trace-1" });
 
     expect(seen[0]?.headers.get("content-type")).toBeNull();
   });
