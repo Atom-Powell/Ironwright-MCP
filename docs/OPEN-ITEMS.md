@@ -829,12 +829,21 @@ range read. All of it against fixtures, all of it green, none of it against a re
 in this repository's own test files, and the seeder's bytes in `scripts/seed/blank-workbook.ts`
 are hand-written too. The suite proves the reader agrees with what this repository believes Excel
 emits, and nothing more: a wrong assumption shared by the reader and every fixture author would
-pass every test here and still be wrong against a real workbook. Task 8 of the phase 2b-2 plan, a
-binary fixture Excel itself produced, carrying a table, a formula, an `#N/A` and a date, is the one
-artifact that would catch that. It has not landed; `tests/workbook/fixtures/real-excel.xlsx` does
-not exist, and the operator has been asked for it. This is a blocker on live-run sign-off, not on
-merge: the design explicitly scoped it as the one task requiring a human-supplied artifact rather
-than something an implementing session could produce itself.
+pass every test here and still be wrong against a real workbook.
+
+**DONE 2026-09-16.** Task 8 of the phase 2b-2 plan, a binary fixture Excel itself produced,
+carrying a table, a formula, an `#N/A` and a date, is the artifact that would catch that, and it
+has landed. See "Task 8 done, and two more findings from the same evening, 2026-09-16" below for
+what it proved and what it did not. It no longer blocks live-run sign-off.
+
+Original paragraph follows, describing Task 8 as outstanding, kept for history.
+
+Task 8 of the phase 2b-2 plan, a binary fixture Excel itself produced, carrying a table, a
+formula, an `#N/A` and a date, is the one artifact that would catch that. It has not landed;
+`tests/workbook/fixtures/real-excel.xlsx` does not exist, and the operator has been asked for it.
+This is a blocker on live-run sign-off, not on merge: the design explicitly scoped it as the one
+task requiring a human-supplied artifact rather than something an implementing session could
+produce itself.
 
 **Why the live run has not happened.** The same synthetic tracking workbook `npm run seed-library`
 places in the site is now written directly as bytes (`scripts/seed/workbook.ts`, using
@@ -842,6 +851,47 @@ places in the site is now written directly as bytes (`scripts/seed/workbook.ts`,
 than built through Graph Excel calls, since those calls are what phase 2b-1 proved unreachable.
 Downloading that file and parsing it through `readWorkbookSnapshot` against a real tenant is the
 live verification this phase needs, and it has not happened in any implementing session to date.
+
+## Task 8 done, and two more findings from the same evening, 2026-09-16
+
+**Task 8 is complete.** `tests/workbook/fixtures/real-excel.xlsx` exists, produced by Excel for
+the web from a starter this repository generated, and `tests/workbook/xlsx.real.test.ts` pins the
+production parser against it. A reviewer unzipped the file and checked each assertion against its
+actual parts: a table named `ClientRoster` whose declared dimension is `A5:E7` resolves by name to
+row offset 5, header cells stored as shared string references resolve through Excel's own
+`sharedStrings.xml`, two cells Excel stored as `t="e"` with cached `#N/A` arrive as unevaluable
+rather than as empty values, and two cells holding a shared formula with cached results arrive as
+those results rather than being rejected. The file carries `docProps/app.xml`, `xl/calcChain.xml`
+and `xl/sharedStrings.xml`, none of which this repository's own writers produce. This is the
+paragraph in the Phase 2b-2 section above that named Task 8 as a blocker on live-run sign-off;
+that claim no longer holds.
+
+This is one workbook, and it settles less than a passing suite might suggest. It does not exercise
+an Excel date serial, because the operator's date values stayed text in the file, so that branch
+remains covered only by `excelSerialToIsoDate`'s unit tests. It says nothing about the live tenant
+path, and `reconcile_workbook_vs_repository` has still never returned a report against a real
+library.
+
+**The seeder's production writer opens in real Excel.** `seededWorkbookBytes` in
+`scripts/seed/blank-workbook.ts` produces a workbook that Excel for the web opens. Verified
+2026-09-16 by generating a workbook with that function and having the operator open it in Excel,
+edit it and save it. This closes a concern Task 9's implementer had raised and could not settle at
+the time: the table XML was written to be well formed OOXML but had never been checked against
+real Excel. It now has been. The limit is the same shape as Task 8's: this proves Excel opens and
+rewrites the seeder's output, not that a seeded workbook has been read back from a tenant by the
+reconcile tool.
+
+**The hand-written fixture builder produces files Excel refuses to open.** Found the same way.
+`tests/workbook/xlsx-fixture.ts`, the test fixture builder the rest of the suite depends on,
+produces files Excel reports as possibly corrupt or in an unsupported format when opened directly.
+The cause is that it writes only the parts the parser needs, omitting `[Content_Types].xml`,
+`_rels/.rels` and `xl/styles.xml`, all of which Excel requires. This is not a defect in that
+builder: its job is exercising the parser rather than producing valid workbooks, and a parser
+tolerant of minimal input is reasonable. It is recorded because it sharpens what the hand-written
+fixtures in the Phase 2b-2 section above actually prove: they show the parser reads a reduced
+shape this repository constructs, and that shape is not merely different from what Excel emits, it
+is one Excel would reject. A green suite built only on those fixtures should be read with that in
+mind.
 
 ## Neither teardown mode can recover from its own partial purge failure
 
