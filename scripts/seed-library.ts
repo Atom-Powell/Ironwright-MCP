@@ -24,6 +24,16 @@
  * validate it, and writing a second validator by hand would be the same
  * duplication in a different place.
  *
+ * scripts/seed/workbook.ts separately imports one thing from src/workbook/:
+ * excelSerialToIsoDate, from src/workbook/read.js. Same underlying reason as
+ * the two src/domain/ imports above: that function is the one place the
+ * workbook reader converts an Excel date serial to ISO text, and the seeder
+ * needs the identical conversion to write the Onboarded column as text the
+ * reader will actually recognize as a date. Writing a second conversion here
+ * would let the two drift apart silently, which is the same duplication the
+ * single-entry reasoning above exists to prevent, just applied to
+ * src/workbook/ rather than src/domain/.
+ *
  * The token substitution below is still a local reimplementation of just
  * enough of naming.template's placeholder syntax, not a second copy of the
  * domain's renderer, and that stays deliberate: a fixture generator is not a

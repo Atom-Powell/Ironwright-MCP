@@ -2,14 +2,17 @@
  * Puts a populated, tabled tracking workbook in the library.
  *
  * The whole workbook, table included, is assembled in memory by
- * scripts/seed/blank-workbook.ts and uploaded with one content PUT. There is
- * no read of src/workbook/ here and no use of the Graph Excel API's
- * /workbook/ surface: that surface refuses this server's app-only tokens at
- * every permission tested, which is the finding that started this phase, and
- * this script used to be the last caller still depending on it, through a
- * range write, a table add and a table rename after the upload. This script
- * writes, so it uses the seeder's own client rather than a read path built
- * for a server that only ever reads.
+ * scripts/seed/blank-workbook.ts and uploaded with one content PUT. This file
+ * makes no call against the Graph Excel API's /workbook/ surface: that
+ * surface refuses this server's app-only tokens at every permission tested,
+ * which is the finding that started this phase, and this script used to be
+ * the last caller still depending on it, through a range write, a table add
+ * and a table rename after the upload. This script writes, so it uses the
+ * seeder's own client rather than a read path built for a server that only
+ * ever reads. It does import one function from src/workbook/, the reader's
+ * own excelSerialToIsoDate, for the Onboarded column conversion below; that
+ * is a pure conversion with no Graph call in it, so it does not touch the
+ * claim above about this file's own Graph surface.
  */
 import { GraphRequestError } from "../../src/graph/errors.js";
 import { excelSerialToIsoDate } from "../../src/workbook/read.js";
