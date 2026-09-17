@@ -8,6 +8,13 @@ import { unzipSync, strFromU8 } from "fflate";
  */
 export const MAX_INFLATED_BYTES = 200 * 1024 * 1024;
 
+export class ArchiveSizeExceededError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ArchiveSizeExceededError";
+  }
+}
+
 export function readZipParts(
   bytes: Uint8Array,
   wanted: (name: string) => boolean,
@@ -22,7 +29,7 @@ export function readZipParts(
       filter: (file) => {
         declared += file.originalSize;
         if (declared > cap) {
-          throw new Error(
+          throw new ArchiveSizeExceededError(
             `The workbook declares ${String(declared)} bytes of uncompressed content, past the ` +
               `${String(cap)} byte limit this server will inflate.`,
           );
@@ -31,11 +38,11 @@ export function readZipParts(
       },
     });
   } catch (error) {
-    // fflate throws its own error for malformed input. The filter's own throw
-    // is re-raised unchanged, because it already says what an operator needs
-    // and rewording it here would replace a true statement with a guess about
-    // which of the two causes applied.
-    if (error instanceof Error && error.message.includes("uncompressed content")) throw error;
+    // The cap check throws its own distinct error type, which is re-raised
+    // unchanged. An entry the caller does not want still contributes to the
+    // running total, because the cap is about what the archive claims it would
+    // cost to inflate, not about what this caller happens to read.
+    if (error instanceof ArchiveSizeExceededError) throw error;
     throw new Error(
       "The downloaded file is not a zip archive, so it is not an xlsx workbook. The profile's workbookPath " +
         "may name a file that is not a workbook, or the download was truncated.",
