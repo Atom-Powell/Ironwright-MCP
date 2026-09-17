@@ -102,4 +102,38 @@ describe("searchDriveItems", () => {
     expect(result.hits).toHaveLength(1);
     expect(result.hits[0]?.name).toBe("good.xlsx");
   });
+
+  it("carries a hit with no size or no lastModifiedDateTime as present with the field absent", async () => {
+    const missingSize = {
+      resource: {
+        name: "no-size.xlsx",
+        webUrl: "https://contoso.sharepoint.com/sites/Example/Archive/no-size.xlsx",
+        lastModifiedDateTime: "2026-01-01T00:00:00Z",
+        parentReference: { driveId: "drive-archive" },
+      },
+    };
+    const missingLastModified = {
+      resource: {
+        name: "no-last-modified.xlsx",
+        webUrl: "https://contoso.sharepoint.com/sites/Example/Archive/no-last-modified.xlsx",
+        size: 5,
+        parentReference: { driveId: "drive-archive" },
+      },
+    };
+    const client = {
+      post: (async () => page([missingSize, missingLastModified], false)) as never,
+    };
+
+    const result = await searchDriveItems(client, { region: "NAM", pathScope: "https://x/Archive" });
+
+    expect(result.hits).toHaveLength(2);
+    // Not skipped: name, webUrl and driveId all identify the hit.
+    expect(result.hits[0]?.name).toBe("no-size.xlsx");
+    // Not defaulted to 0 or "": the field is simply absent from the object.
+    expect(result.hits[0]?.size).toBeUndefined();
+    expect("size" in (result.hits[0] ?? {})).toBe(false);
+    expect(result.hits[1]?.name).toBe("no-last-modified.xlsx");
+    expect(result.hits[1]?.lastModified).toBeUndefined();
+    expect("lastModified" in (result.hits[1] ?? {})).toBe(false);
+  });
 });

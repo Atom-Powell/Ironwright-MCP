@@ -8,12 +8,24 @@ import type { GraphClient } from "./client.js";
  * the library it was searching, turning a trusted path scope into a verified
  * one; that check belongs there, not here, because this module knows nothing
  * about which library a caller meant to search.
+ *
+ * `size` and `lastModified` are optional rather than defaulted, because this
+ * layer reports what the response contained rather than inventing a value
+ * for what it did not. `lastModified` in particular feeds a plain-string
+ * comparison downstream (`supersedes` in the reconciliation engine) that
+ * decides which of two candidate files represents an artifact; a defaulted
+ * empty string would sort below every real timestamp and silently lose that
+ * comparison as though the file were the oldest possible one, rather than as
+ * something unknown. A caller that needs both fields to describe a candidate,
+ * such as building a `RepositoryFile`, is the one positioned to decide that a
+ * hit missing either is worse than a hit it cannot report at all, and should
+ * skip it there rather than have this layer guess on its behalf.
  */
 export interface SearchHit {
   name: string;
   webUrl: string;
-  size: number;
-  lastModified: string;
+  size?: number;
+  lastModified?: string;
   driveId: string;
 }
 
@@ -58,9 +70,16 @@ interface SearchResponse {
 /**
  * A hit missing a name, a webUrl or a driveId is not something this layer can
  * report: inventing any of the three would let a caller act on data the
- * search response never actually contained. Skipping it here, rather than
- * emitting a placeholder, is what keeps that decision out of the caller's
- * hands.
+ * search response never actually contained, and without one of them there is
+ * nothing to identify the hit as being about at all. Skipping it here, rather
+ * than emitting a placeholder, is what keeps that decision out of the
+ * caller's hands.
+ *
+ * `size` and `lastModifiedDateTime` are a different situation: the hit is
+ * still identified, only incompletely described, so the field is simply left
+ * off rather than defaulted or treated as a reason to skip the hit. See the
+ * comment on `SearchHit` for why a default here would be worse than an
+ * absence.
  */
 function toSearchHit(rawHit: SearchHitRaw): SearchHit | undefined {
   const resource = rawHit.resource;
@@ -77,9 +96,9 @@ function toSearchHit(rawHit: SearchHitRaw): SearchHit | undefined {
   return {
     name,
     webUrl,
-    size: typeof size === "number" ? size : 0,
-    lastModified: typeof lastModifiedDateTime === "string" ? lastModifiedDateTime : "",
     driveId,
+    ...(typeof size === "number" ? { size } : {}),
+    ...(typeof lastModifiedDateTime === "string" ? { lastModified: lastModifiedDateTime } : {}),
   };
 }
 
@@ -95,6 +114,10 @@ export async function searchDriveItems(
   client: Pick<GraphClient, "post">,
   args: { region: string; pathScope: string; extension?: string },
 ): Promise<SearchOutcome> {
+  // pathScope is not escaped against an embedded double quote, which would
+  // break the path:"..." clause. Unescaped because every caller in this
+  // codebase sources pathScope from a driveItem webUrl or a site path Graph
+  // itself returned, and a double quote is not a legal character in either.
   const queryString = `path:"${args.pathScope}"${args.extension === undefined ? "" : ` filetype:${args.extension}`}`;
   const hits: SearchHit[] = [];
 
