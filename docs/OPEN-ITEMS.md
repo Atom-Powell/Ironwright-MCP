@@ -613,6 +613,12 @@ prediction was therefore never compared against a live report, so nothing in thi
 anything about whether the composed tool returns the right answer. Phase 4a remains verified
 against fakes only.
 
+**UPDATE 2026-09-17.** Step 7 ran, in a later sitting, once the bytes-reader replacement existed.
+See "The second live tenant sitting, 2026-09-17" below. The paragraph above is an accurate account
+of this sitting on 2026-09-16; its last two sentences, that nothing here says whether the tool
+returns the right answer and that phase 4a remains verified against fakes only, no longer describe
+the project's current state.
+
 **Step 9 did not run.** The server application, the grant issuer, and a throwaway `WAC probe`
 registration created for the permission testing below are all still present in the tenant. The
 probe application holds tenant-wide `Files.ReadWrite.All` and `Files.Read.All` and should be
@@ -620,25 +626,40 @@ deleted. Teardown, and the two questions it exists to answer, whether the purge 
 **Deleted applications** and whether a service principal survives the application delete, are
 still unanswered.
 
-**Two seeder defects the sitting exposed, neither of them yet fixed.**
+**Two seeder defects the sitting exposed, both fixed by the workbook-bytes-reader phase's task 9.**
 
-The failure message blames the wrong thing. `scripts/seed/workbook.ts` attributes a failed range
-write to the bytes it uploaded, on the reasoning that this is the first call requiring Graph to
-open the file as a workbook. The reasoning about call ordering is correct and the conclusion is
-still wrong: the bytes were fine, confirmed by downloading them back and by opening them in Excel
-for the web. The message names the one cause the code cannot distinguish from the real one, which
-is the message-audit failure this project has a whole spec section about.
+The failure message blamed the wrong thing. `scripts/seed/workbook.ts` used to attribute a failed
+range write to the bytes it uploaded, on the reasoning that this is the first call requiring Graph
+to open the file as a workbook. The reasoning about call ordering was correct and the conclusion
+was still wrong: the bytes were fine, confirmed by downloading them back and by opening them in
+Excel for the web. The message named the one cause the code could not distinguish from the real
+one, which is the message-audit failure this project has a whole spec section about. Fixed by
+deleting the call rather than rewording the message: the range write, the number format call, the
+table add and the table rename are all gone, along with every message attached to them, because
+the whole populated workbook, table included, is now assembled in memory and uploaded once. There
+is no second or third `/workbook/` call left for a failure to be misattributed to.
 
-A workbook failure discards the execution report for work that succeeded. `runSeed` in
-`scripts/seed-library.ts` calls `executeSeed`, then `createSeedWorkbook`, and only then prints
+A workbook failure used to discard the execution report for work that succeeded. `runSeed` in
+`scripts/seed-library.ts` called `executeSeed`, then `createSeedWorkbook`, and only then printed
 `formatExecutionReport`. The tree was built, 121 folders and 143 files and roughly 264 Graph
 requests of real work, and the operator was told nothing about any of it, only that the workbook
-step failed. The count was recovered afterward by probing the library.
+step failed. The count was recovered afterward by probing the library. Fixed by printing the tree's
+own execution report as soon as `executeSeed` returns, before the workbook step runs at all;
+`formatExecutionReport` no longer takes a workbook request count, since at the point it prints, the
+workbook step has not observed one yet, and a separate `formatWorkbookReport` prints that count
+once `createSeedWorkbook` actually returns it.
 
 **What is still verified only against fakes.** Everything about the workbook, the reconciliation
 engine's behavior on live data, the composed tool's output, and the whole write-tool surface,
 which does not exist yet. The Microsoft Search cross-check is phase 2c and has not been started,
 so both scans above correctly reported themselves as degraded.
+
+**UPDATE 2026-09-17.** The workbook and the composed tool's output are no longer verified only
+against fakes; both were exercised in "The second live tenant sitting, 2026-09-17" below. The
+reconciliation engine's own correctness on live data still is not established, because that
+sitting's expectation was computed by running the same engine over the same plan in memory, so the
+two agree by construction on anything the engine gets wrong. The write-tool surface and the
+Microsoft Search cross-check remain as described above.
 
 ## BLOCKING: the Graph Excel API refuses app-only tokens, so phase 2b-1 cannot run as built
 
@@ -682,6 +703,12 @@ of phase 2b-1: the non-persistent session manager, the mapped range read, and
 own terms; the problem is that no session of either kind can be opened by this server at all. The
 reconciliation engine's second input therefore has no supplier, which blocks
 `reconcile_workbook_vs_repository` end to end even though phase 4a wired it.
+
+**UPDATE 2026-09-17.** The bytes-reader replacement (phase 2b-2, superseded section below)
+supplies the reconciliation engine's second input without opening an Excel session, and
+`reconcile_workbook_vs_repository` returned a report against a real library in "The second live
+tenant sitting, 2026-09-17" below. The last clause above, that this blocks the tool end to end, no
+longer holds; the rest of this finding, about the Excel API itself, is unaffected and still stands.
 
 **What is not affected.** Everything that reaches a file rather than a workbook. Path addressing,
 delta, the repository snapshot and `/content` download all work app-only under `Sites.Selected`,
@@ -754,7 +781,21 @@ in prose that the seeder's own workbook is the orphan it lists. That was the rig
 branch whose scope was the seeder, and it settles nothing about the product question. Step 7 of
 the phase 2a checklist above is where an operator meets this for the first time.
 
-## Phase 2b-1: covered only by fakes, 2026-09-14
+## SUPERSEDED: Phase 2b-1 covered only by fakes, 2026-09-14
+
+**SUPERSEDED 2026-09-16 by the workbook-bytes-reader phase (commits `8827fd5` through `b242ab2`),
+following from the BLOCKING finding above that the Graph Excel API refuses this server's app-only
+tokens.** The Excel session layer this entry describes, `src/graph/excel.ts`, is deleted along
+with its tests. Opening a non-persistent session, reading a table's range or a worksheet's used
+range through it, retrying once on an expired session, and closing it are none of them things
+this server does any more, or can do under the app-only identity model the Decision Record
+requires. `src/workbook/read.ts` still turns a grid into records and rejections the way this
+entry describes, but the grid now comes from parsing downloaded bytes rather than from a Graph
+range read, and `readWorkbookSnapshot` in `src/scan/workbook.ts` is recomposed onto that path. See
+the entry below for what is verified about the replacement.
+
+Original entry follows, describing a layer that no longer exists, kept for the history of how
+phase 2b was first built and then abandoned rather than as a current account of anything.
 
 Phase 2b-1, the workbook snapshot, has not been run against a real tenant. No Excel call has been
 made by this code, against a real workbook or otherwise. Everything below is verified against
@@ -781,6 +822,195 @@ layer's retry and close behavior against Graph's actual responses rather than a 
 Until that run happens, this phase's session-layer behavior, its rejection handling, and the
 snapshot assembly are known from reading the code and from tests against fakes only. None of it
 has been proven by use.
+
+## Phase 2b-2: covered only by fakes and hand-written fixtures, 2026-09-16
+
+The workbook-bytes reader that replaced phase 2b-1, per the design at
+`docs/superpowers/specs/2026-09-16-workbook-bytes-reader-design.md`, has not been run against a
+real tenant or a real Excel-produced workbook either. Everything below is verified against
+in-process fixtures, and nothing more should be read into it than that.
+
+**RUN AGAINST A REAL TENANT 2026-09-17.** See "The second live tenant sitting, 2026-09-17" below.
+The claim above was accurate when written. It no longer is: the bytes path downloaded a real
+workbook from a real SharePoint library and the production parser read it. What it read was the
+seeder's own generated bytes, not a workbook Excel itself produced, so the real-Excel-produced-
+workbook half of the claim above still stands; the Task 8 fixture below remains the only thing
+ever checked against bytes Excel wrote.
+
+**What is covered.** `src/graph/content.ts`'s `downloadDriveItem`, following the driveItem
+content redirect and dropping the bearer token before the second request, against a fake
+transport. `src/workbook/zip.ts`'s `readZipParts`, refusing an archive whose declared inflated
+size exceeds its cap by inspection, before inflating it. `src/workbook/cells.ts`'s `decodeCell`,
+the rejection rule itself: a formula with no cached value, an error cell, and a cell whose cached
+value is present but empty, all refuse rather than substitute. `src/workbook/sheet.ts`'s
+`sheetToGrid`, building a grid from cells by their own reference rather than position, and, since
+this branch's own whole-branch review, refusing a bounding box or a declared range whose area
+exceeds a fixed cell cap before allocating it. `src/workbook/xlsx.ts`'s `parseWorkbookGrid`,
+resolving a named table or worksheet through the workbook's own internal relationships and
+failing the read when `fullCalcOnLoad` is set over a range holding a formula. `readWorkbookGrid`
+in `src/workbook/read.ts`, unchanged in what it does, now fed by this path instead of a Graph
+range read. All of it against fixtures, all of it green, none of it against a real Excel workbook.
+
+**What the fixtures cannot show.** Every fixture the parser is tested against is hand-written XML
+in this repository's own test files, and the seeder's bytes in `scripts/seed/blank-workbook.ts`
+are hand-written too. The suite proves the reader agrees with what this repository believes Excel
+emits, and nothing more: a wrong assumption shared by the reader and every fixture author would
+pass every test here and still be wrong against a real workbook.
+
+**DONE 2026-09-16.** Task 8 of the phase 2b-2 plan, a binary fixture Excel itself produced,
+carrying a table, a formula, an `#N/A` and a date, is the artifact that would catch that, and it
+has landed. See "Task 8 done, and two more findings from the same evening, 2026-09-16" below for
+what it proved and what it did not. It no longer blocks live-run sign-off.
+
+Original paragraph follows, describing Task 8 as outstanding, kept for history.
+
+Task 8 of the phase 2b-2 plan, a binary fixture Excel itself produced, carrying a table, a
+formula, an `#N/A` and a date, is the one artifact that would catch that. It has not landed;
+`tests/workbook/fixtures/real-excel.xlsx` does not exist, and the operator has been asked for it.
+This is a blocker on live-run sign-off, not on merge: the design explicitly scoped it as the one
+task requiring a human-supplied artifact rather than something an implementing session could
+produce itself.
+
+**Why the live run has not happened.** The same synthetic tracking workbook `npm run seed-library`
+places in the site is now written directly as bytes (`scripts/seed/workbook.ts`, using
+`src/workbook/xlsx.ts`'s own `parseWorkbookGrid` to read its output back before upload) rather
+than built through Graph Excel calls, since those calls are what phase 2b-1 proved unreachable.
+Downloading that file and parsing it through `readWorkbookSnapshot` against a real tenant is the
+live verification this phase needs, and it has not happened in any implementing session to date.
+
+**RAN 2026-09-17.** It has now happened; see "The second live tenant sitting, 2026-09-17" below.
+The sentence above, that it has not happened in any implementing session to date, no longer holds.
+
+## Task 8 done, and two more findings from the same evening, 2026-09-16
+
+**Task 8 is complete.** `tests/workbook/fixtures/real-excel.xlsx` exists, produced by Excel for
+the web from a starter this repository generated, and `tests/workbook/xlsx.real.test.ts` pins the
+production parser against it. A reviewer unzipped the file and checked each assertion against its
+actual parts: a table named `ClientRoster` whose declared dimension is `A5:E7` resolves by name to
+row offset 5, header cells stored as shared string references resolve through Excel's own
+`sharedStrings.xml`, two cells Excel stored as `t="e"` with cached `#N/A` arrive as unevaluable
+rather than as empty values, and two cells holding a shared formula with cached results arrive as
+those results rather than being rejected. The file carries `docProps/app.xml`, `xl/calcChain.xml`
+and `xl/sharedStrings.xml`, none of which this repository's own writers produce. This is the
+paragraph in the Phase 2b-2 section above that named Task 8 as a blocker on live-run sign-off;
+that claim no longer holds.
+
+This is one workbook, and it settles less than a passing suite might suggest. It does not exercise
+an Excel date serial, because the operator's date values stayed text in the file, so that branch
+remains covered only by `excelSerialToIsoDate`'s unit tests. It says nothing about the live tenant
+path, and `reconcile_workbook_vs_repository` has still never returned a report against a real
+library.
+
+**UPDATE 2026-09-17.** The last sentence above no longer holds.
+`reconcile_workbook_vs_repository` has now returned a report against a real library; see "The
+second live tenant sitting, 2026-09-17" below. The date-serial gap is unaffected: the workbook read
+live was the seeder's own generated bytes, not one authored by Excel, so this remains the only
+thing ever checked against bytes Excel wrote, and it still does not exercise a date serial.
+
+**The seeder's production writer opens in real Excel.** `seededWorkbookBytes` in
+`scripts/seed/blank-workbook.ts` produces a workbook that Excel for the web opens. Verified
+2026-09-16 by generating a workbook with that function and having the operator open it in Excel,
+edit it and save it. This closes a concern Task 9's implementer had raised and could not settle at
+the time: the table XML was written to be well formed OOXML but had never been checked against
+real Excel. It now has been. The limit is the same shape as Task 8's: this proves Excel opens and
+rewrites the seeder's output, not that a seeded workbook has been read back from a tenant by the
+reconcile tool.
+
+**UPDATE 2026-09-17.** A seeded workbook has since been read back from a tenant by the reconcile
+tool; see "The second live tenant sitting, 2026-09-17" below. This paragraph's own finding is
+unaffected: it is still true, separately, that Excel itself opens and rewrites the seeder's output.
+
+**The hand-written fixture builder produces files Excel refuses to open.** Found the same way.
+`tests/workbook/xlsx-fixture.ts`, the test fixture builder the rest of the suite depends on,
+produces files Excel reports as possibly corrupt or in an unsupported format when opened directly.
+The cause is that it writes only the parts the parser needs, omitting `[Content_Types].xml`,
+`_rels/.rels` and `xl/styles.xml`, all of which Excel requires. This is not a defect in that
+builder: its job is exercising the parser rather than producing valid workbooks, and a parser
+tolerant of minimal input is reasonable. It is recorded because it sharpens what the hand-written
+fixtures in the Phase 2b-2 section above actually prove: they show the parser reads a reduced
+shape this repository constructs, and that shape is not merely different from what Excel emits, it
+is one Excel would reject. A green suite built only on those fixtures should be read with that in
+mind.
+
+## The second live tenant sitting, 2026-09-17
+
+Run against the `helloironwright` developer tenant, site `IronwrightTest`, library `Documents`,
+profile `profiles/synthetic.json`, on branch `phase-2b-2-workbook-bytes-reader`, with the suite at
+1555 tests across 108 files and all gates green. This is the sitting the runbook above, and the
+BLOCKING, Phase 2b-2 and Phase 4a sections, have been waiting on since 2026-09-16.
+
+**Step 3, the seeder, completed for the first time.** `npm run seed-library --confirm` processed
+121 folders and 143 files in 266 Graph requests, then replaced the tracking workbook in **2** Graph
+requests. The previous implementation needed five calls through the Graph Excel API and could not
+complete any of them; that is the BLOCKING finding above. Elapsed 63712 ms. The execution report
+printed before the workbook step, which is the ordering fix task 9 made, recorded in "The first
+live tenant sitting, 2026-09-16" above.
+
+**Steps 5 and 6, the scan.** An incremental scan reported 145 files and 122 folders in 3 Graph
+requests over 1 delta page, applying 267 changes with 4 write operations, against the Azure Table
+store running on Azurite.
+
+**Step 7 ran, for the first time in this project's history.** `reconcile_workbook_vs_repository`
+was called over Streamable HTTP against a running server and returned a report. `isError` false,
+2003 ms, 3 Graph requests for the call. The workbook was read through the new bytes path,
+provenance `"/Trackers/Operational Tracking Workbook.xlsx#ClientRoster in Documents"`, scan mode
+incremental, not resynced.
+
+**The comparison against the expectation the seeder printed.** Every count matched except one:
+
+| | predicted | live |
+|---|---|---|
+| clients | 13 | 13 |
+| artifacts | 156 | 156 |
+| non-compliant | 14 | 14 |
+| empty folders | 1 | 1 |
+| duplicates | 0 | 0 |
+| rejected workbook rows | 0 | 0 |
+| orphans | 1 | 2 |
+
+The non-compliant rows matched exactly: Client04 one missing, Client09 one misnamed, Client13
+twelve missing.
+
+The orphan difference is explained and was arranged deliberately, not a discrepancy. A file named
+`starter.xlsx` had been left in the library root earlier that evening, from the work that produced
+the Task 8 fixture above. Neither the seeder nor the engine had any knowledge of it, and it was
+correctly reported as a second unrecognized orphan. That is orphan detection working on a file
+genuinely unknown to the profile, not on one the fixture anticipated.
+
+**Also observed: the write gate hides write tools.** The server registered seven tools rather than
+ten. `IW_ALLOW_WRITES` was unset, and `selectTools` in `src/tools/registry.ts` filters tools of
+kind `write` when writes are disabled. The three absent tools were exactly `execute_rename_plan`,
+`execute_move_plan` and `replicate_template`. The two plan generators, `generate_rename_plan` and
+`generate_move_plan`, stayed visible, because they are kind `plan` rather than `write`. This is the
+first live confirmation of the outer layer of the two-layer write gate, and of the decision record
+that there are three tool kinds rather than two.
+
+**What this does and does not establish.** It establishes that the composed tool returns a correct
+report against a real library, through real Graph, a real downloaded and parsed xlsx, and real
+Azure Table Storage via Azurite; that the Excel-free seeder produces a workbook this server can
+read back; and that the write gate hides write tools. It does not establish that the reconciliation
+engine is correct. The expectation was computed by running the same engine over the same plan in
+memory, so the two agree by construction on anything the engine gets wrong. What a match checks is
+the layers a fake cannot reach: Graph, the xlsx parser, Azure Table Storage, and the tool's own
+composition. It also does not cover the Microsoft Search cross-check, which is phase 2c and
+unstarted, so the report correctly declared itself degraded. Azurite is not Azure Table Storage
+proper.
+
+**Step 9, the teardown, still has not run.** The grant issuer and the server application are both
+still live in the tenant and both still issue tokens, verified 2026-09-17. The two questions
+teardown exists to answer, whether the purge really empties **Deleted applications** and whether a
+service principal survives an application delete, remain unanswered.
+
+This sitting updates several claims made before it, listed here rather than left to be inferred
+from silence: the "Step 7 did not run, and cannot" paragraph and the "What is still verified only
+against fakes" paragraph in "The first live tenant sitting, 2026-09-16" above; the last clause of
+"What it invalidates" in the BLOCKING section above; the section framing and the "Why the live run
+has not happened" paragraph in "Phase 2b-2: covered only by fakes and hand-written fixtures"
+above; the last sentence of "The seeder's production writer opens in real Excel" and of "Task 8 is
+complete" in "Task 8 done, and two more findings from the same evening" above; and the framing and
+the "Why this matters beyond the usual disclaimer" paragraph in "Phase 4a: covered only by fakes,
+2026-09-14" below. Each has its own dated update note at its location rather than being edited
+away.
 
 ## Neither teardown mode can recover from its own partial purge failure
 
@@ -860,6 +1090,13 @@ and scan layer, phase 2b-1's Excel and workbook layer, and phase 3's reconciliat
 report this tool produces is exactly as unproven as those three inputs, and nothing in this slice
 changes that.
 
+**UPDATE 2026-09-17.** `reconcile_workbook_vs_repository` has since run against a real tenant and
+returned a report; see "The second live tenant sitting, 2026-09-17" above. The claim above, that
+no Graph call, no Excel call and no Azure Storage call had been made by this code, described the
+state through 2026-09-16 and no longer holds. What the "What is covered" list below still describes
+accurately is the unit-level test coverage; the tool composition as a whole has now been exercised
+live exactly once, which is a single data point, not a suite.
+
 **What is covered.** The handler contract and dispatch in `src/mcp/build-server.ts`. The profile
 registry's validation, duplicate-`profileId` detection, and unknown-id message, in
 `src/profiles/registry.ts`. The scan coordinator's join behavior, its zeroed Graph cost for a
@@ -874,6 +1111,12 @@ Excel, or Azure Table Storage.
 2b-1 are both waiting on now gates a third thing: whether the composed tool returns a report at
 all. Until that sitting happens, the claim that a caller can ask this server a compliance
 question and get a real answer is a design argument, not evidence.
+
+**UPDATE 2026-09-17.** That sitting happened. The composed tool returned a report against a real
+library; see "The second live tenant sitting, 2026-09-17" above. The claim that a caller can ask
+this server a compliance question and get a real answer is no longer only a design argument. It is
+still not evidence that the answer is correct: see that section's own statement of what the match
+does and does not establish.
 
 ## The cross-replica scan coordination gap
 

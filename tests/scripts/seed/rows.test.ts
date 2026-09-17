@@ -1,13 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { excelSerialToIsoDate } from "../../../src/workbook/read.js";
 import { buildSeedPlan, ABSENT_CLIENT } from "../../../scripts/seed-library.js";
-import {
-  excelDateSerial,
-  onboardedColumnAddress,
-  rangeAddress,
-  WORKBOOK_HEADERS,
-  workbookGrid,
-} from "../../../scripts/seed/rows.js";
+import { excelDateSerial, WORKBOOK_HEADERS, workbookGrid } from "../../../scripts/seed/rows.js";
 import { exampleSeedProfile } from "./fixtures.js";
 
 const options = { clientCount: 12, year: 2026, includeQuarterly: true, throughMonth: 9 };
@@ -48,13 +42,5 @@ describe("workbookGrid", () => {
   it("onboards every client on January 1 of the seeded year", () => {
     const grid = workbookGrid(buildSeedPlan(exampleSeedProfile(), options));
     for (const row of grid.slice(1)) expect(row[3]).toBe(excelDateSerial(2026, 1, 1));
-  });
-});
-
-describe("addresses", () => {
-  it("covers the header row and every client row", () => {
-    const plan = buildSeedPlan(exampleSeedProfile(), options);
-    expect(rangeAddress(plan)).toBe("A1:D14");
-    expect(onboardedColumnAddress(plan)).toBe("D2:D14");
   });
 });

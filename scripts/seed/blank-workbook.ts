@@ -1,11 +1,15 @@
 /**
- * The bytes of an empty single-sheet workbook.
+ * The bytes of a workbook this module assembles from scratch: either the
+ * empty single-sheet form (blankWorkbookBytes) or, with a grid and a table
+ * name, a populated one whose rows and table the production parser
+ * (src/workbook/xlsx.ts) can read back (seededWorkbookBytes). scripts/seed/
+ * workbook.ts uploads the populated form with one content PUT; there is no
+ * range write, table-add, or table-rename call after it, because the Graph
+ * Excel API that those calls would have used refuses this server's app-only
+ * tokens.
  *
  * Generated rather than committed as a binary so the artifact is reviewable in
- * a diff and testable, and so this repository stays text. The Excel API cannot
- * open a zero-byte file, and every call in scripts/seed/workbook.ts after the
- * upload requires Graph to open this as a workbook, so these bytes are the
- * precondition for all of it.
+ * a diff and testable, and so this repository stays text.
  *
  * Entries are stored rather than deflated: the parts total a few kilobytes, so
  * compression would buy nothing and add a second way to be wrong.
@@ -50,12 +54,15 @@ const WORKBOOK_RELS =
 const SHEET = `${XML_DECLARATION}<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>`;
 
 /**
- * A minimal style table. Five parts make a workbook that opens; this sixth
- * exists because the Onboarded column is written with a date number format,
- * and a workbook carrying no style table at all is the case most likely to
- * make that call fail for a reason this project does not own. Two fills
- * rather than one: the none/gray125 pair is what every Excel-written file
- * carries, and readers have been known to assume it.
+ * A minimal style table. A workbook carrying no style table at all is the
+ * kind of file most likely to be refused for a reason this project does not
+ * own, so this part ships even though nothing written here asks for a
+ * non-default style: the Onboarded column is written as ISO text rather than
+ * a number carrying a date format, so no cellXfs entry beyond the default is
+ * needed (see the comment on the Onboarded column conversion in
+ * scripts/seed/workbook.ts). Two fills rather than one: the none/gray125 pair
+ * is what every Excel-written file carries, and readers have been known to
+ * assume it.
  */
 const STYLES =
   `${XML_DECLARATION}<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">` +
@@ -97,11 +104,15 @@ function u32(value: number): number[] {
   return [value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff];
 }
 
-export function blankWorkbookBytes(): Uint8Array {
+/**
+ * Assembles a set of parts into zip bytes. Shared by the empty and the
+ * populated workbook, because the two differ only in which parts they carry,
+ * never in how a part becomes a zip entry.
+ */
+function zipFromParts(entries: Part[]): Uint8Array {
   const encoder = new TextEncoder();
   const local: number[] = [];
   const central: number[] = [];
-  const entries = parts();
 
   for (const part of entries) {
     const name = encoder.encode(part.name);
@@ -158,4 +169,152 @@ export function blankWorkbookBytes(): Uint8Array {
   ];
 
   return Uint8Array.from([...local, ...central, ...end]);
+}
+
+export function blankWorkbookBytes(): Uint8Array {
+  return zipFromParts(parts());
+}
+
+// ---------------------------------------------------------------------------
+// The populated form: a grid of rows written into xl/worksheets/sheet1.xml, a
+// table defined over the grid's own used range in xl/tables/table1.xml, and
+// the worksheet relationship and sheetData <tableParts> entry that connect
+// the two. This is what scripts/seed/workbook.ts uploads in place of the
+// blank form followed by a range write, a table add and a table rename: those
+// three calls all went through the Graph Excel API's /workbook/ surface,
+// which app-only tokens cannot reach, so the whole table now has to exist in
+// the uploaded bytes rather than be built by a sequence of calls against them.
+// ---------------------------------------------------------------------------
+
+const NS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+const NS_R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const NS_PACKAGE_RELATIONSHIPS = "http://schemas.openxmlformats.org/package/2006/relationships";
+
+const TABLE_PART_NAME = "xl/tables/table1.xml";
+const WORKSHEET_RELS_PART_NAME = "xl/worksheets/_rels/sheet1.xml.rels";
+
+const POPULATED_SHEET_RELATIONSHIP_ID = "rId1";
+
+/**
+ * Escapes the four characters this writer cannot leave literal in the XML it
+ * produces: `&` and `<`, which XML never allows literal in element or
+ * attribute content, plus `>` and `"`, escaped here even where the format
+ * would tolerate them literal, because every value this function receives
+ * can end up inside a double-quoted attribute value (a table's `name` and
+ * `displayName`) as well as element content, and only escaping both keeps
+ * one function safe for both call sites rather than one per context.
+ */
+function escapeXmlText(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/** A 0 based column index read back as a spreadsheet column letter, so index 0 is "A". */
+function columnLetter(index: number): string {
+  let remaining = index + 1;
+  let label = "";
+  while (remaining > 0) {
+    const digit = (remaining - 1) % 26;
+    label = String.fromCharCode(65 + digit) + label;
+    remaining = Math.floor((remaining - 1) / 26);
+  }
+  return label;
+}
+
+function cellXml(rowNumber: number, columnIndex: number, value: string | number): string {
+  const ref = `${columnLetter(columnIndex)}${String(rowNumber)}`;
+  // Every value seededWorkbookBytes actually receives is a string: workbook.ts
+  // converts the Onboarded column's serial to ISO text before calling here
+  // (see the comment there), and every other column is text already. The
+  // numeric branch is kept so this function stays honest about the grid type
+  // it declares it accepts, rather than silently assuming a caller never
+  // passes a number.
+  if (typeof value === "number") return `<c r="${ref}"><v>${String(value)}</v></c>`;
+  return `<c r="${ref}" t="inlineStr"><is><t>${escapeXmlText(value)}</t></is></c>`;
+}
+
+function rowXml(rowNumber: number, cells: (string | number)[]): string {
+  const cellsXml = cells.map((cell, columnIndex) => cellXml(rowNumber, columnIndex, cell)).join("");
+  return `<row r="${String(rowNumber)}">${cellsXml}</row>`;
+}
+
+/** "A1:D14" for a 14 row, 4 column grid: the whole grid is the table's used range. */
+function usedRangeRef(grid: (string | number)[][]): string {
+  const firstRow = grid[0];
+  if (grid.length === 0 || firstRow === undefined || firstRow.length === 0) {
+    throw new Error("seededWorkbookBytes requires a grid with at least one header row and one column.");
+  }
+  return `A1:${columnLetter(firstRow.length - 1)}${String(grid.length)}`;
+}
+
+function populatedSheetXml(grid: (string | number)[][]): string {
+  const rows = grid.map((cells, index) => rowXml(index + 1, cells)).join("");
+  return (
+    `${XML_DECLARATION}<worksheet xmlns="${NS_MAIN}" xmlns:r="${NS_R}"><sheetData>${rows}</sheetData>` +
+    `<tableParts count="1"><tablePart r:id="${POPULATED_SHEET_RELATIONSHIP_ID}"/></tableParts></worksheet>`
+  );
+}
+
+function worksheetRelsXml(): string {
+  return (
+    `${XML_DECLARATION}<Relationships xmlns="${NS_PACKAGE_RELATIONSHIPS}">` +
+    `<Relationship Id="${POPULATED_SHEET_RELATIONSHIP_ID}" Type="${NS_R}/table" Target="../tables/table1.xml"/>` +
+    "</Relationships>"
+  );
+}
+
+/**
+ * tableColumns is required for the part to be a well formed table definition,
+ * not merely a part the parser this project wrote happens to tolerate: a real
+ * copy of Excel opening this file needs one <tableColumn> per header, in
+ * order, or it treats the table as damaged. The header row (grid[0]) is that
+ * list, because workbookGrid always writes it first.
+ */
+function tableXml(tableName: string, ref: string, headers: (string | number)[]): string {
+  const columns = headers
+    .map((header, index) => `<tableColumn id="${String(index + 1)}" name="${escapeXmlText(String(header))}"/>`)
+    .join("");
+  return (
+    `${XML_DECLARATION}<table xmlns="${NS_MAIN}" id="1" name="${tableName}" displayName="${tableName}" ` +
+    `ref="${ref}" totalsRowShown="0"><autoFilter ref="${ref}"/>` +
+    `<tableColumns count="${String(headers.length)}">${columns}</tableColumns>` +
+    '<tableStyleInfo showFirstColumn="0" showLastColumn="0" showRowStripes="1" showColumnStripes="0"/></table>'
+  );
+}
+
+function contentTypesXmlWithTable(): string {
+  return CONTENT_TYPES.replace(
+    "</Types>",
+    `<Override PartName="/${TABLE_PART_NAME}" ` +
+      'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/></Types>',
+  );
+}
+
+function populatedParts(grid: (string | number)[][], tableName: string): Part[] {
+  const encoder = new TextEncoder();
+  const ref = usedRangeRef(grid);
+  const headers = grid[0] ?? [];
+
+  return [
+    { name: "[Content_Types].xml", bytes: encoder.encode(contentTypesXmlWithTable()) },
+    { name: "_rels/.rels", bytes: encoder.encode(ROOT_RELS) },
+    { name: "xl/workbook.xml", bytes: encoder.encode(WORKBOOK) },
+    { name: "xl/_rels/workbook.xml.rels", bytes: encoder.encode(WORKBOOK_RELS) },
+    { name: "xl/worksheets/sheet1.xml", bytes: encoder.encode(populatedSheetXml(grid)) },
+    { name: WORKSHEET_RELS_PART_NAME, bytes: encoder.encode(worksheetRelsXml()) },
+    { name: TABLE_PART_NAME, bytes: encoder.encode(tableXml(tableName, ref, headers)) },
+    { name: "xl/styles.xml", bytes: encoder.encode(STYLES) },
+  ];
+}
+
+/**
+ * A populated, tabled workbook: the grid's rows in xl/worksheets/sheet1.xml,
+ * a table named tableName defined over the grid's own used range in
+ * xl/tables/table1.xml, and the worksheet relationship and <tableParts>
+ * entry that connect the two. Every cell workbook.ts hands here is already
+ * text, including the Onboarded column, which workbook.ts converts from an
+ * Excel date serial to ISO text before calling in (see the comment there for
+ * why).
+ */
+export function seededWorkbookBytes(grid: (string | number)[][], tableName: string): Uint8Array {
+  return zipFromParts(populatedParts(grid, tableName));
 }

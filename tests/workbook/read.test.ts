@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { excelSerialToIsoDate, readWorkbookGrid } from "../../src/workbook/read.js";
+import { UNEVALUABLE } from "../../src/workbook/cells.js";
 import { loadProfile } from "../../src/domain/profile/load.js";
 import { readFileSync } from "node:fs";
 
@@ -36,6 +37,19 @@ describe("readWorkbookGrid", () => {
     );
 
     expect(result.rows[0]?.fields.Notes).toBeUndefined();
+  });
+
+  it("ignores an unevaluable cell in a column the mapping does not name", () => {
+    // The mapping never reads this column, so a cell the parser could not
+    // read from it is nobody's problem here.
+    const result = readWorkbookGrid(
+      [[...HEADER, "Notes"], ["CLIENTA", true, false, 45231, UNEVALUABLE]],
+      PROFILE,
+    );
+
+    expect(result.rejectedRows).toEqual([]);
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]?.client).toBe("CLIENTA");
   });
 
   it("puts effectiveFrom on its own field rather than into fields", () => {

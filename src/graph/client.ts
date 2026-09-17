@@ -1,4 +1,4 @@
-import { GraphRequestError } from "./errors.js";
+import { GraphRequestError, GraphResponseTooLargeError } from "./errors.js";
 import { defaultRetryPolicy, isRetriableStatus, withRetry, type RetryPolicy } from "./retry.js";
 import { TokenRequestError, type TokenProvider } from "./token.js";
 
@@ -23,6 +23,16 @@ export const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 export interface GraphClient {
   get<T>(pathOrUrl: string, headers?: Record<string, string>): Promise<T>;
   post<T>(pathOrUrl: string, body?: unknown, headers?: Record<string, string>): Promise<T>;
+  /**
+   * Bytes rather than JSON, for driveItem content. It goes through this client
+   * rather than a bare fetch so the request counter and the Retry-After policy
+   * still apply: the scan reports that count, and a download that bypassed it
+   * would make the reported number wrong. `maxBytes`, when given, is enforced
+   * twice inside this call: against a declared Content-Length before the body
+   * is read, and against the bytes actually received afterward, because a
+   * missing or untruthful header must not be the only guard.
+   */
+  getBytes(pathOrUrl: string, maxBytes?: number): Promise<Uint8Array>;
   /** Requests issued since creation, retries included. This is the number the scan reports. */
   requests(): number;
 }
@@ -93,6 +103,18 @@ export function createGraphClient(options: GraphClientOptions): GraphClient {
     };
   }
 
+  async function sendForBytes(url: string, withAuth: boolean): Promise<Response> {
+    requests += 1;
+    // accept is not set to application/json here: this request wants the file,
+    // not a Graph JSON envelope. redirect is manual rather than followed by
+    // fetch itself, because the follow below must drop the bearer token before
+    // the second request, and fetch's automatic follow would resend it.
+    const headers: Record<string, string> = withAuth
+      ? { authorization: `Bearer ${await options.tokenProvider.getToken()}` }
+      : {};
+    return fetchImpl(url, { method: "GET", headers, redirect: "manual" });
+  }
+
   async function request<T>(pathOrUrl: string, requestOptions: RequestOptions): Promise<T> {
     const url = pathOrUrl.startsWith("https://") ? pathOrUrl : `${GRAPH_BASE}${pathOrUrl}`;
     // Sliced only when the prefix is genuinely there. A blind slice of the
@@ -137,6 +159,68 @@ export function createGraphClient(options: GraphClientOptions): GraphClient {
         ...(body === undefined ? {} : { body }),
         ...(headers === undefined ? {} : { headers }),
       });
+    },
+
+    async getBytes(pathOrUrl: string, maxBytes?: number): Promise<Uint8Array> {
+      const url = pathOrUrl.startsWith("https://") ? pathOrUrl : `${GRAPH_BASE}${pathOrUrl}`;
+      const label = url.startsWith(GRAPH_BASE) ? url.slice(GRAPH_BASE.length) : url;
+
+      const first = await withRetry(
+        retry,
+        () => sendForBytes(url, true),
+        (value) => ({ retriable: isRetriableStatus(value.status), retryAfter: value.headers.get("retry-after") }),
+        isRetriableTransportError,
+      );
+
+      let response = first;
+      if (first.status >= 300 && first.status < 400) {
+        const location = first.headers.get("location");
+        if (location === null || location.length === 0) {
+          throw new Error(
+            `Graph GET ${label} answered ${String(first.status)} with no location header, so there is nowhere to ` +
+              "follow. A redirect without a target is a malformed response rather than a missing file.",
+          );
+        }
+        // Deliberately without the bearer token. The redirect target is a
+        // pre-authenticated storage URL that needs no credential, and sending
+        // one would deliver a Graph bearer token to a host that is not Graph.
+        response = await withRetry(
+          retry,
+          () => sendForBytes(location, false),
+          (value) => ({ retriable: isRetriableStatus(value.status), retryAfter: value.headers.get("retry-after") }),
+          isRetriableTransportError,
+        );
+      }
+
+      if (response.status < 200 || response.status >= 300) {
+        throw new GraphRequestError({
+          method: "GET",
+          path: label,
+          status: response.status,
+          body: await response.text(),
+        });
+      }
+
+      // Checked against the header before the body is read, because a body
+      // large enough to exceed the cap is also large enough that reading it
+      // into memory before discarding it defeats the reason for the cap.
+      if (maxBytes !== undefined) {
+        const declared = response.headers.get("content-length");
+        if (declared !== null && Number(declared) > maxBytes) {
+          throw new GraphResponseTooLargeError({ path: label, bytes: Number(declared), maxBytes });
+        }
+      }
+
+      const bytes = new Uint8Array(await response.arrayBuffer());
+
+      // Checked again after the read: a missing or untruthful Content-Length
+      // must not be the only guard, since the header is server-declared and
+      // this server has no control over what a storage host sends.
+      if (maxBytes !== undefined && bytes.length > maxBytes) {
+        throw new GraphResponseTooLargeError({ path: label, bytes: bytes.length, maxBytes });
+      }
+
+      return bytes;
     },
   };
 }

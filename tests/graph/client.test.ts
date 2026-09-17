@@ -61,19 +61,19 @@ describe("createGraphClient", () => {
       tokenProvider: TOKEN,
       fetchImpl: (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
         seen.push(new Request(input as string, init));
-        return new Response(JSON.stringify({ id: "session-1" }), { status: 200 });
+        return new Response(JSON.stringify({ id: "copy-job-1" }), { status: 200 });
       }) as typeof fetch,
     });
 
-    const value = await client.post<{ id: string }>("/drives/d1/items/i1/workbook/createSession", {
-      persistChanges: false,
+    const value = await client.post<{ id: string }>("/drives/d1/items/i1/copy", {
+      name: "renamed.txt",
     });
 
-    expect(value.id).toBe("session-1");
+    expect(value.id).toBe("copy-job-1");
     expect(seen[0]?.method).toBe("POST");
     expect(seen[0]?.headers.get("authorization")).toBe("Bearer token-1");
     expect(seen[0]?.headers.get("content-type")).toBe("application/json");
-    await expect(seen[0]?.text()).resolves.toBe(JSON.stringify({ persistChanges: false }));
+    await expect(seen[0]?.text()).resolves.toBe(JSON.stringify({ name: "renamed.txt" }));
   });
 
   it("sends per-call headers alongside the ones it always sets", async () => {
@@ -86,10 +86,49 @@ describe("createGraphClient", () => {
       }) as typeof fetch,
     });
 
-    await client.get("/drives/d1/items/i1/workbook/tables/T/range", { "workbook-session-id": "s-1" });
+    await client.get("/drives/d1/items/i1/thumbnails", { "x-test-trace-id": "trace-1" });
 
-    expect(seen[0]?.headers.get("workbook-session-id")).toBe("s-1");
+    expect(seen[0]?.headers.get("x-test-trace-id")).toBe("trace-1");
     expect(seen[0]?.headers.get("authorization")).toBe("Bearer token-1");
+  });
+
+  it("gets bytes without asking for a JSON accept header", async () => {
+    const seen: Request[] = [];
+    const client = createGraphClient({
+      tokenProvider: TOKEN,
+      fetchImpl: (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+        seen.push(new Request(input as string, init));
+        return new Response(new Uint8Array([9, 8, 7]), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    const bytes = await client.getBytes("/drives/d1/items/i1/content");
+
+    expect(Array.from(bytes)).toEqual([9, 8, 7]);
+    expect(seen[0]?.url).toBe("https://graph.microsoft.com/v1.0/drives/d1/items/i1/content");
+    expect(seen[0]?.headers.get("authorization")).toBe("Bearer token-1");
+    expect(seen[0]?.headers.get("accept")).toBeNull();
+  });
+
+  it("retries a 429 on getBytes and counts every request through the same counter", async () => {
+    const statuses = [429, 200];
+    let call = 0;
+    const client = createGraphClient({
+      tokenProvider: TOKEN,
+      retry: defaultRetryPolicy({ sleep: async () => {}, now: () => 0 }),
+      fetchImpl: (async () => {
+        const status = statuses[call] ?? 200;
+        call += 1;
+        return new Response(new Uint8Array([1]), {
+          status,
+          headers: status === 429 ? { "retry-after": "0" } : {},
+        });
+      }) as typeof fetch,
+    });
+
+    await client.getBytes("/drives/d1/items/i1/content");
+
+    expect(client.requests()).toBe(2);
   });
 
   it("omits a body and its content type when a POST has none", async () => {
@@ -104,7 +143,7 @@ describe("createGraphClient", () => {
       }) as typeof fetch,
     });
 
-    await client.post("/drives/d1/items/i1/workbook/closeSession", undefined, { "workbook-session-id": "s-1" });
+    await client.post("/drives/d1/items/i1/checkin", undefined, { "x-test-trace-id": "trace-1" });
 
     expect(seen[0]?.headers.get("content-type")).toBeNull();
   });

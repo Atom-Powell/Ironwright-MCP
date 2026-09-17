@@ -46,8 +46,15 @@ interface DriveListing {
   value?: Array<{ id?: unknown; name?: unknown }>;
 }
 
+/**
+ * Narrowed to `get` alone, which is the only member this function calls (the
+ * site lookup and the drive listing, both below). A caller whose own client
+ * cannot download content, such as the seeder's write-only client, still has
+ * a library to resolve, and a parameter typed as the full `GraphClient` would
+ * force it to carry a `getBytes` it never uses just to call this function.
+ */
 export async function resolveDrive(
-  client: GraphClient,
+  client: Pick<GraphClient, "get">,
   siteUrl: string,
   library: string,
 ): Promise<DriveLocation> {

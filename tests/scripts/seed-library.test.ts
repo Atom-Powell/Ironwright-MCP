@@ -10,6 +10,7 @@ import {
   executeSeed,
   formatDryRunReport,
   formatExecutionReport,
+  formatWorkbookReport,
   loadSeedProfile,
   MISNAMED_FILE_CLIENT,
   MISNAMED_FILE_MONTH,
@@ -131,25 +132,25 @@ describe("buildSeedTree", () => {
 });
 
 describe("estimateGraphRequests", () => {
-  it("adds the workbook's fixed five calls plus one createFolder per ancestor segment of its path", () => {
+  it("adds the workbook's fixed one call plus one createFolder per ancestor segment of its path", () => {
     const tree = buildSeedTree(exampleSeedProfile(), { clientCount: 2, year: 2026, includeQuarterly: true, throughMonth: 12 });
 
     expect(estimateGraphRequests(tree, "/Trackers/Operational Tracking Workbook.xlsx")).toBe(
-      2 + tree.folderPaths.length + tree.filePaths.length + 6,
+      2 + tree.folderPaths.length + tree.filePaths.length + 2,
     );
   });
 
-  it("costs five, not six, for a workbook sitting at the library root", () => {
+  it("costs one, not two, for a workbook sitting at the library root", () => {
     const tree = buildSeedTree(exampleSeedProfile(), { clientCount: 2, year: 2026, includeQuarterly: true, throughMonth: 12 });
 
-    expect(estimateGraphRequests(tree, "/Tracker.xlsx")).toBe(2 + tree.folderPaths.length + tree.filePaths.length + 5);
+    expect(estimateGraphRequests(tree, "/Tracker.xlsx")).toBe(2 + tree.folderPaths.length + tree.filePaths.length + 1);
   });
 
   it("costs one more request for each additional level the workbook is nested", () => {
     const tree = buildSeedTree(exampleSeedProfile(), { clientCount: 2, year: 2026, includeQuarterly: true, throughMonth: 12 });
 
     expect(estimateGraphRequests(tree, "/A/B/C/Tracker.xlsx")).toBe(
-      2 + tree.folderPaths.length + tree.filePaths.length + 8,
+      2 + tree.folderPaths.length + tree.filePaths.length + 4,
     );
   });
 });
@@ -375,26 +376,33 @@ describe("buildSeedPlan", () => {
 });
 
 describe("formatExecutionReport", () => {
-  it("reports the tree's counts and the workbook's request count as separate lines", () => {
+  it("reports the tree's own counts, with no workbook request count in it", () => {
+    // formatExecutionReport no longer takes a workbookRequests value at all:
+    // runSeed calls it as soon as executeSeed returns, before the workbook
+    // step has run, so there is no such count for it to state yet. See its
+    // own comment in scripts/seed-library.ts for the sitting that ordering
+    // fixes.
     const lines = formatExecutionReport({
       driveId: "drive-1",
       foldersProcessed: 5,
       filesProcessed: 7,
       graphRequests: 14,
       elapsedMs: 250,
-      workbookRequests: 6,
     }).join("\n");
 
     expect(lines).toMatch(/drive-1/);
     expect(lines).toMatch(/Folders processed: 5/);
     expect(lines).toMatch(/Files processed: 7/);
-    // The tree's own count (14) and the workbook's (6) never sum to one
-    // number in the output: that would bury the count this script exists to
-    // let an operator measure inside a total that also depends on how deep
-    // the workbook happens to be nested.
     expect(lines).toMatch(/tree: 14/);
-    expect(lines).toMatch(/workbook: 6/);
     expect(lines).toMatch(/250ms/);
+    expect(lines).not.toMatch(/workbook/i);
+  });
+});
+
+describe("formatWorkbookReport", () => {
+  it("states the workbook's own request count on its own line", () => {
+    const lines = formatWorkbookReport(6).join("\n");
+    expect(lines).toMatch(/workbook: 6/);
   });
 });
 
@@ -428,11 +436,12 @@ function fakeSeedClient(driveName: string): { client: SeedGraphClient; calls: st
       return { status: 201 };
     },
     // post, putBytes and patch answer for real, unlike the get/createFolder/
-    // createFile branches' earlier not-implemented stand-ins, because
-    // createSeedWorkbook (scripts/seed/workbook.ts) drives all three: the
-    // table-add POST, the blank-workbook PUT, and the range/format/rename
-    // PATCHes. A fake that threw on any of them could no longer stand in for
-    // a confirmed run once runSeed always seeds the workbook after the tree.
+    // createFile branches' earlier not-implemented stand-ins. createSeedWorkbook
+    // (scripts/seed/workbook.ts) drives only putBytes today, the workbook's one
+    // content upload; post and patch are implemented anyway because
+    // SeedGraphClient declares them, and a stub that throws would be a client
+    // claiming a capability it silently refuses, the same reasoning
+    // createSeedGraphClient's own post implementation documents.
     post: async <T,>(path: string): Promise<T> => {
       requestCount += 1;
       calls.push(`POST:${path}`);
@@ -582,6 +591,41 @@ describe("runSeed with the workbook", () => {
       log: (line) => lines.push(line),
     });
     expect(lines.join("\n")).toContain("Expected report from the live reconciliation tool");
+  });
+
+  it("prints the execution report for the tree even when the workbook step then fails", async () => {
+    // This is the 2026-09-16 sitting's second seeder defect, from
+    // docs/OPEN-ITEMS.md: the workbook step failed and the operator was told
+    // nothing about the 121 folders and 143 files that executeSeed had, by
+    // then, already written. putBytes fails here to stand in for that
+    // failure; everything else about the client answers normally, so the
+    // tree step succeeds before the workbook step is even attempted.
+    const lines: string[] = [];
+    const { client } = fakeSeedClient("Compliance Reports");
+    const workbookFailingClient: SeedGraphClient = {
+      ...client,
+      putBytes: async () => {
+        throw new Error("simulated workbook upload failure");
+      },
+    };
+
+    await expect(
+      runSeed(["--profile", "examples/profiles/example.json", "--confirm"], {
+        readProfileFile: async () => JSON.parse(readFileSync("examples/profiles/example.json", "utf8")) as unknown,
+        createGraphClient: () => workbookFailingClient,
+        now: () => new Date("2026-09-15T00:00:00Z"),
+        log: (line) => lines.push(line),
+      }),
+    ).rejects.toThrow(/simulated workbook upload failure/);
+
+    const report = lines.join("\n");
+    expect(report).toMatch(/Seed complete/);
+    expect(report).toMatch(/Folders processed: \d+/);
+    expect(report).toMatch(/Files processed: \d+/);
+    // The workbook step never returned a request count, so nothing printed
+    // here claims one: a count this function has not observed is exactly the
+    // kind of assertion this project treats as a first class defect.
+    expect(report).not.toMatch(/Graph requests issued to replace the workbook/);
   });
 
   it("refuses a profile that fails the full schema before the dry run prints anything", async () => {

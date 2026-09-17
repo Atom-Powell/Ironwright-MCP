@@ -37,11 +37,3 @@ export function workbookGrid(plan: SeedPlan): (string | number)[][] {
     ...plan.workbookClients.map((client) => [client, OWED, OWED, onboarded]),
   ];
 }
-
-export function rangeAddress(plan: SeedPlan): string {
-  return `A1:D${plan.workbookClients.length + 1}`;
-}
-
-export function onboardedColumnAddress(plan: SeedPlan): string {
-  return `D2:D${plan.workbookClients.length + 1}`;
-}

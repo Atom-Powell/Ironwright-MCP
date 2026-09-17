@@ -110,6 +110,12 @@ export const DeliverableSchema = z.object({
 
 export const WorkbookMappingSchema = z.object({
   source: z.object({ kind: z.enum(["table", "worksheet"]), name: z.string().min(1) }),
+  // Relative to the range that was read (the table's own rows, or a
+  // worksheet's used range), not to the sheet: 1 names the first row of
+  // whichever range `source` resolves to. This is measured differently from
+  // `RejectedWorkbookRow.row`, which is the sheet's own absolute row number,
+  // so an operator reading "row 13 rejected" against a `headerRow` of 1 is
+  // reading two different rulers.
   headerRow: z.number().int().positive(),
   // `client` is required; any other key is a caller-chosen field name that
   // deliverables and the window reference by key rather than by column header,
