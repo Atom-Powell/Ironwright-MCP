@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { describeToolFailure } from "../../src/tools/errors.js";
 import { UnknownProfileError } from "../../src/profiles/registry.js";
 import { LibraryNotFoundError } from "../../src/graph/drive.js";
-import { WorkbookFileError, WorkbookMappingError } from "../../src/workbook/errors.js";
+import { WorkbookFileError, WorkbookMappingError, WorkbookUnreadableError } from "../../src/workbook/errors.js";
 import { GraphRequestError } from "../../src/graph/errors.js";
 import { TokenRequestError } from "../../src/graph/token.js";
 
@@ -52,6 +52,17 @@ describe("describeToolFailure", () => {
     expect(message).toContain(original);
     expect(message).toContain("about the workbook file itself");
     expect(message).not.toContain("workbook mapping in profile");
+  });
+
+  it("names both possibilities for an unreadable workbook without asserting either", () => {
+    const original = "The downloaded file is not a zip archive, so it is not an xlsx workbook.";
+
+    const message = describeToolFailure(new WorkbookUnreadableError(original), SUBJECT);
+
+    expect(message).toContain(original);
+    expect(message).toContain('profile "example"\'s workbookPath naming a file that was never a workbook');
+    expect(message).toContain("truncated or corrupted in transit");
+    expect(message).toContain("Open the file at that path to see which");
   });
 
   it("reports a Graph failure by status, code and request, and guesses at no cause", () => {

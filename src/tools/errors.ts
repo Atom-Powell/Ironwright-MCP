@@ -1,7 +1,7 @@
 import { GraphRequestError } from "../graph/errors.js";
 import { LibraryNotFoundError } from "../graph/drive.js";
 import { TokenRequestError } from "../graph/token.js";
-import { WorkbookFileError, WorkbookMappingError } from "../workbook/errors.js";
+import { WorkbookFileError, WorkbookMappingError, WorkbookUnreadableError } from "../workbook/errors.js";
 import { UnknownProfileError } from "../profiles/registry.js";
 
 /**
@@ -54,6 +54,23 @@ export function describeToolFailure(error: unknown, subject: FailureSubject): st
     // Sending an operator to edit a profile that is not wrong wastes the
     // one thing this message can usefully spend, which is where to look.
     return `${error.message} This is about the workbook file itself, not about how profile "${subject.profileId}" is configured.`;
+  }
+
+  if (error instanceof WorkbookUnreadableError) {
+    // Neither of the two attributions above fits here, and asserting either
+    // would assert something this server never observed: it only knows the
+    // downloaded bytes did not open as a workbook, not whether that is
+    // because profile "X"'s workbookPath names the wrong file or because the
+    // download arrived damaged. So this names both possibilities rather than
+    // picking one, and gives the operator the one thing that tells them
+    // apart: the profile's workbookPath is a real path, and opening the file
+    // it names is what a mapping problem and a damaged download cannot both
+    // survive.
+    return (
+      `${error.message} This could be profile "${subject.profileId}"'s workbookPath naming a file that was ` +
+      "never a workbook, or it could be a workbook download that was truncated or corrupted in transit. Open " +
+      "the file at that path to see which."
+    );
   }
 
   if (error instanceof TokenRequestError) {
