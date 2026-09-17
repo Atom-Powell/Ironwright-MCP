@@ -8,6 +8,7 @@ function throwingClient(error: unknown): GraphClient {
     requests: () => 1,
     get: async () => { throw error; },
     post: async () => { throw error; },
+    getBytes: async () => { throw error; },
   };
 }
 
@@ -34,6 +35,7 @@ describe("deltaPages failures", () => {
       requests: () => 1,
       get: async () => ({ value: [] }) as never,
       post: async () => { throw new Error("this fake does not implement post"); },
+      getBytes: async () => { throw new Error("this fake does not implement getBytes"); },
     };
     const iterator = deltaPages(client, "d1");
     await expect(iterator.next()).rejects.toThrow(/neither @odata.nextLink nor @odata.deltaLink/);

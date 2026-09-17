@@ -37,6 +37,7 @@ describe("readWorkbookRange failures", () => {
         if (path === CLOSE_PATH) return undefined as T;
         throw new Error(`unexpected post ${path}`);
       },
+      getBytes: async (): Promise<Uint8Array> => { throw new Error("this fake does not implement getBytes"); },
     };
 
     const values = await readWorkbookRange(client, {
@@ -69,6 +70,7 @@ describe("readWorkbookRange failures", () => {
         if (path === CLOSE_PATH) return undefined as T;
         throw new Error(`unexpected post ${path}`);
       },
+      getBytes: async (): Promise<Uint8Array> => { throw new Error("this fake does not implement getBytes"); },
     };
 
     await expect(
@@ -100,6 +102,7 @@ describe("readWorkbookRange failures", () => {
         if (path === CLOSE_PATH) return undefined as T;
         throw new Error(`unexpected post ${path}`);
       },
+      getBytes: async (): Promise<Uint8Array> => { throw new Error("this fake does not implement getBytes"); },
     };
 
     await expect(
@@ -136,6 +139,7 @@ describe("readWorkbookRange failures", () => {
         if (path === CLOSE_PATH) return undefined as T;
         throw new Error(`unexpected post ${path}`);
       },
+      getBytes: async (): Promise<Uint8Array> => { throw new Error("this fake does not implement getBytes"); },
     };
   }
 
@@ -177,6 +181,7 @@ describe("readWorkbookRange failures", () => {
         if (path === CLOSE_PATH) throw new GraphRequestError({ method: "POST", path, status: 500, body: "close failed" });
         throw new Error(`unexpected post ${path}`);
       },
+      getBytes: async (): Promise<Uint8Array> => { throw new Error("this fake does not implement getBytes"); },
     };
 
     const values = await readWorkbookRange(client, {

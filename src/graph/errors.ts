@@ -27,6 +27,33 @@ export class GraphRequestError extends Error {
 }
 
 /**
+ * A driveItem's content has no range read available to this server, because the
+ * Graph Excel API refuses an app-only token and the whole file is downloaded
+ * instead. Nothing else caps the size of that download, so this error stands
+ * in for a limit Graph does not enforce on this path. It fires from two
+ * different checks in `getBytes`: one against a declared Content-Length, which
+ * can be absent or untruthful, and one against the bytes actually received, so
+ * a caller sees the same message regardless of which check caught it.
+ */
+export class GraphResponseTooLargeError extends Error {
+  readonly path: string;
+  readonly bytes: number;
+  readonly maxBytes: number;
+
+  constructor(args: { path: string; bytes: number; maxBytes: number }) {
+    const maxMegabytes = args.maxBytes / (1024 * 1024);
+    super(
+      `Graph GET ${args.path} is ${String(args.bytes)} bytes, larger than the ${String(maxMegabytes)} MB ` +
+        "this server will download.",
+    );
+    this.name = "GraphResponseTooLargeError";
+    this.path = args.path;
+    this.bytes = args.bytes;
+    this.maxBytes = args.maxBytes;
+  }
+}
+
+/**
  * Graph nests its machine-readable code at error.code. A body that is not JSON
  * yields undefined rather than throwing, because a gateway or proxy in front of
  * Graph can return HTML and that must not become the failure the operator sees.

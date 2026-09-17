@@ -24,6 +24,7 @@ function fakeClient(
       if (!(path in (responses.post ?? {}))) throw new Error(`unexpected post ${path}`);
       return responses.post?.[path] as T;
     },
+    getBytes: async (): Promise<Uint8Array> => { throw new Error("this fake does not implement getBytes"); },
   };
 }
 

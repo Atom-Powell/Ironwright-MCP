@@ -11,6 +11,7 @@ function fakeClient(responses: Record<string, unknown>, seen: string[] = []): Gr
       return responses[path] as T;
     },
     post: async <T,>(): Promise<T> => { throw new Error("this fake does not implement post"); },
+    getBytes: async (): Promise<Uint8Array> => { throw new Error("this fake does not implement getBytes"); },
   };
 }
 

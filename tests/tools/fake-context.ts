@@ -19,6 +19,7 @@ export function createFakeToolContext(overrides: Partial<ToolContext> = {}): Too
   const graph: GraphClient = {
     get: () => Promise.reject(new Error("the fake Graph client was called")),
     post: () => Promise.reject(new Error("the fake Graph client was called")),
+    getBytes: () => Promise.reject(new Error("the fake Graph client was called")),
     requests: () => 0,
   };
 

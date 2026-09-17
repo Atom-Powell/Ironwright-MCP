@@ -36,6 +36,7 @@ function scriptedClient(responses: Record<string, unknown>): GraphClient {
     requests: () => requests,
     get: async <T,>(path: string): Promise<T> => lookup<T>(path),
     post: async <T,>(path: string): Promise<T> => lookup<T>(path),
+    getBytes: async (): Promise<Uint8Array> => { throw new Error("this fake does not implement getBytes"); },
   };
 }
 
