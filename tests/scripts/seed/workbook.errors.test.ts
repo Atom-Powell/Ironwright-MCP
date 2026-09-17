@@ -14,18 +14,26 @@ function clientFailing(predicate: (url: string) => boolean, status: number, body
   });
 }
 
+// createSeedWorkbook now issues exactly one call after the workbook's
+// ancestor folders exist: the content upload. The range write, the number
+// format call, the table add and the table rename are gone, along with the
+// three-way blame each of their failure messages used to carry, because those
+// calls went through the Graph Excel API's /workbook/ surface, which app-only
+// tokens cannot reach at all: there is no longer a second or third call whose
+// failure this module could misattribute to the uploaded bytes. One failure
+// path remains, and it names the one thing that can actually fail.
 describe("createSeedWorkbook failures", () => {
   it("names the upload when the upload is what failed", async () => {
     const client = clientFailing((url) => url.includes(":/content"), 403, '{"error":{"code":"accessDenied"}}');
     await expect(createSeedWorkbook(client, "drive-1", "/Trackers/Book.xlsx", plan())).rejects.toThrow(
-      /Uploading the blank workbook to \/Trackers\/Book\.xlsx failed with 403/,
+      /Uploading the workbook to \/Trackers\/Book\.xlsx failed with 403/,
     );
   });
 
   it("carries Graph's own error code and the response it came from, not the status alone", async () => {
     // A 403 on this call is accessDenied or it is something else, and the two
     // have different remedies. The status alone sends an operator to the
-    // wrong one, and the GraphRequestError these catches replace already
+    // wrong one, and the GraphRequestError this catch replaces already
     // carries both the code and the whole response body.
     const client = clientFailing((url) => url.includes(":/content"), 403, '{"error":{"code":"accessDenied"}}');
     const failure = (await createSeedWorkbook(client, "drive-1", "/Trackers/Book.xlsx", plan()).then(
@@ -38,53 +46,16 @@ describe("createSeedWorkbook failures", () => {
     expect((failure.cause as GraphRequestError).body).toContain("accessDenied");
   });
 
-  it("names the workbook bytes as the suspect when the first workbook-opening call fails", async () => {
-    // The client rows range write is the first call requiring Graph to open
-    // the uploaded file as a workbook. Its URL address, "A1:D14" for the
-    // default plan, is what distinguishes it from the second range PATCH
-    // ("D2:D14") and from tables/add, which carries no address in its URL.
-    const client = clientFailing((url) => url.includes("range(address='A1:D14')"), 400, '{"error":{"code":"invalidRequest"}}');
+  it("propagates a non-Graph failure unchanged, rather than wrapping it as though Graph answered", async () => {
+    const client = createSeedGraphClient({
+      tokenProvider: { getToken: async () => "token" },
+      fetchImpl: (async () => {
+        throw new Error("network unreachable");
+      }) as typeof fetch,
+    });
+
     await expect(createSeedWorkbook(client, "drive-1", "/Trackers/Book.xlsx", plan())).rejects.toThrow(
-      /first call that requires Graph to open the uploaded file as a workbook/,
+      "network unreachable",
     );
-  });
-
-  it("carries the range write's own Graph code and response", async () => {
-    const client = clientFailing((url) => url.includes("range(address='A1:D14')"), 400, '{"error":{"code":"invalidRequest"}}');
-    const failure = (await createSeedWorkbook(client, "drive-1", "/Trackers/Book.xlsx", plan()).then(
-      () => undefined,
-      (error: unknown) => error,
-    )) as Error;
-
-    expect(failure.message).toContain("invalidRequest");
-    expect(failure.cause).toBeInstanceOf(GraphRequestError);
-  });
-
-  it("names the table request itself as the suspect, not the bytes, when tables/add fails for another reason", async () => {
-    // By the time tables/add runs, both range writes above have already
-    // succeeded, so the code has positively observed that Graph opened the
-    // uploaded file as a workbook. The message must not blame the bytes for
-    // something it has evidence against.
-    const client = clientFailing((url) => url.includes("/tables/add"), 400, '{"error":{"code":"invalidRequest"}}');
-    const failure = await createSeedWorkbook(client, "drive-1", "/Trackers/Book.xlsx", plan()).then(
-      () => undefined,
-      (error: unknown) => error,
-    );
-    expect(failure).toBeInstanceOf(Error);
-    expect((failure as Error).message).toMatch(/this request's own address, header row, or an existing table/);
-    expect((failure as Error).message).not.toMatch(/the bytes/);
-    expect((failure as Error).message).toContain("invalidRequest");
-    expect((failure as Error).cause).toBeInstanceOf(GraphRequestError);
-  });
-
-  it("says a table of that name already exists when Graph reports the conflict", async () => {
-    const client = clientFailing((url) => url.includes("/tables/add"), 409, '{"error":{"code":"nameAlreadyExists"}}');
-    const failure = (await createSeedWorkbook(client, "drive-1", "/Trackers/Book.xlsx", plan()).then(
-      () => undefined,
-      (error: unknown) => error,
-    )) as Error;
-
-    expect(failure.message).toMatch(/already carries a table named ClientRoster/);
-    expect(failure.cause).toBeInstanceOf(GraphRequestError);
   });
 });

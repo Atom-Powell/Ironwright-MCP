@@ -543,21 +543,24 @@ function plantedPath(
 // between the two.
 const RESOLVE_DRIVE_REQUEST_COUNT = 2;
 
-// createSeedWorkbook (scripts/seed/workbook.ts) issues five requests once the
-// workbook's parent folder exists: the blank upload, the range write, the
-// Onboarded column's number format, the table add, and the table rename. This
-// constant mirrors that count rather than measuring it, so if
-// createSeedWorkbook's own call sequence ever changes, this estimate silently
-// drifts from it; there is no automated link between the two.
-const WORKBOOK_FIXED_REQUEST_COUNT = 5;
+// createSeedWorkbook (scripts/seed/workbook.ts) issues one request once the
+// workbook's parent folder exists: the populated file's own content upload.
+// It used to be five, a blank upload followed by a range write, a number
+// format, a table add and a table rename, all through the Graph Excel API's
+// /workbook/ surface; that surface refuses this server's app-only tokens, so
+// the whole workbook, table included, is now assembled in memory and
+// uploaded once. This constant mirrors createSeedWorkbook's own call count
+// rather than measuring it, so if that count ever changes, this estimate
+// silently drifts from it; there is no automated link between the two.
+const WORKBOOK_FIXED_REQUEST_COUNT = 1;
 
 /**
  * The workbook's ancestor folders, root to leaf, the same walk
- * createSeedWorkbook performs before its own five fixed calls: one
- * createFolder per segment of the path above the workbook file itself. A
- * workbook sitting directly at the library root has no ancestor to create, so
- * this returns an empty array rather than a "-1" that would have to be
- * special-cased at every call site.
+ * createSeedWorkbook performs before its own fixed upload: one createFolder
+ * per segment of the path above the workbook file itself. A workbook sitting
+ * directly at the library root has no ancestor to create, so this returns an
+ * empty array rather than a "-1" that would have to be special-cased at
+ * every call site.
  */
 function workbookAncestorSegments(workbookPath: string): string[] {
   const { parentPath } = splitPath(workbookPath.replace(/^\/+/, ""));
@@ -567,9 +570,9 @@ function workbookAncestorSegments(workbookPath: string): string[] {
 /**
  * Derived from workbookPath rather than a flat constant, because the cost
  * this function estimates is not fixed: createSeedWorkbook walks the path's
- * own ancestor chain before its five fixed calls, so a workbook nested
- * several folders deep costs more than one at the library root. See
- * WORKBOOK_FIXED_REQUEST_COUNT above for why the five is a mirror, not a
+ * own ancestor chain before its fixed upload, so a workbook nested several
+ * folders deep costs more than one at the library root. See
+ * WORKBOOK_FIXED_REQUEST_COUNT above for why the one is a mirror, not a
  * measurement, of createSeedWorkbook's own call count.
  */
 function estimateWorkbookRequests(workbookPath: string): number {
@@ -707,9 +710,9 @@ export function formatDryRunReport(tree: SeedTree, args: SeedArguments, profile:
     `Estimated Graph requests to build this tree and replace the workbook: ${estimate}. This is an estimate, ` +
       "not a measured cost: it assumes one request per folder, one per file, the two requests resolveDrive " +
       "issues to find the site and the library, and the fixed calls createSeedWorkbook issues to replace the " +
-      "workbook (one createFolder per ancestor folder in its path, plus five to upload the blank file, write its " +
-      "rows, format its date column, add its table, and name it). A re-run costs the same number of requests, " +
-      "not fewer: executeSeed issues one request per tree entry regardless of whether that item already exists, " +
+      "workbook (one createFolder per ancestor folder in its path, plus one to upload the already populated, " +
+      "already tabled file). A re-run costs the same number of requests, not fewer: executeSeed issues one " +
+      "request per tree entry regardless of whether that item already exists, " +
       "and createSeedWorkbook always replaces the workbook outright. What a re-run changes is the side effect, " +
       "not the count: an existing folder is left alone rather than recreated or erroring, an existing file is " +
       "overwritten with the same placeholder content it already had, and the workbook is overwritten with a " +
@@ -725,26 +728,39 @@ export interface SeedExecutionResult {
   elapsedMs: number;
 }
 
-// workbookRequests is kept off SeedExecutionResult itself and carried as an
-// intersection here instead, because executeSeed above never learns it:
-// createSeedWorkbook runs after executeSeed returns, against the driveId
-// executeSeed resolved, so the caller has to combine the two before this
-// function ever sees them.
-//
-// Printed as its own line rather than folded into graphRequests, on purpose.
-// graphRequests is the number this whole script exists to let an operator
-// measure against the recursive-enumeration baseline Pain-Points.txt
-// complains about; the workbook's calls have nothing to do with that
-// comparison, and adding them into the same total would make that number
-// stop meaning what it is supposed to mean.
-export function formatExecutionReport(result: SeedExecutionResult & { workbookRequests: number }): string[] {
+// Takes only what executeSeed itself observed, and nothing runSeed learns
+// afterward. It used to also take workbookRequests and print it on its own
+// line, which meant this whole report was held until createSeedWorkbook had
+// also returned; when the workbook step failed on the 2026-09-16 tenant
+// sitting, the operator was told nothing about the 121 folders and 143 files
+// that executeSeed had, by then, already written. runSeed now calls this
+// function as soon as executeSeed returns, before the workbook step runs at
+// all, so a tree that was actually built is reported whether or not what
+// follows it succeeds.
+export function formatExecutionReport(result: SeedExecutionResult): string[] {
   return [
     `Seed complete against drive ${result.driveId}.`,
     `Folders processed: ${result.foldersProcessed}. Files processed: ${result.filesProcessed}.`,
     `Graph requests issued to build the tree: ${result.graphRequests}.`,
-    `Graph requests issued to replace the workbook: ${result.workbookRequests}.`,
     `Elapsed: ${result.elapsedMs}ms.`,
   ];
+}
+
+// A separate function rather than a second argument threaded through
+// formatExecutionReport's own call site: the workbook's request count does
+// not exist until createSeedWorkbook has returned, which is after
+// formatExecutionReport above has already printed. Giving it its own
+// function, called only once that count is in hand, is what keeps the
+// earlier report from ever having to carry a value it has not observed yet,
+// a zero standing in for "not measured yet" or a guess standing in for a
+// real count, either of which is the exact defect class this project treats
+// as first class: a claim about an outcome nothing has observed. Printed as
+// its own line rather than folded into graphRequests, on purpose: graphRequests
+// is the number this whole script exists to let an operator measure against
+// the recursive-enumeration baseline Pain-Points.txt complains about, and the
+// workbook's calls have nothing to do with that comparison.
+export function formatWorkbookReport(workbookRequests: number): string[] {
+  return [`Graph requests issued to replace the workbook: ${workbookRequests}.`];
 }
 
 // ---------------------------------------------------------------------------
@@ -1054,14 +1070,20 @@ export async function runSeed(argv: readonly string[], dependencies: SeedDepende
 
   const client = dependencies.createGraphClient();
   const result = await executeSeed(client, seedProfile.identity, plan.tree);
+  // Printed here, immediately, rather than held until the workbook step below
+  // also finishes: the tree this describes was real Graph work that already
+  // happened, and reporting it should not depend on what a later, separate
+  // step does. See formatExecutionReport's own comment for the sitting this
+  // ordering fixes.
+  for (const line of formatExecutionReport(result)) dependencies.log(line);
+
   // profile.identity.workbookPath, the same field expectedReport predicts the
   // orphan from, so the file this run writes and the file the expectation
   // describes cannot be two different paths.
   const workbookPath = profile.identity.workbookPath;
   const workbook = await createSeedWorkbook(client, result.driveId, workbookPath, plan);
-  for (const line of formatExecutionReport({ ...result, workbookRequests: workbook.requests })) {
-    dependencies.log(line);
-  }
+  for (const line of formatWorkbookReport(workbook.requests)) dependencies.log(line);
+
   const expected = expectedReport(profile, plan, asOfFromClock(dependencies.now));
   for (const line of formatExpectedReport(expected, workbookPath)) {
     dependencies.log(line);

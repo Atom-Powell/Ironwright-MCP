@@ -620,20 +620,28 @@ deleted. Teardown, and the two questions it exists to answer, whether the purge 
 **Deleted applications** and whether a service principal survives the application delete, are
 still unanswered.
 
-**Two seeder defects the sitting exposed, neither of them yet fixed.**
+**Two seeder defects the sitting exposed, both fixed by the workbook-bytes-reader phase's task 9.**
 
-The failure message blames the wrong thing. `scripts/seed/workbook.ts` attributes a failed range
-write to the bytes it uploaded, on the reasoning that this is the first call requiring Graph to
-open the file as a workbook. The reasoning about call ordering is correct and the conclusion is
-still wrong: the bytes were fine, confirmed by downloading them back and by opening them in Excel
-for the web. The message names the one cause the code cannot distinguish from the real one, which
-is the message-audit failure this project has a whole spec section about.
+The failure message blamed the wrong thing. `scripts/seed/workbook.ts` used to attribute a failed
+range write to the bytes it uploaded, on the reasoning that this is the first call requiring Graph
+to open the file as a workbook. The reasoning about call ordering was correct and the conclusion
+was still wrong: the bytes were fine, confirmed by downloading them back and by opening them in
+Excel for the web. The message named the one cause the code could not distinguish from the real
+one, which is the message-audit failure this project has a whole spec section about. Fixed by
+deleting the call rather than rewording the message: the range write, the number format call, the
+table add and the table rename are all gone, along with every message attached to them, because
+the whole populated workbook, table included, is now assembled in memory and uploaded once. There
+is no second or third `/workbook/` call left for a failure to be misattributed to.
 
-A workbook failure discards the execution report for work that succeeded. `runSeed` in
-`scripts/seed-library.ts` calls `executeSeed`, then `createSeedWorkbook`, and only then prints
+A workbook failure used to discard the execution report for work that succeeded. `runSeed` in
+`scripts/seed-library.ts` called `executeSeed`, then `createSeedWorkbook`, and only then printed
 `formatExecutionReport`. The tree was built, 121 folders and 143 files and roughly 264 Graph
 requests of real work, and the operator was told nothing about any of it, only that the workbook
-step failed. The count was recovered afterward by probing the library.
+step failed. The count was recovered afterward by probing the library. Fixed by printing the tree's
+own execution report as soon as `executeSeed` returns, before the workbook step runs at all;
+`formatExecutionReport` no longer takes a workbook request count, since at the point it prints, the
+workbook step has not observed one yet, and a separate `formatWorkbookReport` prints that count
+once `createSeedWorkbook` actually returns it.
 
 **What is still verified only against fakes.** Everything about the workbook, the reconciliation
 engine's behavior on live data, the composed tool's output, and the whole write-tool surface,
