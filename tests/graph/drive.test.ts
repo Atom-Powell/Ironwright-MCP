@@ -41,6 +41,10 @@ describe("resolveDrive", () => {
     await expect(resolveDrive(client, "https://contoso.sharepoint.com/sites/Example", "Compliance Reports")).resolves.toEqual({
       siteId: "site-1",
       driveId: "drive-b",
+      drives: [
+        { id: "drive-a", name: "Documents" },
+        { id: "drive-b", name: "Compliance Reports" },
+      ],
     });
   });
 
@@ -53,6 +57,7 @@ describe("resolveDrive", () => {
     await expect(resolveDrive(client, "https://contoso.sharepoint.com/sites/Example", "compliance reports")).resolves.toEqual({
       siteId: "site-1",
       driveId: "drive-b",
+      drives: [{ id: "drive-b", name: "Compliance Reports" }],
     });
   });
 
@@ -70,7 +75,28 @@ describe("resolveDrive", () => {
     await expect(resolveDrive(client, "https://contoso.sharepoint.com/sites/Example", "Compliance Reports")).resolves.toEqual({
       siteId: "site-1",
       driveId: "drive-exact",
+      drives: [
+        { id: "drive-lower", name: "compliance reports" },
+        { id: "drive-exact", name: "Compliance Reports" },
+      ],
     });
+  });
+
+  it("hands back the same drive listing it resolved the own drive from, so a caller needing the site's other libraries spends no second request for it", async () => {
+    const client = fakeClient({
+      "/sites/contoso.sharepoint.com:/sites/Example": { id: "site-1" },
+      "/sites/site-1/drives?$select=id,name,webUrl": {
+        value: [
+          { id: "drive-a", name: "Documents" },
+          { id: "drive-b", name: "Compliance Reports" },
+          { id: "drive-c", name: "Archive" },
+        ],
+      },
+    });
+
+    const result = await resolveDrive(client, "https://contoso.sharepoint.com/sites/Example", "Compliance Reports");
+
+    expect(result.drives.map((drive) => drive.id)).toEqual(["drive-a", "drive-b", "drive-c"]);
   });
 });
 

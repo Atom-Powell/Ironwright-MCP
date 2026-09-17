@@ -3,6 +3,16 @@ import type { GraphClient } from "./client.js";
 export interface DriveLocation {
   siteId: string;
   driveId: string;
+  /**
+   * Every drive the site listing carried, own library included, alongside the
+   * resolved id rather than requiring a second caller to fetch it again. The
+   * Microsoft Search cross-check needs the site's other libraries and the
+   * profile's own resolved drive id to exclude by, and `runScan` already pays
+   * for this exact listing to resolve the profile's own library before the
+   * cross-check ever runs, so handing it back here is what lets a scan spend
+   * one listing call rather than two for the same site.
+   */
+  drives: SiteDrive[];
 }
 
 export class LibraryNotFoundError extends Error {
@@ -131,5 +141,5 @@ export async function resolveDrive(
     );
   }
 
-  return { siteId, driveId: matched.id };
+  return { siteId, driveId: matched.id, drives };
 }

@@ -1,5 +1,5 @@
 import type { GraphClient } from "../graph/client.js";
-import { listDrives, matchDrive, type SiteDrive } from "../graph/drive.js";
+import type { SiteDrive } from "../graph/drive.js";
 import { searchDriveItems, type SearchHit } from "../graph/search.js";
 import type { RepositoryFile } from "../domain/reconcile/index.js";
 import type { Profile } from "../domain/profile/schema.js";
@@ -8,11 +8,11 @@ import type { Profile } from "../domain/profile/schema.js";
  * The operator's remedy differs for each, which is the whole reason this is a
  * closed set rather than a message string: "no-region" means configure
  * searchRegion on the profile, "search-failed" means investigate a Graph
- * failure that actually occurred, "library-not-addressable" means a listed
- * library came back with no webUrl to search it by, which is a listing-shape
- * problem rather than a failed request, and "page-cap-reached" means the site
- * has more matching files in one library than this cross-check is willing to
- * page through.
+ * search request that actually failed, "library-not-addressable" means a
+ * listed library came back with no webUrl to search it by, which is a
+ * listing-shape problem rather than a failed request, and "page-cap-reached"
+ * means the site has more matching files in one library than this cross-check
+ * is willing to page through.
  */
 export type CrossCheckSkipReason = "no-region" | "search-failed" | "library-not-addressable" | "page-cap-reached";
 
@@ -104,10 +104,12 @@ function relativePathWithinLibrary(hit: SearchHit, libraryWebUrl: string): strin
  *   than reported half true.
  * - The etag is always the empty string, never fetched, because Microsoft
  *   Search carries no etag on a driveItem hit and fetching one per hit would
- *   cost a Graph call per candidate. `reconcile`'s duplicate tiebreaker reads
- *   etag only to break a tie between two candidates at the same path, where
- *   an empty string loses to any real one, so a local file wins a tie against
- *   a cross-library one, which is the preference wanted here.
+ *   cost a Graph call per candidate. `reconcile`'s own file collapse keys on
+ *   library and path together, so a local file and a file this cross-check
+ *   qualifies with a library are never the same key and are never compared
+ *   against each other at all; a real etag would only ever settle a tie
+ *   between two hits this cross-check found in the same other library at the
+ *   same path.
  */
 function toRepositoryFile(hit: SearchHit, library: SiteDrive & { webUrl: string }): RepositoryFile | undefined {
   if (hit.driveId !== library.id) return undefined;
@@ -131,20 +133,28 @@ function toRepositoryFile(hit: SearchHit, library: SiteDrive & { webUrl: string 
  * profile's own, and returns the correctly named deliverables it finds
  * elsewhere, qualified with the library they were found in.
  *
- * The profile's own library is excluded by drive id, resolved through
- * `matchDrive`, the same exact-then-case-insensitive rule `resolveDrive`
- * uses, never by comparing library names against the drive listing directly.
- * This is not a detail: the reconciliation engine treats the mere presence
- * of `RepositoryFile.library` as meaning "not the profile's own library",
- * without re-checking the name against anything. If this function ever
- * stamped the profile's own library name onto a file that was already in the
- * profile's own library, that file would be silently reclassified as
- * misplaced and become permanently exempt from ever being reported as an
- * orphan, with nothing downstream able to notice. `listDrives` is called
- * once, and its result feeds both the own-drive match and the other-libraries
- * filter, rather than calling it a second time the way routing the own match
- * through `resolveDrive` itself would: one listing, one rule, applied twice
- * to the same data.
+ * The site's drive listing and the profile's own resolved drive id are given
+ * by the caller rather than fetched here. `runScan` already calls
+ * `resolveDrive` to resolve the profile's own library before a scan can do
+ * anything else, and that call already lists every drive on the site and
+ * already applies `matchDrive`'s exact-then-case-insensitive rule to find the
+ * profile's own one among them; a second `listDrives` call in this function
+ * would spend a Graph request the caller's own call already paid for, and a
+ * second `matchDrive` call would duplicate a rule that exists in exactly one
+ * place so it cannot go missing from a second copy.
+ *
+ * The profile's own library is excluded by drive id, never by comparing
+ * library names against the drive listing. This is not a detail: the
+ * reconciliation engine treats the mere presence of `RepositoryFile.library`
+ * as meaning "not the profile's own library", without re-checking the name
+ * against anything. If this function ever stamped the profile's own library
+ * name onto a file that was already in the profile's own library, that file
+ * would be silently reclassified as misplaced and become permanently exempt
+ * from ever being reported as an orphan, with nothing downstream able to
+ * notice. Trusting the caller's own already-resolved `ownDriveId`, the same
+ * id `resolveDrive` handed back and the same id the scan used to enumerate
+ * this library's own delta, is what keeps that guarantee to one resolution
+ * rather than a second one that could disagree with it.
  *
  * A failure anywhere in here is caught and reported through `reason`, never
  * thrown: a reconciliation report without a cross-check is still worth
@@ -152,8 +162,10 @@ function toRepositoryFile(hit: SearchHit, library: SiteDrive & { webUrl: string 
  * one degraded check.
  */
 export async function crossCheckOtherLibraries(
-  client: Pick<GraphClient, "get" | "post">,
+  client: Pick<GraphClient, "post">,
   profile: Profile,
+  drives: readonly SiteDrive[],
+  ownDriveId: string,
 ): Promise<CrossCheckResult> {
   const region = profile.identity.searchRegion;
   // Checked first and returned immediately, spending no Graph call at all:
@@ -163,20 +175,6 @@ export async function crossCheckOtherLibraries(
   }
 
   const extension = literalExtension(profile.naming.template);
-
-  let ownDriveId: string;
-  let drives: SiteDrive[];
-  try {
-    ({ drives } = await listDrives(client, profile.identity.siteUrl));
-    const own = matchDrive(drives, profile.identity.library);
-    if (own === undefined) {
-      throw new Error(`no drive on the site matched the profile's own library "${profile.identity.library}"`);
-    }
-    ownDriveId = own.id;
-  } catch {
-    return { files: [], complete: false, reason: "search-failed" };
-  }
-
   const otherLibraries = drives.filter((drive) => drive.id !== ownDriveId);
 
   const files: RepositoryFile[] = [];
@@ -220,8 +218,11 @@ export async function crossCheckOtherLibraries(
   // (search-failed) is investigated first because it can mask the other two
   // conditions on a retry; an unaddressable library (a listing-shape problem)
   // next; the page cap last, since it is the only one of the three that means
-  // the cross-check otherwise worked. Nothing in this task exercises more
-  // than one at once, so this order is a choice, not an observed requirement.
+  // the cross-check otherwise worked. This is a real precedence rule, not a
+  // choice that happens never to be tested: different libraries in the same
+  // run can fail in different ways, for instance one lacking a webUrl while a
+  // different one's search request throws, and `search-failed` is what this
+  // function reports for that run rather than `library-not-addressable`.
   const reason: CrossCheckSkipReason | undefined = failed
     ? "search-failed"
     : notAddressable

@@ -71,7 +71,7 @@ export async function runScan(dependencies: ScanDependencies): Promise<ScanResul
   // a tool to, and a tool that reuses a client must not have this call's
   // report include requests a previous call already paid for.
   const requestsAtStart = client.requests();
-  const { driveId } = await resolveDrive(client, profile.identity.siteUrl, profile.identity.library);
+  const { driveId, drives } = await resolveDrive(client, profile.identity.siteUrl, profile.identity.library);
 
   const storedLink = await store.getDeltaLink(profile.profileId, driveId);
 
@@ -138,7 +138,7 @@ export async function runScan(dependencies: ScanDependencies): Promise<ScanResul
   const graphRequests = client.requests() - requestsAtStart;
 
   const requestsBeforeCrossCheck = client.requests();
-  const crossCheck = await crossCheckOtherLibraries(client, profile);
+  const crossCheck = await crossCheckOtherLibraries(client, profile, drives, driveId);
   const searchCrossCheckGraphRequests = client.requests() - requestsBeforeCrossCheck;
 
   return {

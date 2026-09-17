@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { crossCheckOtherLibraries } from "../../src/scan/cross-check.js";
 import { loadProfile } from "../../src/domain/profile/load.js";
 import type { GraphClient } from "../../src/graph/client.js";
@@ -15,9 +15,6 @@ function profileWithRegion(overrides: Record<string, unknown> = {}): ReturnType<
   });
 }
 
-const SITE_PATH = "/sites/contoso.sharepoint.com:/sites/Example";
-const DRIVES_PATH = "/sites/site-1/drives?$select=id,name,webUrl";
-
 interface Drive {
   id: string;
   name: string;
@@ -32,19 +29,18 @@ type SearchScript = unknown | ((call: number) => unknown);
  * present here means that library must never be searched at all: any
  * queryString this fake cannot match throws, which is what lets a test prove
  * a library, such as the profile's own, was never queried.
+ *
+ * Only `post` is faked: `crossCheckOtherLibraries` no longer lists a site's
+ * drives itself, since `runScan` already does that once through
+ * `resolveDrive` and threads the listing and the resolved own-drive id
+ * through, so there is nothing here for a `get` to serve.
  */
 function fakeClient(args: {
-  drives: Drive[];
   scripts: Record<string, SearchScript>;
   onSearch?: (pathScope: string, body: unknown) => void;
-}): Pick<GraphClient, "get" | "post"> {
+}): Pick<GraphClient, "post"> {
   const callCounts = new Map<string, number>();
   return {
-    get: async <T,>(path: string): Promise<T> => {
-      if (path === SITE_PATH) return { id: "site-1" } as T;
-      if (path === DRIVES_PATH) return { value: args.drives } as T;
-      throw new Error(`unexpected get ${path}`);
-    },
     post: async <T,>(path: string, body?: unknown): Promise<T> => {
       if (path !== "/search/query") throw new Error(`unexpected post ${path}`);
       const b = body as { requests: Array<{ query: { queryString: string } }> };
@@ -90,16 +86,15 @@ const ARCHIVE_DRIVE: Drive = {
 
 describe("crossCheckOtherLibraries", () => {
   it("returns complete with no files when the site carries only the profile's own library", async () => {
-    const client = fakeClient({ drives: [OWN_DRIVE], scripts: {} });
+    const client = fakeClient({ scripts: {} });
 
-    const result = await crossCheckOtherLibraries(client, profileWithRegion());
+    const result = await crossCheckOtherLibraries(client, profileWithRegion(), [OWN_DRIVE], OWN_DRIVE.id);
 
     expect(result).toEqual({ files: [], complete: true });
   });
 
   it("qualifies a hit from another library with that library's name and a path relative to it", async () => {
     const client = fakeClient({
-      drives: [OWN_DRIVE, ARCHIVE_DRIVE],
       scripts: {
         [ARCHIVE_DRIVE.webUrl!]: page(
           [
@@ -114,7 +109,7 @@ describe("crossCheckOtherLibraries", () => {
       },
     });
 
-    const result = await crossCheckOtherLibraries(client, profileWithRegion());
+    const result = await crossCheckOtherLibraries(client, profileWithRegion(), [OWN_DRIVE, ARCHIVE_DRIVE], OWN_DRIVE.id);
 
     expect(result.complete).toBe(true);
     expect(result.reason).toBeUndefined();
@@ -137,14 +132,13 @@ describe("crossCheckOtherLibraries", () => {
     // throws, and the search cross-check must never trigger that throw.
     const searchedScopes: string[] = [];
     const client = fakeClient({
-      drives: [OWN_DRIVE, ARCHIVE_DRIVE],
       scripts: {
         [ARCHIVE_DRIVE.webUrl!]: page([], false),
       },
       onSearch: (scope) => searchedScopes.push(scope),
     });
 
-    const result = await crossCheckOtherLibraries(client, profileWithRegion());
+    const result = await crossCheckOtherLibraries(client, profileWithRegion(), [OWN_DRIVE, ARCHIVE_DRIVE], OWN_DRIVE.id);
 
     expect(searchedScopes).toEqual([ARCHIVE_DRIVE.webUrl]);
     expect(searchedScopes).not.toContain(OWN_DRIVE.webUrl);
@@ -152,21 +146,21 @@ describe("crossCheckOtherLibraries", () => {
     expect(result.complete).toBe(true);
   });
 
-  it("excludes the profile's own library by id, not by a name comparison that a same-named decoy would also match", async () => {
+  it("excludes the profile's own library by the given id, not by a name comparison that a same-named decoy would also match", async () => {
     // Two drives share the exact display name "Compliance Reports", the
-    // profile's own library name, but carry different ids. matchDrive's
-    // exact-then-case-insensitive rule resolves the profile's own library to
-    // whichever one is found first, ownPrimary here, exactly as resolveDrive
-    // would. ownNameDecoy is a second, genuinely different library that
-    // happens to share that display name.
+    // profile's own library name, but carry different ids. `runScan` resolves
+    // which one is genuinely the profile's own through `resolveDrive`'s
+    // exact-then-case-insensitive rule before this function ever runs, so
+    // this function is handed that one id directly; ownNameDecoy is a second,
+    // genuinely different library that happens to share the display name.
     //
-    // A filter that excludes by comparing `drive.name` against
+    // A filter that excluded by comparing `drive.name` against
     // `profile.identity.library` directly, instead of comparing ids against
-    // the one drive matchDrive actually resolved, would exclude both drives:
-    // ownNameDecoy's name matches the profile's library name too. That would
-    // make this test fail, because ownNameDecoy would then never be searched
-    // and its file would never appear below. The correct, id-based exclusion
-    // searches ownNameDecoy, since its id is not the resolved own id.
+    // the given `ownDriveId`, would exclude both drives: ownNameDecoy's name
+    // matches the profile's library name too. That would make this test
+    // fail, because ownNameDecoy would then never be searched and its file
+    // would never appear below. The correct, id-based exclusion searches
+    // ownNameDecoy, since its id is not the given own id.
     const ownPrimary: Drive = {
       id: "drive-own-primary",
       name: "Compliance Reports",
@@ -179,7 +173,6 @@ describe("crossCheckOtherLibraries", () => {
     };
     const searchedScopes: string[] = [];
     const client = fakeClient({
-      drives: [ownPrimary, ownNameDecoy],
       scripts: {
         [ownNameDecoy.webUrl!]: page(
           [hit("2026-01_CLIENTA_MonthlyTraining.xlsx", ownNameDecoy.id, `${ownNameDecoy.webUrl}/2026-01_CLIENTA_MonthlyTraining.xlsx`)],
@@ -189,7 +182,7 @@ describe("crossCheckOtherLibraries", () => {
       onSearch: (scope) => searchedScopes.push(scope),
     });
 
-    const result = await crossCheckOtherLibraries(client, profileWithRegion());
+    const result = await crossCheckOtherLibraries(client, profileWithRegion(), [ownPrimary, ownNameDecoy], ownPrimary.id);
 
     expect(searchedScopes).toEqual([ownNameDecoy.webUrl]);
     expect(searchedScopes).not.toContain(ownPrimary.webUrl);
@@ -212,7 +205,6 @@ describe("crossCheckOtherLibraries", () => {
     const profile = profileWithRegion({ naming: { ...RAW_PROFILE.naming, template: "{year}-{month:02}_{client}.{deliverable}" } });
     let sentQueryString = "";
     const client = fakeClient({
-      drives: [OWN_DRIVE, ARCHIVE_DRIVE],
       scripts: { [ARCHIVE_DRIVE.webUrl!]: page([], false) },
       onSearch: (_scope, body) => {
         const b = body as { requests: Array<{ query: { queryString: string } }> };
@@ -220,7 +212,7 @@ describe("crossCheckOtherLibraries", () => {
       },
     });
 
-    const result = await crossCheckOtherLibraries(client, profile);
+    const result = await crossCheckOtherLibraries(client, profile, [OWN_DRIVE, ARCHIVE_DRIVE], OWN_DRIVE.id);
 
     expect(sentQueryString).not.toContain("filetype:");
     expect(result.complete).toBe(true);
@@ -231,14 +223,18 @@ describe("crossCheckOtherLibraries", () => {
     const fullPage = Array.from({ length: SEARCH_PAGE_SIZE }, (_, i) => hit(`f${String(i)}.xlsx`, "drive-capped", `${cappedDrive.webUrl}/f${String(i)}.xlsx`));
 
     const client = fakeClient({
-      drives: [OWN_DRIVE, ARCHIVE_DRIVE, cappedDrive],
       scripts: {
         [ARCHIVE_DRIVE.webUrl!]: page([], false),
         [cappedDrive.webUrl!]: () => page(fullPage, true),
       },
     });
 
-    const result = await crossCheckOtherLibraries(client, profileWithRegion());
+    const result = await crossCheckOtherLibraries(
+      client,
+      profileWithRegion(),
+      [OWN_DRIVE, ARCHIVE_DRIVE, cappedDrive],
+      OWN_DRIVE.id,
+    );
 
     expect(result.complete).toBe(false);
     expect(result.reason).toBe("page-cap-reached");

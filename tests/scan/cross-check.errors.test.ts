@@ -6,25 +6,20 @@ import type { GraphClient } from "../../src/graph/client.js";
 
 const RAW_PROFILE = JSON.parse(readFileSync(new URL("../../examples/profiles/example.json", import.meta.url), "utf8"));
 
-const SITE_PATH = "/sites/contoso.sharepoint.com:/sites/Example";
-const DRIVES_PATH = "/sites/site-1/drives?$select=id,name,webUrl";
-
 interface Drive {
   id: string;
   name: string;
   webUrl?: string;
 }
 
-function fakeClient(args: {
-  drives: Drive[];
-  scripts: Record<string, unknown>;
-}): Pick<GraphClient, "get" | "post"> {
+/**
+ * Only `post` is faked. `crossCheckOtherLibraries` no longer resolves the
+ * site's drives itself; `runScan` does that once through `resolveDrive` and
+ * hands the listing and the resolved own-drive id in, so there is no `get`
+ * for this cross-check to make and nothing here for one to serve.
+ */
+function fakeClient(args: { scripts: Record<string, unknown> }): Pick<GraphClient, "post"> {
   return {
-    get: async <T,>(path: string): Promise<T> => {
-      if (path === SITE_PATH) return { id: "site-1" } as T;
-      if (path === DRIVES_PATH) return { value: args.drives } as T;
-      throw new Error(`unexpected get ${path}`);
-    },
     post: async <T,>(path: string, body?: unknown): Promise<T> => {
       if (path !== "/search/query") throw new Error(`unexpected post ${path}`);
       const b = body as { requests: Array<{ query: { queryString: string } }> };
@@ -77,18 +72,14 @@ function profileWithRegion(): ReturnType<typeof loadProfile> {
 describe("crossCheckOtherLibraries failures", () => {
   it("issues no search at all when the profile carries no region", async () => {
     let calls = 0;
-    const client: Pick<GraphClient, "get" | "post"> = {
-      get: (async () => {
-        calls += 1;
-        return {};
-      }) as never,
+    const client: Pick<GraphClient, "post"> = {
       post: (async () => {
         calls += 1;
         return {};
       }) as never,
     };
 
-    const result = await crossCheckOtherLibraries(client, profileWithoutRegion());
+    const result = await crossCheckOtherLibraries(client, profileWithoutRegion(), [OWN_DRIVE, ARCHIVE_DRIVE], OWN_DRIVE.id);
 
     expect(result).toEqual({ files: [], complete: false, reason: "no-region" });
     // Not merely "returns incomplete": it must not spend a request either.
@@ -97,35 +88,18 @@ describe("crossCheckOtherLibraries failures", () => {
 
   it("catches a search failure and reports search-failed rather than throwing", async () => {
     const client = fakeClient({
-      drives: [OWN_DRIVE, ARCHIVE_DRIVE],
       scripts: { [ARCHIVE_DRIVE.webUrl!]: new Error("search exploded") },
     });
 
-    const result = await crossCheckOtherLibraries(client, profileWithRegion());
+    const result = await crossCheckOtherLibraries(client, profileWithRegion(), [OWN_DRIVE, ARCHIVE_DRIVE], OWN_DRIVE.id);
 
     expect(result.complete).toBe(false);
     expect(result.reason).toBe("search-failed");
     expect(result.files).toEqual([]);
   });
 
-  it("reports search-failed rather than throwing when the site's own drive cannot be resolved", async () => {
-    const client: Pick<GraphClient, "get" | "post"> = {
-      get: async () => {
-        throw new Error("site lookup exploded");
-      },
-      post: async () => {
-        throw new Error("this test does not expect a search");
-      },
-    };
-
-    const result = await crossCheckOtherLibraries(client, profileWithRegion());
-
-    expect(result).toEqual({ files: [], complete: false, reason: "search-failed" });
-  });
-
   it("skips a hit whose driveId does not match the library actually being searched", async () => {
     const client = fakeClient({
-      drives: [OWN_DRIVE, ARCHIVE_DRIVE],
       scripts: {
         [ARCHIVE_DRIVE.webUrl!]: page(
           [
@@ -138,7 +112,7 @@ describe("crossCheckOtherLibraries failures", () => {
       },
     });
 
-    const result = await crossCheckOtherLibraries(client, profileWithRegion());
+    const result = await crossCheckOtherLibraries(client, profileWithRegion(), [OWN_DRIVE, ARCHIVE_DRIVE], OWN_DRIVE.id);
 
     expect(result.complete).toBe(true);
     expect(result.files).toEqual([]);
@@ -150,11 +124,10 @@ describe("crossCheckOtherLibraries failures", () => {
       lastModifiedDateTime: undefined,
     });
     const client = fakeClient({
-      drives: [OWN_DRIVE, ARCHIVE_DRIVE],
       scripts: { [ARCHIVE_DRIVE.webUrl!]: page([missingSize, missingModified], false) },
     });
 
-    const result = await crossCheckOtherLibraries(client, profileWithRegion());
+    const result = await crossCheckOtherLibraries(client, profileWithRegion(), [OWN_DRIVE, ARCHIVE_DRIVE], OWN_DRIVE.id);
 
     expect(result.complete).toBe(true);
     expect(result.files).toEqual([]);
@@ -169,34 +142,38 @@ describe("crossCheckOtherLibraries failures", () => {
     // this library well enough to search it.
     const noWebUrlDrive: Drive = { id: "drive-no-weburl", name: "No Url" };
     let searchCalls = 0;
-    const client = fakeClient({ drives: [OWN_DRIVE, noWebUrlDrive], scripts: {} });
-    const countingClient: Pick<GraphClient, "get" | "post"> = {
-      get: client.get,
+    const client = fakeClient({ scripts: {} });
+    const countingClient: Pick<GraphClient, "post"> = {
       post: async <T,>(path: string, body?: unknown): Promise<T> => {
         searchCalls += 1;
         return client.post<T>(path, body);
       },
     };
 
-    const result = await crossCheckOtherLibraries(countingClient, profileWithRegion());
+    const result = await crossCheckOtherLibraries(countingClient, profileWithRegion(), [OWN_DRIVE, noWebUrlDrive], OWN_DRIVE.id);
 
     expect(result).toEqual({ files: [], complete: false, reason: "library-not-addressable" });
     expect(searchCalls).toBe(0);
   });
 
   it("still reports search-failed, not library-not-addressable, when a different library both lacks a webUrl and another one fails", async () => {
-    // Both conditions occurred in the same run. search-failed is reported
-    // because it is the more directly actionable of the two: it points at a
-    // request that actually broke, which a retry might resolve and which
-    // could otherwise be masking whether the unaddressable library would
-    // have been reachable at all.
+    // Both conditions occurred in the same run, which is exactly the case
+    // this cross-check's own precedence comment describes rather than a
+    // hypothetical: search-failed is reported because it is the more
+    // directly actionable of the two, pointing at a request that actually
+    // broke, which a retry might resolve and which could otherwise be masking
+    // whether the unaddressable library would have been reachable at all.
     const noWebUrlDrive: Drive = { id: "drive-no-weburl", name: "No Url" };
     const client = fakeClient({
-      drives: [OWN_DRIVE, noWebUrlDrive, ARCHIVE_DRIVE],
       scripts: { [ARCHIVE_DRIVE.webUrl!]: new Error("search exploded") },
     });
 
-    const result = await crossCheckOtherLibraries(client, profileWithRegion());
+    const result = await crossCheckOtherLibraries(
+      client,
+      profileWithRegion(),
+      [OWN_DRIVE, noWebUrlDrive, ARCHIVE_DRIVE],
+      OWN_DRIVE.id,
+    );
 
     expect(result.complete).toBe(false);
     expect(result.reason).toBe("search-failed");

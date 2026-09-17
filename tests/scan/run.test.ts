@@ -259,11 +259,13 @@ describe("runScan", () => {
     expect(found?.name).toBe("2026-08_CLIENTA_MonthlyTraining.xlsx");
 
     // The enumeration's own cost (2 to resolve the drive, 1 delta page) stays
-    // 3, the same as a profile with no searchRegion would report, and the
-    // cross-check's cost (2 to list drives again, 1 search call) is reported
-    // as its own figure rather than folded into the enumeration's.
+    // 3, the same as a profile with no searchRegion would report. The
+    // cross-check's own cost is 1 search call, not the 3 an earlier version
+    // of this wiring reported: it no longer lists the site's drives a second
+    // time, since resolveDrive's own listing and its resolved own-drive id
+    // are threaded through from the enumeration above rather than re-fetched.
     expect(result.graphRequests).toBe(3);
-    expect(result.searchCrossCheckGraphRequests).toBe(3);
+    expect(result.searchCrossCheckGraphRequests).toBe(1);
   });
 
   it("does not report a cross-check cost when no searchRegion was configured", async () => {
