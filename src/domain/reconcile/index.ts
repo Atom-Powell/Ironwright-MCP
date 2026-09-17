@@ -140,17 +140,40 @@ function supersedes(candidate: RepositoryFile, held: RepositoryFile): boolean {
 }
 
 /**
- * One entry per path, keeping each path's position from the first time it was
- * listed and its contents from whichever entry describes the file's latest
- * state.
+ * A library-relative path names one item within one document library, not
+ * across all of them: two other libraries on the same site routinely hold a
+ * file at the identical relative path, and the Microsoft Search cross-check
+ * that qualifies a foreign file with `library` guarantees exactly that
+ * collision whenever a seeded deliverable is later filed away elsewhere with
+ * its folder structure kept. Keying the collapse on the path alone would
+ * treat a local file and an unrelated foreign one as one repeated listing of
+ * the same item, let whichever supersedes win the slot, and silently drop the
+ * other: a compliant local artifact would lose to a later-modified foreign
+ * copy and be reported `misplaced` with an empty etag, or a local orphan
+ * would vanish behind a qualified file that is exempt from orphan reporting.
+ * That is the failure the orphan exclusion in match.ts exists to prevent,
+ * arriving from the side nothing there guards. Keying on `library` and `path`
+ * together keeps a local file and a foreign one at the same relative path as
+ * two distinct entries, both of which reach matching, while two hits from the
+ * *same* other library at the same path still collapse to one, exactly as two
+ * local entries do.
+ */
+function dedupeKey(file: RepositoryFile): string {
+  return `${file.library ?? ""}\u0000${file.path}`;
+}
+
+/**
+ * One entry per (library, path), keeping each key's position from the first
+ * time it was listed and its contents from whichever entry describes the
+ * file's latest state.
  *
- * A path identifies one item in a document library, so two entries naming one
- * path are one file listed twice rather than two files. Left uncollapsed they
- * became two candidates for one slot: one won the slot and the other was
- * reported as a duplicate at the winner's own path, so the report said the
- * same file was both the compliant artifact and a redundant copy of it, and a
- * move or cleanup plan built on the duplicate list would have targeted the
- * compliant file.
+ * A path identifies one item within one document library, so two entries
+ * naming one path in one library are one file listed twice rather than two
+ * files. Left uncollapsed they became two candidates for one slot: one won
+ * the slot and the other was reported as a duplicate at the winner's own
+ * path, so the report said the same file was both the compliant artifact and
+ * a redundant copy of it, and a move or cleanup plan built on the duplicate
+ * list would have targeted the compliant file.
  *
  * A repeat is a transport artifact rather than a repository problem to report,
  * which is why this collapses quietly where a repeated workbook client throws:
@@ -161,8 +184,8 @@ function supersedes(candidate: RepositoryFile, held: RepositoryFile): boolean {
  * `folderPaths`, so the engine now holds it about both lists rather than one.
  *
  * Nothing here reads the entries' order, and it must not: `RepositorySnapshot`
- * promises no ordering on `files`, and a phase-2 layer that merged a delta page
- * with a Search cross-check would leave whatever order either had behind. The
+ * promises no ordering on `files`, and the phase-2c layer that merges a delta
+ * page with a Search cross-check leaves whatever order either had behind. The
  * survivor is chosen from what the entries say about themselves, by
  * `supersedes` above, so the same set of entries produces the same report
  * however it is arranged. What the collapse discards is a description of the
@@ -172,17 +195,18 @@ function supersedes(candidate: RepositoryFile, held: RepositoryFile): boolean {
  * so the wrong survivor is a stale precondition against a real client file.
  */
 function dedupeFilesByPath(files: readonly RepositoryFile[]): RepositoryFile[] {
-  const byPath = new Map<string, RepositoryFile>();
+  const byKey = new Map<string, RepositoryFile>();
   for (const file of files) {
-    const held = byPath.get(file.path);
+    const key = dedupeKey(file);
+    const held = byKey.get(key);
     // Map.set on an existing key replaces the value and leaves the insertion
     // position alone, which is what keeps the path where it was first listed
     // while its contents come from the entry that supersedes.
     if (held === undefined || supersedes(file, held)) {
-      byPath.set(file.path, file);
+      byKey.set(key, file);
     }
   }
-  return [...byPath.values()];
+  return [...byKey.values()];
 }
 
 /**
