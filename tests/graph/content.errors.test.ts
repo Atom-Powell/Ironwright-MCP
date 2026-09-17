@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createGraphClient } from "../../src/graph/client.js";
 import { downloadDriveItem, MAX_WORKBOOK_DOWNLOAD_BYTES } from "../../src/graph/content.js";
+import { GraphResponseTooLargeError } from "../../src/graph/errors.js";
 
 const tokenProvider = { getToken: async (): Promise<string> => "test-token" };
 
@@ -41,5 +42,26 @@ describe("downloadDriveItem failures", () => {
     await expect(downloadDriveItem(client, { driveId: "d1", workbookPath: "/Book.xlsx" })).rejects.toThrow(
       /answered 302 with no location header/,
     );
+  });
+});
+
+describe("GraphResponseTooLargeError message formatting", () => {
+  // The workbook cap divides evenly by 1 MiB, so the tests above never exercise
+  // a maxBytes that does not. A future caller with a limit of its own, such as
+  // a per-tool cap smaller than the workbook one, is not guaranteed to divide
+  // evenly, and the message must still read as a number rather than the long
+  // repeating decimal a bare String() on the division would produce.
+  it("renders a whole-megabyte limit with no decimal point", () => {
+    const error = new GraphResponseTooLargeError({ path: "/x", bytes: 2 * 1024 * 1024, maxBytes: 1 * 1024 * 1024 });
+    expect(error.message).toContain("larger than the 1 MB this server will download");
+  });
+
+  it("renders a limit that does not divide evenly by 1 MiB as a short decimal, not a repeating one", () => {
+    const error = new GraphResponseTooLargeError({
+      path: "/x",
+      bytes: 2 * 1024 * 1024,
+      maxBytes: 1.5 * 1024 * 1024,
+    });
+    expect(error.message).toContain("larger than the 1.5 MB this server will download");
   });
 });

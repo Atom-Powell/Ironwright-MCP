@@ -41,9 +41,15 @@ export class GraphResponseTooLargeError extends Error {
   readonly maxBytes: number;
 
   constructor(args: { path: string; bytes: number; maxBytes: number }) {
+    // toFixed(2) rather than a bare String(): the one caller today (the 50 MB
+    // workbook cap) divides evenly and either would read the same, but a limit
+    // that does not divide evenly by 1 MiB would otherwise render as a
+    // non-terminating decimal. Trimmed of trailing zeros so the common case
+    // still reads "50 MB" rather than "50.00 MB".
     const maxMegabytes = args.maxBytes / (1024 * 1024);
+    const maxMegabytesText = maxMegabytes.toFixed(2).replace(/\.?0+$/, "");
     super(
-      `Graph GET ${args.path} is ${String(args.bytes)} bytes, larger than the ${String(maxMegabytes)} MB ` +
+      `Graph GET ${args.path} is ${String(args.bytes)} bytes, larger than the ${maxMegabytesText} MB ` +
         "this server will download.",
     );
     this.name = "GraphResponseTooLargeError";

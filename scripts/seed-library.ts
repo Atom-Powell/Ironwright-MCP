@@ -41,7 +41,7 @@
 import { pathToFileURL } from "node:url";
 import { GRAPH_BASE, type GraphClient } from "../src/graph/client.js";
 import { resolveDrive } from "../src/graph/drive.js";
-import { GraphRequestError, GraphResponseTooLargeError, graphErrorCodeFromBody } from "../src/graph/errors.js";
+import { GraphRequestError, graphErrorCodeFromBody } from "../src/graph/errors.js";
 import { driveItemPath } from "../src/graph/paths.js";
 import { clientCredentialsTokenProvider, type ClientCredentials, type TokenProvider } from "../src/graph/token.js";
 import { readProfile } from "../src/scan/cli.js";
@@ -760,7 +760,17 @@ export function splitPath(path: string): { parentPath: string; name: string } {
   return { parentPath: path.slice(0, separatorIndex), name: path.slice(separatorIndex + 1) };
 }
 
-export interface SeedGraphClient extends GraphClient {
+// Omits getBytes: this client only ever writes a library into existence, and
+// nothing it or its callers do ever downloads a driveItem's content.
+// resolveDrive, the one function outside this file it is handed to, takes
+// `Pick<GraphClient, "get">` rather than the full interface for exactly this
+// reason, so this client needs no getBytes to satisfy that call either. A
+// duplicated reimplementation of client.ts's redirect-and-drop-auth behavior
+// used to sit here to satisfy the type checker alone, with no caller and no
+// test, which is worse than not having the capability: a future change to the
+// real getBytes would silently diverge from this copy until some caller was
+// finally wired to it.
+export interface SeedGraphClient extends Omit<GraphClient, "getBytes"> {
   createFolder(driveId: string, parentPath: string, name: string): Promise<{ status: number }>;
   createFile(driveId: string, parentPath: string, name: string, content: string): Promise<{ status: number }>;
   putBytes(driveId: string, path: string, bytes: Uint8Array, contentType: string): Promise<{ status: number }>;
@@ -928,48 +938,6 @@ export function createSeedGraphClient(options: {
             "Graph answered this request.",
         );
       }
-    },
-
-    // Implemented for real, for the same reason as post above: SeedGraphClient
-    // extends GraphClient, and a stub that throws would be a client claiming a
-    // capability it silently refuses. This script never calls it, since seeding
-    // only ever writes, but resolveDrive takes a GraphClient and this is the
-    // client it is handed, so the whole interface must be honored. Mirrors
-    // src/graph/client.ts's getBytes: a redirect is followed manually and
-    // deliberately without the bearer token, because the redirect target is a
-    // pre-authenticated storage URL and sending a Graph bearer token to a host
-    // that is not Graph is the failure this avoids.
-    async getBytes(path: string, maxBytes?: number): Promise<Uint8Array> {
-      const token = await options.tokenProvider.getToken();
-      requestCount += 1;
-      const first = await fetchImpl(`${GRAPH_BASE}${path}`, {
-        method: "GET",
-        headers: { authorization: `Bearer ${token}` },
-        redirect: "manual",
-      });
-
-      let response = first;
-      if (first.status >= 300 && first.status < 400) {
-        const location = first.headers.get("location");
-        if (location === null || location.length === 0) {
-          throw new Error(
-            `Graph GET ${path} answered ${String(first.status)} with no location header, so there is nowhere to ` +
-              "follow. A redirect without a target is a malformed response rather than a missing file.",
-          );
-        }
-        requestCount += 1;
-        response = await fetchImpl(location, { method: "GET", redirect: "manual" });
-      }
-
-      if (response.status < 200 || response.status >= 300) {
-        throw new GraphRequestError({ method: "GET", path, status: response.status, body: await response.text() });
-      }
-
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      if (maxBytes !== undefined && bytes.length > maxBytes) {
-        throw new GraphResponseTooLargeError({ path, bytes: bytes.length, maxBytes });
-      }
-      return bytes;
     },
 
     async createFolder(driveId, parentPath, name) {

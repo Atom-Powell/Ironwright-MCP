@@ -448,7 +448,6 @@ function fakeSeedClient(driveName: string): { client: SeedGraphClient; calls: st
       calls.push(`PATCH:${path}`);
       return {} as T;
     },
-    getBytes: async (): Promise<Uint8Array> => { throw new Error("this fake does not implement getBytes"); },
   };
   return { client, calls };
 }
