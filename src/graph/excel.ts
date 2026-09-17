@@ -1,6 +1,9 @@
 import type { GraphClient } from "./client.js";
 import { GraphRequestError } from "./errors.js";
 import { driveItemPath } from "./paths.js";
+import type { WorkbookSource } from "../workbook/xlsx.js";
+
+export type { WorkbookSource } from "../workbook/xlsx.js";
 
 /**
  * Every field optional, the way `delta.ts` models its own response, because a
@@ -14,8 +17,6 @@ import { driveItemPath } from "./paths.js";
 export interface WorkbookRange {
   values?: unknown[][];
 }
-
-export type WorkbookSource = { kind: "table" | "worksheet"; name: string };
 
 function rangeValues(response: WorkbookRange | undefined, url: string): unknown[][] {
   // The client turns a zero-length body into undefined, so this is the shape a

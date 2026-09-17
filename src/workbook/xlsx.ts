@@ -1,0 +1,280 @@
+import type { CellValue } from "./cells.js";
+import { parseSharedStrings } from "./cells.js";
+import type { SheetBounds } from "./sheet.js";
+import { columnLabelToIndex, sheetToGrid } from "./sheet.js";
+import { readZipParts } from "./zip.js";
+import { WorkbookMappingError } from "./read.js";
+
+/**
+ * Names a range the same way a profile's workbookMapping names one: either a
+ * named table (which carries its own bounds) or a whole worksheet (read used
+ * range to used range). Moved here from src/graph/excel.ts, which read this
+ * range over Graph; this module reads the same range out of downloaded
+ * bytes, and a caller of either should describe what it wants the same way.
+ */
+export type WorkbookSource = { kind: "table" | "worksheet"; name: string };
+
+const RELATIONSHIP_PATTERN = /<Relationship\b[^>]*\/>|<Relationship\b[^>]*>[\s\S]*?<\/Relationship>/g;
+const SHEET_ENTRY_PATTERN = /<sheet\b[^>]*\/>|<sheet\b[^>]*>[\s\S]*?<\/sheet>/g;
+const CALC_PR_PATTERN = /<calcPr\b[^>]*\/>|<calcPr\b[^>]*>/;
+const TABLE_ROOT_PATTERN = /<table\b[^>]*>|<table\b[^>]*\/>/;
+
+/** Reads one attribute's value out of a tag's own text, such as `<sheet name="X" r:id="rId1"/>`. */
+function attribute(tag: string, name: string): string | undefined {
+  return new RegExp(`\\s${name}="([^"]*)"`).exec(tag)?.[1];
+}
+
+function describeSource(source: WorkbookSource): string {
+  return source.kind === "table" ? `The table "${source.name}"` : `The worksheet "${source.name}"`;
+}
+
+function requirePart(parts: Map<string, string>, partName: string, neededFor: string): string {
+  const part = parts.get(partName);
+  if (part === undefined) {
+    throw new WorkbookMappingError(
+      `The workbook archive has no ${partName}, which is needed for ${neededFor}. Either the file is not a ` +
+        "well formed xlsx workbook, or the download was truncated.",
+    );
+  }
+  return part;
+}
+
+/**
+ * A relationship's Target is relative to the directory of the part that
+ * carries the relationship, not to the package root. A workbook-level
+ * relationship's target is relative to "xl/", and a worksheet-level one is
+ * relative to "xl/worksheets/"; both are expressed here as the owning part's
+ * own path, so one function resolves either.
+ */
+function resolveRelativeTarget(owningPartPath: string, target: string): string {
+  if (target.startsWith("/")) return target.slice(1);
+
+  const segments = owningPartPath.split("/");
+  segments.pop();
+  for (const piece of target.split("/")) {
+    if (piece === "" || piece === ".") continue;
+    if (piece === "..") segments.pop();
+    else segments.push(piece);
+  }
+  return segments.join("/");
+}
+
+function parseRelationships(relsXml: string): Map<string, string> {
+  const relationships = new Map<string, string>();
+  for (const match of relsXml.matchAll(RELATIONSHIP_PATTERN)) {
+    const tag = match[0];
+    const id = attribute(tag, "Id");
+    const target = attribute(tag, "Target");
+    if (id !== undefined && target !== undefined) relationships.set(id, target);
+  }
+  return relationships;
+}
+
+function isFullCalcOnLoad(workbookXml: string): boolean {
+  const calcPrTag = CALC_PR_PATTERN.exec(workbookXml)?.[0];
+  if (calcPrTag === undefined) return false;
+  const value = attribute(calcPrTag, "fullCalcOnLoad");
+  return value === "1" || value === "true";
+}
+
+function findSheetRelationshipId(workbookXml: string, name: string): string | undefined {
+  const sheetsSection = /<sheets>([\s\S]*?)<\/sheets>/.exec(workbookXml)?.[1] ?? "";
+  for (const match of sheetsSection.matchAll(SHEET_ENTRY_PATTERN)) {
+    const tag = match[0];
+    const sheetName = attribute(tag, "name");
+    const rId = attribute(tag, "r:id");
+    if (sheetName !== undefined && rId !== undefined && sheetName.toLowerCase() === name.toLowerCase()) {
+      return rId;
+    }
+  }
+  return undefined;
+}
+
+function resolveWorksheet(
+  parts: Map<string, string>,
+  workbookXml: string,
+  workbookRelsXml: string,
+  source: WorkbookSource,
+): { sheetXml: string; bounds: undefined } {
+  const rId = findSheetRelationshipId(workbookXml, source.name);
+  if (rId === undefined) {
+    throw new WorkbookMappingError(
+      `No worksheet named "${source.name}" was found in the workbook's sheet list. Either the profile's ` +
+        "workbookMapping names a worksheet that was renamed or removed, or it should name a table instead.",
+    );
+  }
+
+  const target = parseRelationships(workbookRelsXml).get(rId);
+  if (target === undefined) {
+    throw new WorkbookMappingError(
+      `The worksheet "${source.name}" points at relationship "${rId}", which xl/_rels/workbook.xml.rels does ` +
+        "not define. The workbook's own internal relationships are inconsistent.",
+    );
+  }
+
+  const partName = resolveRelativeTarget("xl/workbook.xml", target);
+  const sheetXml = parts.get(partName);
+  if (sheetXml === undefined) {
+    throw new WorkbookMappingError(
+      `The worksheet "${source.name}" resolves to ${partName}, which is missing from the archive. The ` +
+        "workbook's own internal relationships name a part the file does not actually contain.",
+    );
+  }
+
+  return { sheetXml, bounds: undefined };
+}
+
+interface TableInfo {
+  name: string;
+  ref: string;
+  partName: string;
+}
+
+function findTables(parts: Map<string, string>): TableInfo[] {
+  const tables: TableInfo[] = [];
+  for (const [partName, xml] of parts) {
+    if (!/^xl\/tables\/[^/]+\.xml$/.test(partName)) continue;
+    const tag = TABLE_ROOT_PATTERN.exec(xml)?.[0];
+    if (tag === undefined) continue;
+    const name = attribute(tag, "name");
+    const ref = attribute(tag, "ref");
+    if (name !== undefined && ref !== undefined) tables.push({ name, ref, partName });
+  }
+  return tables;
+}
+
+/**
+ * A table's own part carries no back reference to its worksheet, only the
+ * worksheet's rels carry a forward reference to the table. So the owner is
+ * found by resolving every worksheet's own relationships and matching the one
+ * that points at this table part, rather than by reading anything on the
+ * table part itself.
+ */
+function findOwningWorksheetPart(parts: Map<string, string>, tablePartName: string): string | undefined {
+  for (const [partName, xml] of parts) {
+    if (!/^xl\/worksheets\/_rels\/[^/]+\.xml\.rels$/.test(partName)) continue;
+    const owningWorksheetPart = partName.replace("_rels/", "").replace(/\.rels$/, "");
+    for (const target of parseRelationships(xml).values()) {
+      if (resolveRelativeTarget(owningWorksheetPart, target) === tablePartName) return owningWorksheetPart;
+    }
+  }
+  return undefined;
+}
+
+function parseCellRef(cellRef: string, wholeRef: string, tableName: string): { row: number; column: number } {
+  const match = /^([A-Za-z]+)([0-9]+)$/.exec(cellRef);
+  if (!match) {
+    throw new WorkbookMappingError(
+      `The table "${tableName}" has ref "${wholeRef}", which contains "${cellRef}", not a column letter ` +
+        "followed by a row number. The table's range cannot be determined.",
+    );
+  }
+  const [, letters, digits] = match;
+  return { column: columnLabelToIndex(letters as string), row: Number(digits) };
+}
+
+function parseTableRange(ref: string, tableName: string): SheetBounds {
+  const [startRef, endRef] = ref.split(":");
+  if (startRef === undefined || endRef === undefined) {
+    throw new WorkbookMappingError(
+      `The table "${tableName}" has ref "${ref}", which is not an "A1:D10" style range, so the rows and ` +
+        "columns it covers cannot be determined.",
+    );
+  }
+  const start = parseCellRef(startRef, ref, tableName);
+  const end = parseCellRef(endRef, ref, tableName);
+  return { firstRow: start.row, lastRow: end.row, firstColumn: start.column, lastColumn: end.column };
+}
+
+function resolveTable(
+  parts: Map<string, string>,
+  source: WorkbookSource,
+): { sheetXml: string; bounds: SheetBounds } {
+  const table = findTables(parts).find((candidate) => candidate.name.toLowerCase() === source.name.toLowerCase());
+  if (table === undefined) {
+    throw new WorkbookMappingError(
+      `No table named "${source.name}" was found in the workbook. Either the profile's workbookMapping names ` +
+        "a table that was renamed or removed, or it should name a worksheet instead.",
+    );
+  }
+
+  const bounds = parseTableRange(table.ref, table.name);
+
+  const owningWorksheetPart = findOwningWorksheetPart(parts, table.partName);
+  if (owningWorksheetPart === undefined) {
+    throw new WorkbookMappingError(
+      `The table "${source.name}" is defined in ${table.partName}, but no worksheet's relationships point at ` +
+        "that part, so which worksheet holds it cannot be determined.",
+    );
+  }
+
+  const sheetXml = parts.get(owningWorksheetPart);
+  if (sheetXml === undefined) {
+    throw new WorkbookMappingError(
+      `The table "${source.name}" belongs to ${owningWorksheetPart}, which is missing from the archive. The ` +
+        "workbook's own internal relationships name a part the file does not actually contain.",
+    );
+  }
+
+  return { sheetXml, bounds };
+}
+
+/**
+ * Reads a table's own range, or a worksheet's whole used range, out of xlsx
+ * bytes already in memory. A table read passes its ref to sheetToGrid as
+ * bounds; a worksheet read passes none, which is why its grid's column 0 is
+ * always spreadsheet column A regardless of where data starts (see sheet.ts).
+ * That asymmetry is safe here for the same reason it is safe in sheet.ts:
+ * nothing in this module or its caller translates a grid column index back to
+ * a spreadsheet column.
+ */
+export function parseWorkbookGrid(
+  bytes: Uint8Array,
+  source: WorkbookSource,
+): { grid: CellValue[][]; rowOffset: number } {
+  const parts = readZipParts(
+    bytes,
+    (name) =>
+      name === "xl/workbook.xml" ||
+      name === "xl/_rels/workbook.xml.rels" ||
+      name === "xl/sharedStrings.xml" ||
+      name.startsWith("xl/worksheets/") ||
+      name.startsWith("xl/tables/"),
+  );
+
+  const workbookXml = requirePart(parts, "xl/workbook.xml", "resolving any sheet or table by name");
+  const workbookRelsXml = requirePart(
+    parts,
+    "xl/_rels/workbook.xml.rels",
+    "mapping a sheet's r:id to the worksheet part that holds it",
+  );
+
+  // Absent entirely, rather than an empty <sst/>, is ordinary for a workbook
+  // whose text is all inline strings, so this is not a missing-part failure.
+  const sharedStrings = parseSharedStrings(parts.get("xl/sharedStrings.xml") ?? "");
+
+  const fullCalcOnLoad = isFullCalcOnLoad(workbookXml);
+
+  const { sheetXml, bounds } =
+    source.kind === "table"
+      ? resolveTable(parts, source)
+      : resolveWorksheet(parts, workbookXml, workbookRelsXml, source);
+
+  const { grid, firstRow, hadFormula } = sheetToGrid(sheetXml, sharedStrings, bounds);
+
+  // A workbook-wide condition, not a per-row one: reporting it as fifty
+  // rejected rows would bury the fact that none of this range's cached values
+  // are trustworthy, which is the same reasoning read.ts applies to a stale
+  // mapping.
+  if (fullCalcOnLoad && hadFormula) {
+    throw new WorkbookMappingError(
+      `${describeSource(source)} contains at least one formula, and the workbook is marked fullCalcOnLoad, which ` +
+        "instructs Excel to recalculate every formula when it opens. The values saved in the file are therefore " +
+        "not authoritative, and reading them would report compliance from numbers the workbook itself does not " +
+        "stand behind. Open the workbook in Excel and save it, which writes current values, or point the " +
+        "mapping at a range with no formulas.",
+    );
+  }
+
+  return { grid, rowOffset: firstRow };
+}
