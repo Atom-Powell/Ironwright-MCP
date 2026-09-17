@@ -6,6 +6,7 @@ import type { RepositorySnapshot } from "../domain/reconcile/index.js";
 import type { StateStore } from "../store/types.js";
 import { changesFromDeltaItems } from "./changes.js";
 import { assembleSnapshot } from "./snapshot.js";
+import { crossCheckOtherLibraries, type CrossCheckSkipReason } from "./cross-check.js";
 
 export interface ScanDependencies {
   client: GraphClient;
@@ -38,6 +39,28 @@ export interface ScanResult {
    */
   unfilteredFileCount: number;
   unfilteredFolderCount: number;
+  /**
+   * Present only when the Search cross-check did not complete, naming why.
+   * `crossCheckOtherLibraries` always names one of the four reasons whenever
+   * it does not complete, "no-region" included, so absent means the
+   * cross-check completed rather than "completed or never ran": every
+   * reachable way for it to have never run at all, such as the profile
+   * carrying no searchRegion, is itself one of the four named reasons.
+   */
+  searchCrossCheckSkipReason?: CrossCheckSkipReason;
+  /**
+   * What the cross-check itself spent, kept apart from `graphRequests`
+   * rather than folded into it. `graphRequests` is the figure
+   * `docs/OPEN-ITEMS.md` records a live baseline for and the one this
+   * project treats as evidence of what the delta enumeration costs; a
+   * profile with `searchRegion` configured must not make that figure grow
+   * for a reason that has nothing to do with the enumeration. Present only
+   * when the cross-check issued at least one Graph request, which is
+   * exactly when it was attempted at all: a profile with no `searchRegion`
+   * spends nothing on it, and reporting a zero there would invite a reader
+   * to think something ran and cost nothing rather than that nothing ran.
+   */
+  searchCrossCheckGraphRequests?: number;
 }
 
 export async function runScan(dependencies: ScanDependencies): Promise<ScanResult> {
@@ -48,7 +71,7 @@ export async function runScan(dependencies: ScanDependencies): Promise<ScanResul
   // a tool to, and a tool that reuses a client must not have this call's
   // report include requests a previous call already paid for.
   const requestsAtStart = client.requests();
-  const { driveId } = await resolveDrive(client, profile.identity.siteUrl, profile.identity.library);
+  const { driveId, drives } = await resolveDrive(client, profile.identity.siteUrl, profile.identity.library);
 
   const storedLink = await store.getDeltaLink(profile.profileId, driveId);
 
@@ -108,17 +131,29 @@ export async function runScan(dependencies: ScanDependencies): Promise<ScanResul
 
   const records = await store.listInventory(profile.profileId, driveId);
 
+  // The enumeration's own cost is measured here, before the cross-check runs,
+  // so `graphRequests` below stays exactly what it always meant: the delta
+  // enumeration's cost alone, comparable to the baseline recorded in
+  // docs/OPEN-ITEMS.md whether or not this profile ever runs a cross-check.
+  const graphRequests = client.requests() - requestsAtStart;
+
+  const requestsBeforeCrossCheck = client.requests();
+  const crossCheck = await crossCheckOtherLibraries(client, profile, drives, driveId);
+  const searchCrossCheckGraphRequests = client.requests() - requestsBeforeCrossCheck;
+
   return {
-    snapshot: assembleSnapshot(records, scannedAt, dependencies.subPath),
+    snapshot: assembleSnapshot(records, scannedAt, dependencies.subPath, crossCheck),
     driveId,
     mode,
     resynced,
     pages,
     changesApplied,
-    graphRequests: client.requests() - requestsAtStart,
+    graphRequests,
     storeBatches,
     subPath: dependencies.subPath,
     unfilteredFileCount: records.filter((record) => !record.isFolder).length,
     unfilteredFolderCount: records.filter((record) => record.isFolder).length,
+    ...(crossCheck.reason === undefined ? {} : { searchCrossCheckSkipReason: crossCheck.reason }),
+    ...(searchCrossCheckGraphRequests > 0 ? { searchCrossCheckGraphRequests } : {}),
   };
 }

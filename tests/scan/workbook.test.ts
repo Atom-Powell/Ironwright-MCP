@@ -10,7 +10,7 @@ const PROFILE = loadProfile(
 );
 
 const SITE = "/sites/contoso.sharepoint.com:/sites/Example";
-const DRIVES = "/sites/site-1/drives?$select=id,name";
+const DRIVES = "/sites/site-1/drives?$select=id,name,webUrl";
 // The workbook path the example profile carries, run through driveItemPath's
 // per-segment encoding: the space in the file name becomes %20.
 const ITEM_PATH = "/drives/drive-1/root:/Trackers/Operational%20Tracking%20Workbook.xlsx:";

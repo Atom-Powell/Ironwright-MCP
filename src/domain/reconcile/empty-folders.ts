@@ -29,11 +29,22 @@ function ancestorsOf(path: string): string[] {
  * The result is deduplicated and sorted by path, because two scan entries for
  * one folder must not become two rows in the report, and the report is
  * compared against a golden file.
+ *
+ * A file carrying `library` came from the Microsoft Search cross-check and
+ * sits in a different document library, not in this profile's own one, so it
+ * cannot occupy a folder here: `repository.folderPaths` is the profile's own
+ * library's folder listing, and a library-relative path from another library
+ * occupying it by coincidence of spelling would mark a genuinely empty client
+ * folder in the profile's own library as occupied. Such a file is excluded
+ * from this walk for the same reason it is excluded from orphan reporting in
+ * match.ts: this cross-check only ever supplies candidates for expected
+ * artifacts, never facts about the profile's own library's contents.
  */
 export function findEmptyFolders(repository: RepositorySnapshot): string[] {
   const occupied = new Set<string>();
 
   for (const file of repository.files) {
+    if (file.library !== undefined) continue;
     for (const ancestor of ancestorsOf(file.path)) {
       occupied.add(ancestor);
     }

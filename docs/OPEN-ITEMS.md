@@ -661,6 +661,11 @@ sitting's expectation was computed by running the same engine over the same plan
 two agree by construction on anything the engine gets wrong. The write-tool surface and the
 Microsoft Search cross-check remain as described above.
 
+**A second update, 2026-09-17.** The Microsoft Search cross-check is no longer phase 2c and
+unstarted, and the claim that both scans above correctly reported themselves as degraded no longer
+describes the current state of that check. See "The phase 2c live tenant sitting, 2026-09-17"
+below. The write-tool surface is unaffected and remains as described above.
+
 ## BLOCKING: the Graph Excel API refuses app-only tokens, so phase 2b-1 cannot run as built
 
 Found 2026-09-16, on the first live tenant sitting, by the seed command's workbook step. This is
@@ -996,6 +1001,12 @@ composition. It also does not cover the Microsoft Search cross-check, which is p
 unstarted, so the report correctly declared itself degraded. Azurite is not Azure Table Storage
 proper.
 
+**UPDATE 2026-09-17, from the phase 2c sitting.** The Microsoft Search cross-check is no longer
+phase 2c and unstarted, and a report from this branch is no longer necessarily degraded on that
+account. See "The phase 2c live tenant sitting, 2026-09-17" below. The rest of this paragraph is
+unaffected: the reconciliation engine's own correctness is still not established by this sitting,
+and Azurite is still not Azure Table Storage proper.
+
 **Step 9, the teardown, still has not run.** The grant issuer and the server application are both
 still live in the tenant and both still issue tokens, verified 2026-09-17. The two questions
 teardown exists to answer, whether the purge really empties **Deleted applications** and whether a
@@ -1011,6 +1022,94 @@ complete" in "Task 8 done, and two more findings from the same evening" above; a
 the "Why this matters beyond the usual disclaimer" paragraph in "Phase 4a: covered only by fakes,
 2026-09-14" below. Each has its own dated update note at its location rather than being edited
 away.
+
+## The phase 2c live tenant sitting, 2026-09-17
+
+Run against the `helloironwright` developer tenant, site `IronwrightTest`, profile
+`profiles/synthetic.json`, on branch `phase-2c-search-cross-check`, with the suite at 1635 tests
+across 113 files and all gates green. This is the first live run of the Microsoft Search
+cross-check, run deliberately before merging, which is the sequence phase 2b-1 skipped.
+
+**Setup.** A second document library named `Archive` was created on the site through Graph, using
+the grant issuer, because the server application is read-only by design. `identity.searchRegion`
+was set to `NAM` in the profile. Two perturbations were made against `Documents`.
+`2026/Client01/02-February/2026-02_Client01_MonthlyTraining.xlsx` was moved into `Archive` at the
+identical library-relative path and deleted from `Documents`.
+`2026/Client02/02-February/2026-02_Client02_MonthlyTraining.xlsx` was copied into `Archive` at the
+identical library-relative path and left in `Documents`. The second case was added deliberately: it
+is the input the whole-branch review found would erase the local file, because both copies then
+occupy the same library-relative path.
+
+**Result, once the Search index caught up.** The cross-check completed, `searchCrossCheckIncluded`
+true, no skip reason, costing 1 Graph request while the inventory scan's own count stayed at 3.
+
+Client01's February artifact moved from `missing` to `misplaced`, with `matched.library` equal to
+`Archive`. That is the phase's whole purpose, working against a real tenant. The report names the
+library in prose: "1 listed finding was found in another document library rather than the profile's
+own: Archive".
+
+Client02 stayed `compliant` with 12 compliant artifacts, despite an `Archive` copy at the identical
+relative path whose timestamp was newer, since it was uploaded later. Before the dedupe fix that
+copy would have superseded and erased the local file. The fix is proven on live data.
+
+The `Archive` copy was reported as 1 duplicate, not as an orphan. Orphans stayed at 2, the tracking
+workbook and `starter.xlsx`, both in the profile's own library. The `Archive` tree contributed no
+orphans of its own. The rule that makes this tool usable at a customer with more than one library
+holds live.
+
+The matched file carries `etag: ""`, which is the documented consequence of Search returning no
+eTag, and is harmless because a local and a foreign file at the same path are no longer compared.
+
+**A defect the live run found, and the most important thing recorded in this section.**
+`listDrives` returns a drive `webUrl` that is percent encoded, while a search hit's `webUrl` is
+not:
+
+```
+drive:  https://helloironwright.sharepoint.com/sites/IronwrightTest/Shared%20Documents
+hit:    https://helloironwright.sharepoint.com/sites/IronwrightTest/Shared Documents/2026/Client02/...
+```
+
+`relativePathWithinLibrary` stripped the drive URL as a literal prefix, so for any library whose
+name contains a space the prefix never matched, every hit was skipped, and the cross-check reported
+itself complete having found nothing. It fails safe: nothing errored and nothing warned. `Shared
+Documents` is the default name of a SharePoint document library, so this would have hit most real
+customers on the most common library name, and the symptom would have been a feature that silently
+did nothing.
+
+No test could have caught it. Every fixture builds both URLs itself, so both sides agree by
+construction. The live site's second library is named `Archive`, with no space, which is why the
+run that exposed the mismatch did not also fail on it. Fixed in commit `2461d6c`, by comparing path
+segments after decoding each one.
+
+**A second suspicion, ruled out by evidence.** The same fix raised a concern that the `path:` KQL
+scope might also need the unencoded form, and named it the likely cause of the symptom. That was
+tested directly against the live index using the `Documents` library, which has a space in its URL
+name and 144 indexed files. The encoded form returned 144 hits and the decoded form returned 144
+hits. Both are accepted. The scope was never broken, and the concern is closed by measurement
+rather than left standing as a suspicion.
+
+**An operational fact, worth recording as a product property rather than a defect.** Search
+indexing took approximately seven minutes. The first reconcile after the move reported the artifact
+as `missing`, and was correct to: the cross-check completed against an index that did not yet
+contain the file. A customer who moves a file and immediately runs a report will see the same
+thing.
+
+**A process hazard, worth one line.** The first attempt to call the tool was answered by a stale
+server left listening on port 3000 from an earlier sitting, running pre-phase-2c code. It reported
+that the cross-check did not run, using wording this branch had already replaced. The new server
+had failed to bind with `EADDRINUSE`, and its exit code was the only signal available. A conclusion
+drawn from that response would have been confidently wrong.
+
+**What this run establishes, and what it does not.** It establishes, against a real tenant and a
+real Search index, that a file moved to a second library is reported `misplaced` with the correct
+library named; that the dedupe fix preventing a foreign copy from erasing a locally present file
+holds on live data; that a foreign-library file at a colliding path is counted as a duplicate
+rather than an orphan; that a second library contributes no orphans of its own; and that the drive
+`webUrl` versus search hit `webUrl` encoding defect above is real and is fixed. It does not
+establish anything about a library holding more results than the page cap, about a search failing,
+about a library listed without a `webUrl`, or about behavior at scale. This run exercised one site
+with two libraries, one moved file, and one copied file, and no more than that should be read into
+it.
 
 ## Neither teardown mode can recover from its own partial purge failure
 

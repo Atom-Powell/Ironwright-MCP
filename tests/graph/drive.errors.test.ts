@@ -15,7 +15,7 @@ describe("resolveDrive failures", () => {
   it("lists the libraries that do exist, because a bare not-found sends an operator to the wrong place", async () => {
     const client = fakeClient({
       "/sites/contoso.sharepoint.com:/sites/Example": { id: "site-1" },
-      "/sites/site-1/drives?$select=id,name": {
+      "/sites/site-1/drives?$select=id,name,webUrl": {
         value: [
           { id: "drive-a", name: "Documents" },
           { id: "drive-c", name: "Archive" },
@@ -32,7 +32,7 @@ describe("resolveDrive failures", () => {
   it("says the site has no libraries at all rather than printing an empty list", async () => {
     const client = fakeClient({
       "/sites/contoso.sharepoint.com:/sites/Example": { id: "site-1" },
-      "/sites/site-1/drives?$select=id,name": { value: [] },
+      "/sites/site-1/drives?$select=id,name,webUrl": { value: [] },
     });
 
     await expect(
@@ -51,7 +51,7 @@ describe("resolveDrive failures", () => {
   it("says the response shape was unexpected, not that the site has no libraries, when every entry is malformed", async () => {
     const client = fakeClient({
       "/sites/contoso.sharepoint.com:/sites/Example": { id: "site-1" },
-      "/sites/site-1/drives?$select=id,name": { value: [{ id: "drive-a" }, { name: "Archive" }] },
+      "/sites/site-1/drives?$select=id,name,webUrl": { value: [{ id: "drive-a" }, { name: "Archive" }] },
     });
 
     const failure = resolveDrive(client, "https://contoso.sharepoint.com/sites/Example", "Compliance Reports");

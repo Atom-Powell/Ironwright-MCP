@@ -76,6 +76,15 @@ export const IdentitySchema = z.object({
   siteUrl: z.string().url(),
   library: z.string().min(1),
   workbookPath: z.string().startsWith("/"),
+  /**
+   * The Microsoft Search region, such as "NAM". Required by Graph on any
+   * search issued with an application permission, and there is no discovery
+   * call this project has verified, so it is configured rather than detected.
+   * Optional because a profile without it is still valid: the cross-check is
+   * skipped and the report says that is why, rather than failing a run over a
+   * field that only affects one of its checks.
+   */
+  searchRegion: z.string().min(1).optional(),
 });
 
 export const TaxonomySchema = z.object({

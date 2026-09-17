@@ -1,4 +1,5 @@
 import type { ArtifactState, Period } from "../../domain/reconcile/index.js";
+import { crossCheckNeverAttempted, describeCrossCheckSkipReason } from "../../scan/cross-check.js";
 import type { ReconcileToolOutput } from "./output.js";
 
 function plural(count: number, singular: string, pluralForm: string): string {
@@ -11,6 +12,16 @@ function period(value: Period): string {
 
 function quoteList(values: readonly string[]): string {
   return values.map((value) => `"${value}"`).join(", ");
+}
+
+/**
+ * Ordinary code-unit comparison rather than `localeCompare`, matching the
+ * reconciliation engine's own sort: this list of library names is part of a
+ * response a golden-style test can pin, and `localeCompare` varies with the
+ * host's ICU data and default locale.
+ */
+function compareStrings(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 const STATE_LABELS: ReadonlyArray<{ state: Exclude<ArtifactState, "compliant">; label: string }> = [
@@ -101,6 +112,24 @@ export function reconcileText(output: ReconcileToolOutput): string[] {
     );
   }
 
+  // A qualified `matched.library` means the Microsoft Search cross-check
+  // found this artifact in another document library, not the profile's own
+  // one. Its path alone renders identically to an ordinary misfiling inside
+  // the profile's own library, so an operator who opens that library, does
+  // not find the file there, and has no reason to look anywhere else would
+  // conclude the report is wrong rather than that the file is elsewhere.
+  const foundElsewhere = output.artifacts.filter((artifact) => artifact.matched?.library !== undefined);
+  if (foundElsewhere.length > 0) {
+    const libraries = [...new Set(foundElsewhere.map((artifact) => artifact.matched?.library).filter((library) => library !== undefined))].sort(
+      compareStrings,
+    );
+    lines.push(
+      `${plural(foundElsewhere.length, "listed finding", "listed findings")} ` +
+        `${foundElsewhere.length === 1 ? "was" : "were"} found in another document library rather than the ` +
+        `profile's own: ${quoteList(libraries)}.`,
+    );
+  }
+
   const extras: string[] = [];
   if (output.duplicates.length > 0) extras.push(plural(output.duplicates.length, "duplicate", "duplicates"));
   if (output.orphans.length > 0) extras.push(plural(output.orphans.length, "orphan", "orphans"));
@@ -149,11 +178,37 @@ export function reconcileText(output: ReconcileToolOutput): string[] {
   }
 
   if (!output.provenance.searchCrossCheckIncluded) {
-    lines.push(
-      "The Microsoft Search cross-check did not run. Without it a correctly named file stored outside the " +
-        "expected taxonomy is invisible to this scan, so every misplaced finding is unreliable and every missing " +
-        "finding is suspect.",
-    );
+    // Four causes, four remedies, and never more than the one the cross-check
+    // itself established. `searchCrossCheckSkipReason` absent means the code
+    // never learned why, which is the only case allowed to name no cause: a
+    // sentence that invented one here would be exactly the defect the
+    // message-audit practice exists to prevent, an assertion this function
+    // cannot observe to be true. Whichever reason applies, this function
+    // knows only that the cross-check did not complete, never that it "did
+    // not run": search-failed, library-not-addressable and page-cap-reached
+    // all mean an attempt was made, and even a whole-run search-failed can
+    // still carry files from a library that succeeded before a different
+    // one's request threw.
+    const reason = output.provenance.searchCrossCheckSkipReason;
+    const cause = describeCrossCheckSkipReason(reason);
+
+    // A whole-drive delta scan already finds a correctly named file at an
+    // unexpected path within the profile's own library, so a misplaced
+    // finding is reliable with or without this cross-check; that claim is not
+    // repeated here. What a cross-check adds is visibility into the site's
+    // other libraries, so the only finding this consequence bears on is a
+    // missing one. "no-region" is the sole reason meaning the cross-check
+    // spent no request at all; every other reason, this unrecorded one
+    // included, means an attempt reached at least one library, so those
+    // findings already reflect whatever that attempt found and only the part
+    // it did not reach stays uncertain.
+    const consequence = crossCheckNeverAttempted(reason)
+      ? "Without it, a correctly named file filed into a different document library of the same site is " +
+        "invisible to this scan, so a finding reported missing may in fact exist there."
+      : "Because it did not complete, a finding reported missing may still exist in a document library, or " +
+        "a part of one, this cross-check did not reach.";
+
+    lines.push(`${cause} ${consequence}`);
   }
 
   // `cost` carries the whole predicate on both branches so the sentence below
@@ -162,9 +217,20 @@ export function reconcileText(output: ReconcileToolOutput): string[] {
   // that string in its own "This call cost" template produced "This call cost
   // 1 Graph request, this call.", which is exactly the defect this module
   // exists to prevent: correct clause by clause, false once assembled.
+  //
+  // The cross-check's own cost is named as its own clause rather than folded
+  // into the scan's count. Summing them would make an incremental scan
+  // against a profile with searchRegion configured report a materially
+  // larger number than the same scan without one, for a reason that has
+  // nothing to do with the delta enumeration, which is exactly the number
+  // docs/OPEN-ITEMS.md records a live baseline for.
+  const crossCheckCost =
+    output.provenance.searchCrossCheckGraphRequestsByThisCall === undefined
+      ? ""
+      : `, plus ${plural(output.provenance.searchCrossCheckGraphRequestsByThisCall, "Graph request", "Graph requests")} for the Search cross-check`;
   const cost = output.provenance.scanSharedWithConcurrentCall
     ? "issued no Graph request of its own because it shared a scan already running"
-    : `cost ${plural(output.provenance.graphRequestsByThisCall, "Graph request", "Graph requests")}`;
+    : `cost ${plural(output.provenance.graphRequestsByThisCall, "Graph request", "Graph requests")}${crossCheckCost}`;
 
   lines.push(
     `Repository read by ${output.provenance.scanMode} scan at ${output.provenance.scannedAt}` +

@@ -192,3 +192,70 @@ describe("a repository snapshot whose two entries for one path disagree", () => 
     expect(januaryDuplicatesOf(report)).toHaveLength(1);
   });
 });
+
+/**
+ * The collapse above keys on path alone, which is correct only within one
+ * document library: two other libraries on the same site routinely hold a
+ * file at the identical library-relative path, which is exactly what the
+ * spec's own live scenario produces when a seeded deliverable is later filed
+ * away into a second library with its folder structure kept. Keying the
+ * collapse on path alone would treat the local compliant file and an
+ * unrelated foreign one as one repeated listing of the same item: whichever
+ * one `supersedes` preferred would win, and the other would be discarded
+ * before parsing or matching ever saw it, rather than reported as a duplicate.
+ * A later-modified foreign copy would then erase a genuinely compliant local
+ * artifact from the report entirely, reporting it `misplaced` with an empty
+ * etag a later move plan would use as a stale `If-Match` precondition.
+ */
+describe("a repository snapshot with a foreign file at the same relative path as a local one", () => {
+  it("keeps both as independent candidates rather than letting the later-modified one erase the other", () => {
+    const local = fileAt(COMPLIANT_PATH);
+    const foreign: RepositoryFile = {
+      ...local,
+      // Deliberately later than the local file's own modified date: a
+      // path-only collapse would prefer this entry and silently drop the
+      // local, genuinely compliant file.
+      modified: "2099-01-01T00:00:00Z",
+      etag: "etag-foreign-archive",
+      library: "Archive",
+    };
+    const snapshot: RepositorySnapshot = { ...repository, files: [...repository.files, foreign] };
+
+    const report = reconcile(profile, workbook, snapshot, GOLDEN_AS_OF);
+
+    const january = report.artifacts.find(
+      (artifact) => artifact.client === "CLIENTA" && artifact.deliverable === "monthly-safety" && artifact.period.month === 1,
+    );
+
+    // The local file still wins the slot on its own merits (compliant outranks
+    // misplaced), not because the foreign one was never seen.
+    expect(january?.state).toBe("compliant");
+    expect(january?.matched?.path).toBe(COMPLIANT_PATH);
+    expect(january?.matched?.etag).toBe(local.etag);
+    expect(january?.matched?.library).toBeUndefined();
+
+    // The foreign file reached matching too, lost the slot on its own merits,
+    // and is reported as a duplicate that names the library it was found in.
+    const foreignDuplicate = report.duplicates.find(
+      (duplicate) => duplicate.path === COMPLIANT_PATH && duplicate.library === "Archive",
+    );
+    expect(foreignDuplicate).toBeDefined();
+    expect(foreignDuplicate?.state).toBe("misplaced");
+  });
+
+  it("still collapses two hits from the same other library at the same path", () => {
+    // Guards the guard: the fix must key on (library, path), not exempt every
+    // qualified file from deduplication altogether.
+    const local = fileAt(COMPLIANT_PATH);
+    const foreignOld: RepositoryFile = { ...local, modified: "2026-02-01T00:00:00Z", etag: "etag-archive-old", library: "Archive" };
+    const foreignNew: RepositoryFile = { ...local, modified: "2026-03-01T00:00:00Z", etag: "etag-archive-new", library: "Archive" };
+    const snapshot: RepositorySnapshot = { ...repository, files: [...repository.files, foreignOld, foreignNew] };
+
+    const report = reconcile(profile, workbook, snapshot, GOLDEN_AS_OF);
+
+    const archiveDuplicates = report.duplicates.filter(
+      (duplicate) => duplicate.path === COMPLIANT_PATH && duplicate.library === "Archive",
+    );
+    expect(archiveDuplicates).toHaveLength(1);
+  });
+});

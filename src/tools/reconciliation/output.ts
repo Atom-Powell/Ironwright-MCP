@@ -7,6 +7,7 @@ import type {
   Period,
   RejectedWorkbookRow,
 } from "../../domain/reconcile/index.js";
+import type { CrossCheckSkipReason } from "../../scan/cross-check.js";
 
 /**
  * The most non-compliant artifact findings one call returns.
@@ -35,6 +36,29 @@ export interface ScanProvenance {
    */
   graphRequestsByThisCall: number;
   scanSharedWithConcurrentCall: boolean;
+  /**
+   * Present only when the Search cross-check did not complete, naming why.
+   * `crossCheckOtherLibraries` always names one of the four reasons whenever
+   * it does not complete, "no-region" included, so absent means the
+   * cross-check completed rather than "completed or never ran": every
+   * reachable way for it to have never run at all, such as the profile
+   * carrying no searchRegion, is itself one of the four named reasons.
+   */
+  searchCrossCheckSkipReason?: CrossCheckSkipReason;
+  /**
+   * What this call's own cross-check spent, kept apart from
+   * `graphRequestsByThisCall` rather than summed into it. That field is the
+   * figure `docs/OPEN-ITEMS.md` records a live baseline for, and folding the
+   * cross-check's traffic into it would make an incremental scan against a
+   * profile with `searchRegion` configured report a materially larger number
+   * for a reason that has nothing to do with the delta enumeration.
+   *
+   * Absent, like `graphRequestsByThisCall` being zeroed, when this call
+   * joined a scan another call ran: a joiner paid nothing of its own for the
+   * cross-check either. Also absent when no cross-check was attempted at
+   * all, for the same reason it is never reported as zero on `ScanResult`.
+   */
+  searchCrossCheckGraphRequestsByThisCall?: number;
 }
 
 export interface ReconcileToolOutput {
@@ -83,7 +107,18 @@ const ArtifactSchema = SlotSchema.extend({
   expectedName: z.string(),
   state: ArtifactStateSchema,
   matched: z
-    .object({ path: z.string(), name: z.string(), etag: z.string(), recognizerId: z.string().optional() })
+    .object({
+      path: z.string(),
+      name: z.string(),
+      etag: z.string(),
+      recognizerId: z.string().optional(),
+      library: z
+        .string()
+        .optional()
+        .describe(
+          "The document library this file was actually found in, present only when it is not the profile's own library. A misplaced or misnamed_and_misplaced finding with this set was found by the Microsoft Search cross-check in another library on the same site, not inside the profile's own library.",
+        ),
+    })
     .optional(),
 });
 
@@ -103,12 +138,25 @@ export const RECONCILE_OUTPUT_SCHEMA = {
       searchCrossCheckIncluded: z
         .boolean()
         .describe(
-          "False until the Microsoft Search cross-check ships. While false, a correctly named file stored outside the expected taxonomy is invisible, so every misplaced finding is unreliable and every missing finding is suspect.",
+          "False when the Microsoft Search cross-check did not run to completion. A misplaced finding within the profile's own library is reliable either way, since the whole-drive scan already finds it. What stays invisible while this is false is a correctly named file filed into a different document library of the same site, so a finding reported missing may in fact exist there.",
         ),
       scanMode: z.enum(["full", "incremental"]),
       resynced: z.boolean(),
       graphRequestsByThisCall: z.number().int(),
       scanSharedWithConcurrentCall: z.boolean(),
+      searchCrossCheckSkipReason: z
+        .enum(["no-region", "search-failed", "library-not-addressable", "page-cap-reached"])
+        .optional()
+        .describe(
+          "Present only when the Search cross-check did not complete, naming why. Every way it can fail to run at all, including the profile carrying no searchRegion, is itself one of these named reasons, so absent means it completed.",
+        ),
+      searchCrossCheckGraphRequestsByThisCall: z
+        .number()
+        .int()
+        .optional()
+        .describe(
+          "What this call's own Search cross-check spent, kept separate from graphRequestsByThisCall so that figure keeps meaning the delta enumeration's cost alone. Absent when this call joined another call's scan or when no cross-check was attempted.",
+        ),
     })
     .describe("Where the two inputs came from, and what this call paid for them."),
   scope: z
@@ -141,6 +189,10 @@ export const RECONCILE_OUTPUT_SCHEMA = {
         name: z.string(),
         slot: SlotSchema,
         state: z.enum(["compliant", "misnamed", "misplaced", "misnamed_and_misplaced"]),
+        library: z
+          .string()
+          .optional()
+          .describe("Same meaning as an artifact's matched.library: present when this copy was found in another document library."),
       }),
     )
     .describe("Extra files that also satisfy a slot already claimed by a better candidate."),

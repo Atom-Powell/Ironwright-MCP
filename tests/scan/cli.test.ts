@@ -101,8 +101,62 @@ describe("formatScanResult", () => {
     expect(lines).toMatch(/next run will enumerate in full/i);
   });
 
-  it("always states that no Search cross-check ran, since every 2a snapshot is degraded", () => {
-    expect(formatScanResult(result(), "azure-table").join("\n")).toMatch(/Search cross-check did not run/i);
+  it("says the cross-check completed and prints no degradation sentence when it did", () => {
+    // The default fixture carries no searchCrossCheckSkipReason, which is
+    // exactly what a completed cross-check looks like on a ScanResult.
+    const lines = formatScanResult(result(), "azure-table").join("\n");
+
+    expect(lines).toMatch(/Search cross-check completed/i);
+    expect(lines).not.toMatch(/did not run/i);
+    expect(lines).not.toMatch(/did not complete/i);
+    expect(lines).not.toMatch(/degraded/i);
+  });
+
+  it("names the missing region as the reason and says the cross-check never ran", () => {
+    const lines = formatScanResult(result({ searchCrossCheckSkipReason: "no-region" }), "azure-table").join("\n");
+
+    expect(lines).toMatch(/no searchRegion configured/i);
+    expect(lines).toMatch(/Without it/);
+    expect(lines).not.toMatch(/failed/i);
+  });
+
+  it("says a search failed, and does not claim the cross-check never ran", () => {
+    const lines = formatScanResult(result({ searchCrossCheckSkipReason: "search-failed" }), "azure-table").join(
+      "\n",
+    );
+
+    expect(lines).toMatch(/cross-check failed/i);
+    expect(lines).not.toMatch(/Without it/);
+    expect(lines).toMatch(/did not reach/);
+  });
+
+  it("says a library could not be searched, without calling it a failure", () => {
+    const lines = formatScanResult(
+      result({ searchCrossCheckSkipReason: "library-not-addressable" }),
+      "azure-table",
+    ).join("\n");
+
+    expect(lines).toMatch(/without a URL/);
+    expect(lines).not.toMatch(/cross-check failed/i);
+    expect(lines).not.toMatch(/Without it/);
+  });
+
+  it("says the scan was too large when the page cap was reached", () => {
+    const lines = formatScanResult(result({ searchCrossCheckSkipReason: "page-cap-reached" }), "azure-table").join(
+      "\n",
+    );
+
+    expect(lines).toMatch(/page cap/i);
+    expect(lines).not.toMatch(/Without it/);
+  });
+
+  it("gives each of the four skip reasons its own distinguishable sentence", () => {
+    const reasons = ["no-region", "search-failed", "library-not-addressable", "page-cap-reached"] as const;
+    const texts = reasons.map((reason) =>
+      formatScanResult(result({ searchCrossCheckSkipReason: reason }), "azure-table").join("\n"),
+    );
+
+    expect(new Set(texts).size).toBe(reasons.length);
   });
 
   it("names the count of files with no ETag when some files lack one", () => {

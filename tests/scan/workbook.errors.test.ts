@@ -11,7 +11,7 @@ const PROFILE = loadProfile(
 );
 
 const SITE = "/sites/contoso.sharepoint.com:/sites/Example";
-const DRIVES = "/sites/site-1/drives?$select=id,name";
+const DRIVES = "/sites/site-1/drives?$select=id,name,webUrl";
 const ITEM_PATH = "/drives/drive-1/root:/Trackers/Operational%20Tracking%20Workbook.xlsx:";
 const CONTENT_PATH = `${ITEM_PATH}/content`;
 

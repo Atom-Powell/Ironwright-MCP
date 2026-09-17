@@ -3,6 +3,16 @@ import type { GraphClient } from "./client.js";
 export interface DriveLocation {
   siteId: string;
   driveId: string;
+  /**
+   * Every drive the site listing carried, own library included, alongside the
+   * resolved id rather than requiring a second caller to fetch it again. The
+   * Microsoft Search cross-check needs the site's other libraries and the
+   * profile's own resolved drive id to exclude by, and `runScan` already pays
+   * for this exact listing to resolve the profile's own library before the
+   * cross-check ever runs, so handing it back here is what lets a scan spend
+   * one listing call rather than two for the same site.
+   */
+  drives: SiteDrive[];
 }
 
 export class LibraryNotFoundError extends Error {
@@ -43,7 +53,21 @@ export function siteLookupPath(siteUrl: string): string {
 }
 
 interface DriveListing {
-  value?: Array<{ id?: unknown; name?: unknown }>;
+  value?: Array<{ id?: unknown; name?: unknown; webUrl?: unknown }>;
+}
+
+export interface SiteDrive {
+  id: string;
+  name: string;
+  /**
+   * Optional because id and name are the only fields the shape filter below
+   * requires; a listing entry that is otherwise usable but happens to lack a
+   * webUrl should still resolve for `resolveDrive`, which never reads it.
+   * The Microsoft Search cross-check is the one caller that needs it, to
+   * search a library and to strip its own root back off a hit's webUrl, and
+   * it is positioned to decide what an absent webUrl means for its own job.
+   */
+  webUrl?: string;
 }
 
 /**
@@ -52,12 +76,20 @@ interface DriveListing {
  * cannot download content, such as the seeder's write-only client, still has
  * a library to resolve, and a parameter typed as the full `GraphClient` would
  * force it to carry a `getBytes` it never uses just to call this function.
+ *
+ * `resolveDrive` and the Microsoft Search cross-check both need a site's
+ * libraries, so the enumeration lives here once rather than once per caller.
+ *
+ * `rawCount` rides alongside `drives` for `resolveDrive`'s own use below: it is
+ * how many entries the listing carried before the shape filter, which is what
+ * `LibraryNotFoundError` needs to tell a site with no libraries apart from a
+ * site whose libraries arrived in a shape this code could not read. A caller
+ * that only wants the libraries, such as the search cross-check, can ignore it.
  */
-export async function resolveDrive(
+export async function listDrives(
   client: Pick<GraphClient, "get">,
   siteUrl: string,
-  library: string,
-): Promise<DriveLocation> {
+): Promise<{ siteId: string; drives: SiteDrive[]; rawCount: number }> {
   const site = await client.get<{ id?: unknown }>(siteLookupPath(siteUrl));
   if (typeof site.id !== "string" || site.id.length === 0) {
     // Without this the site id interpolates as the literal text "undefined" into
@@ -65,25 +97,49 @@ export async function resolveDrive(
     throw new Error(`Resolving the site "${siteUrl}" returned a response with no id.`);
   }
 
-  const listing = await client.get<DriveListing>(`/sites/${site.id}/drives?$select=id,name`);
+  const listing = await client.get<DriveListing>(`/sites/${site.id}/drives?$select=id,name,webUrl`);
   const rawValue = listing.value ?? [];
   const drives = rawValue.flatMap((drive) =>
-    typeof drive.id === "string" && typeof drive.name === "string" ? [{ id: drive.id, name: drive.name }] : [],
+    typeof drive.id === "string" && typeof drive.name === "string"
+      ? [{ id: drive.id, name: drive.name, ...(typeof drive.webUrl === "string" ? { webUrl: drive.webUrl } : {}) }]
+      : [],
   );
 
-  // Exact first. SharePoint permits two libraries whose names differ only in
-  // case, so falling straight to a case-insensitive match could pick the wrong one.
+  return { siteId: site.id, drives, rawCount: rawValue.length };
+}
+
+/**
+ * Exact first. SharePoint permits two libraries whose names differ only in
+ * case, so falling straight to a case-insensitive match could pick the wrong
+ * one.
+ *
+ * Exported as its own pure function, separate from `resolveDrive`, so a
+ * second caller that already has a `drives` list in hand -- the Microsoft
+ * Search cross-check identifying the profile's own drive among a listing it
+ * fetched once -- can reuse the exact rule `resolveDrive` uses rather than
+ * keeping an independent copy that could drift from it.
+ */
+export function matchDrive(drives: readonly SiteDrive[], library: string): SiteDrive | undefined {
   const exact = drives.find((drive) => drive.name === library);
-  const insensitive = drives.find((drive) => drive.name.toLowerCase() === library.toLowerCase());
-  const matched = exact ?? insensitive;
+  if (exact !== undefined) return exact;
+  return drives.find((drive) => drive.name.toLowerCase() === library.toLowerCase());
+}
+
+export async function resolveDrive(
+  client: Pick<GraphClient, "get">,
+  siteUrl: string,
+  library: string,
+): Promise<DriveLocation> {
+  const { siteId, drives, rawCount } = await listDrives(client, siteUrl);
+  const matched = matchDrive(drives, library);
 
   if (matched === undefined) {
     throw new LibraryNotFoundError(
       library,
       drives.map((drive) => drive.name).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
-      rawValue.length,
+      rawCount,
     );
   }
 
-  return { siteId: site.id, driveId: matched.id };
+  return { siteId, driveId: matched.id, drives };
 }
