@@ -101,28 +101,83 @@ function literalExtension(template: string): string | undefined {
 }
 
 /**
+ * Decodes every segment of a path, or reports that it could not: a segment
+ * carrying a malformed percent-encoded sequence throws out of
+ * `decodeURIComponent`, and a path this code cannot decode with confidence is
+ * worse than one it refuses to compare at all.
+ */
+function decodeSegments(segments: readonly string[]): string[] | undefined {
+  const decoded: string[] = [];
+  for (const segment of segments) {
+    try {
+      decoded.push(decodeURIComponent(segment));
+    } catch {
+      return undefined;
+    }
+  }
+  return decoded;
+}
+
+/**
  * A hit's webUrl relative to the library's own webUrl, so a qualified file's
  * path means the same thing a local file's path means: library-relative, no
  * leading slash.
  *
- * Only the folder segments are decoded. `hit.name` is already the literal
- * file name Graph reported on the hit itself, unencoded, so decoding it a
- * second time out of the URL would turn a real file called "a%20b.xlsx" into
- * "a b.xlsx" and misreport it, the same trap `libraryRelativePath` in
- * graph/paths.ts exists to avoid.
+ * The library-prefix segments are decoded on both sides before comparison,
+ * rather than compared as raw pathname strings. A live run against
+ * helloironwright.sharepoint.com on 2026-09-17 found the library's own
+ * webUrl, from listDrives, percent encoded ("Shared%20Documents"), while a
+ * Microsoft Search hit's webUrl for a file genuinely in that same library was
+ * not ("Shared Documents", a literal space). A raw prefix comparison never
+ * matches those two spellings of the same library, which skipped every hit
+ * in any library whose name needed encoding and made the cross-check report
+ * `complete: true` having silently found nothing. Decoding both sides first
+ * compares what the library is named rather than which bytes Graph happened
+ * to send, so it does not matter which side, if either, arrived encoded.
+ * This also covers characters outside `Shared Documents`' one space: an
+ * apostrophe or ampersand in a library name is not in the URL path
+ * percent-encode set, so `new URL(...).pathname` alone leaves it exactly as
+ * received and would not have converged the way it accidentally does for a
+ * plain space; decoding is what makes the comparison genuinely
+ * encoding-independent rather than lucky for this one case.
+ *
+ * Only the library-prefix and intervening folder segments are decoded.
+ * `hit.name` is already the literal file name Graph reported on the hit
+ * itself, unencoded, so decoding it a second time out of the URL would turn a
+ * real file called "a%20b.xlsx" into "a b.xlsx" and misreport it, the same
+ * trap `libraryRelativePath` in graph/paths.ts exists to avoid. The output
+ * this function produces is therefore the same library-relative convention
+ * `libraryRelativePath` produces for the ordinary delta scan: segments joined
+ * literally with "/", decoded except for the trailing file name, which is
+ * never touched. The reconciliation engine can compare the two without
+ * knowing which scan found a file, which is the property this cross-check's
+ * whole output depends on.
+ *
+ * A decoded library name that happens to equal a different literal library
+ * name is the one way this could misidentify a library rather than fail
+ * safe: a library literally named "A%20B" (containing a literal percent
+ * sign, not a byte pair meant to be decoded) is indistinguishable from a
+ * library named "A B" once both are decoded, if SharePoint's own webUrl
+ * generation ever emitted the former without escaping its literal "%" as
+ * "%25" first. This is accepted rather than guarded against: escaping a
+ * literal "%" in a generated URL is ordinary, correct URL construction, and
+ * a library name built to collide with its own percent-encoded form is a
+ * pathological case this project has not seen and Graph's own webUrl
+ * generation is not expected to produce.
  *
  * Returns undefined when the hit's webUrl does not sit under the library's
  * own webUrl at all, or when either URL cannot be parsed: a path this code
  * cannot compute with confidence is worse than a path it does not report.
  *
- * The prefix comparison is case sensitive, so a hit whose webUrl differs
- * from the library's own webUrl only in path casing is skipped rather than
- * matched. That fails safe: the hit disappears from this cross-check rather
- * than being mapped to a wrong or malformed path, and the ordinary inventory
- * scan can still see the file directly if it is in fact in the searched
- * library. Whether SharePoint normalizes path casing consistently between a
- * Microsoft Search hit's webUrl and a drive's own webUrl has not been
- * verified against a live tenant, so this has not been relaxed.
+ * The decoded prefix comparison is still case sensitive, so a hit whose
+ * webUrl differs from the library's own webUrl only in path casing is
+ * skipped rather than matched. That fails safe: the hit disappears from this
+ * cross-check rather than being mapped to a wrong or malformed path, and the
+ * ordinary inventory scan can still see the file directly if it is in fact in
+ * the searched library. Whether SharePoint normalizes path casing
+ * consistently between a Microsoft Search hit's webUrl and a drive's own
+ * webUrl has not been verified against a live tenant, so this has not been
+ * relaxed.
  */
 function relativePathWithinLibrary(hit: SearchHit, libraryWebUrl: string): string | undefined {
   let hitUrl: URL;
@@ -134,17 +189,20 @@ function relativePathWithinLibrary(hit: SearchHit, libraryWebUrl: string): strin
     return undefined;
   }
 
-  const libraryPath = libraryUrl.pathname.replace(/\/+$/, "");
-  const prefix = `${libraryPath}/`;
-  if (!hitUrl.pathname.startsWith(prefix)) return undefined;
+  const libraryRawSegments = libraryUrl.pathname.split("/").filter((segment) => segment.length > 0);
+  const hitRawSegments = hitUrl.pathname.split("/").filter((segment) => segment.length > 0);
+  // At least one hit segment, the file name, must remain past the library's
+  // own segments; a hit at or above the library root has nothing to qualify.
+  if (hitRawSegments.length <= libraryRawSegments.length) return undefined;
 
-  const segments = hitUrl.pathname
-    .slice(prefix.length)
-    .split("/")
-    .filter((segment) => segment.length > 0);
-  if (segments.length === 0) return undefined;
+  const libraryPrefix = decodeSegments(libraryRawSegments);
+  const hitPrefix = decodeSegments(hitRawSegments.slice(0, libraryRawSegments.length));
+  if (libraryPrefix === undefined || hitPrefix === undefined) return undefined;
+  if (!libraryPrefix.every((segment, index) => segment === hitPrefix[index])) return undefined;
 
-  const folderSegments = segments.slice(0, -1).map((segment) => decodeURIComponent(segment));
+  const folderSegments = decodeSegments(hitRawSegments.slice(libraryRawSegments.length, -1));
+  if (folderSegments === undefined) return undefined;
+
   return [...folderSegments, hit.name].join("/");
 }
 

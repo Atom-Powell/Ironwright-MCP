@@ -244,3 +244,163 @@ describe("crossCheckOtherLibraries", () => {
     expect(result.files).toHaveLength(SEARCH_PAGE_CAP * SEARCH_PAGE_SIZE);
   });
 });
+
+/**
+ * Every other test in this file builds both the library's webUrl and the
+ * hit's webUrl itself, so both sides agree on encoding by construction and
+ * could never exercise a mismatch between them. These tests build the two
+ * URLs to disagree on purpose, the way a live tenant did: a 2026-09-17 run
+ * against helloironwright.sharepoint.com found the library's own webUrl, from
+ * listDrives, percent encoded ("Shared%20Documents") while a Microsoft
+ * Search hit's webUrl for a file genuinely filed in that same library was
+ * not ("Shared Documents", a literal space). Before the fix, a raw pathname
+ * prefix comparison never matched those two spellings of the same library,
+ * so the hit was silently skipped and the cross-check reported
+ * `complete: true` having found nothing, for a library name as common as
+ * SharePoint's own default.
+ */
+describe("crossCheckOtherLibraries library-name encoding", () => {
+  const LIVE_LIBRARY_NAME = "Shared Documents";
+  const LIVE_FILE_NAME = "2026-02_Client02_MonthlyTraining.xlsx";
+  const LIVE_RELATIVE_PATH = "2026/Client02/02-February/2026-02_Client02_MonthlyTraining.xlsx";
+
+  it("matches a hit whose webUrl is not percent encoded against a library webUrl that is, using the exact strings a live run observed", async () => {
+    const sharedDocuments: Drive = {
+      id: "drive-shared",
+      name: LIVE_LIBRARY_NAME,
+      webUrl: "https://helloironwright.sharepoint.com/sites/IronwrightTest/Shared%20Documents",
+    };
+    const client = fakeClient({
+      scripts: {
+        [sharedDocuments.webUrl!]: page(
+          [
+            hit(
+              LIVE_FILE_NAME,
+              sharedDocuments.id,
+              "https://helloironwright.sharepoint.com/sites/IronwrightTest/Shared Documents/2026/Client02/02-February/2026-02_Client02_MonthlyTraining.xlsx",
+            ),
+          ],
+          false,
+        ),
+      },
+    });
+
+    const result = await crossCheckOtherLibraries(client, profileWithRegion(), [OWN_DRIVE, sharedDocuments], OWN_DRIVE.id);
+
+    expect(result.complete).toBe(true);
+    expect(result.files).toEqual([
+      {
+        path: LIVE_RELATIVE_PATH,
+        name: LIVE_FILE_NAME,
+        size: 10,
+        modified: "2026-01-01T00:00:00Z",
+        etag: "",
+        library: LIVE_LIBRARY_NAME,
+      },
+    ]);
+  });
+
+  it("matches the reverse pairing, a percent-encoded hit webUrl against a library webUrl that is not, in case Graph ever encodes the hit instead", async () => {
+    const sharedDocuments: Drive = {
+      id: "drive-shared",
+      name: LIVE_LIBRARY_NAME,
+      webUrl: "https://helloironwright.sharepoint.com/sites/IronwrightTest/Shared Documents",
+    };
+    const client = fakeClient({
+      scripts: {
+        [sharedDocuments.webUrl!]: page(
+          [
+            hit(
+              LIVE_FILE_NAME,
+              sharedDocuments.id,
+              "https://helloironwright.sharepoint.com/sites/IronwrightTest/Shared%20Documents/2026/Client02/02-February/2026-02_Client02_MonthlyTraining.xlsx",
+            ),
+          ],
+          false,
+        ),
+      },
+    });
+
+    const result = await crossCheckOtherLibraries(client, profileWithRegion(), [OWN_DRIVE, sharedDocuments], OWN_DRIVE.id);
+
+    expect(result.complete).toBe(true);
+    expect(result.files).toEqual([
+      {
+        path: LIVE_RELATIVE_PATH,
+        name: LIVE_FILE_NAME,
+        size: 10,
+        modified: "2026-01-01T00:00:00Z",
+        etag: "",
+        library: LIVE_LIBRARY_NAME,
+      },
+    ]);
+  });
+
+  it("still skips a hit that genuinely sits outside the library, decoding does not widen the match into a false positive", async () => {
+    const sharedDocuments: Drive = {
+      id: "drive-shared",
+      name: LIVE_LIBRARY_NAME,
+      webUrl: "https://helloironwright.sharepoint.com/sites/IronwrightTest/Shared%20Documents",
+    };
+    const client = fakeClient({
+      scripts: {
+        [sharedDocuments.webUrl!]: page(
+          [
+            // Same driveId as the library actually being searched, so this
+            // is not the driveId guard's job to catch; the hit's own path
+            // sits under a sibling library entirely, "Other Library", not
+            // under "Shared Documents" at all.
+            hit(
+              "elsewhere.xlsx",
+              sharedDocuments.id,
+              "https://helloironwright.sharepoint.com/sites/IronwrightTest/Other Library/elsewhere.xlsx",
+            ),
+          ],
+          false,
+        ),
+      },
+    });
+
+    const result = await crossCheckOtherLibraries(client, profileWithRegion(), [OWN_DRIVE, sharedDocuments], OWN_DRIVE.id);
+
+    expect(result.complete).toBe(true);
+    expect(result.files).toEqual([]);
+  });
+
+  it("reports the file name literally from the hit even when the URL's file-name segment is itself percent encoded", async () => {
+    // The library name here carries no space, so only the file-name segment
+    // of the hit's webUrl is exercised for encoding: "&" is not in the URL
+    // path percent-encode set (unlike space), so a naive `new URL(...)`
+    // normalization alone would not converge it. This name is never decoded
+    // out of the URL at all; it is reported exactly as Graph's own `name`
+    // field on the hit, which is why the encoded URL segment does not matter.
+    const client = fakeClient({
+      scripts: {
+        [ARCHIVE_DRIVE.webUrl!]: page(
+          [
+            hit(
+              "Report & Summary.xlsx",
+              ARCHIVE_DRIVE.id,
+              `${ARCHIVE_DRIVE.webUrl}/2026/Report%20%26%20Summary.xlsx`,
+            ),
+          ],
+          false,
+        ),
+      },
+    });
+
+    const result = await crossCheckOtherLibraries(client, profileWithRegion(), [OWN_DRIVE, ARCHIVE_DRIVE], OWN_DRIVE.id);
+
+    expect(result.complete).toBe(true);
+    expect(result.files).toEqual([
+      {
+        path: "2026/Report & Summary.xlsx",
+        name: "Report & Summary.xlsx",
+        size: 10,
+        modified: "2026-01-01T00:00:00Z",
+        etag: "",
+        library: "Archive",
+      },
+    ]);
+  });
+});
