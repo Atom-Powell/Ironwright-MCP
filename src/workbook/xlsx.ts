@@ -8,9 +8,10 @@ import { WorkbookMappingError } from "./read.js";
 /**
  * Names a range the same way a profile's workbookMapping names one: either a
  * named table (which carries its own bounds) or a whole worksheet (read used
- * range to used range). Moved here from src/graph/excel.ts, which read this
- * range over Graph; this module reads the same range out of downloaded
- * bytes, and a caller of either should describe what it wants the same way.
+ * range to used range). The Graph Excel API this range was once read over is
+ * gone; this module reads the same range out of downloaded workbook bytes
+ * instead, so a caller describes what it wants the same way regardless of
+ * which layer resolves it.
  */
 export type WorkbookSource = { kind: "table" | "worksheet"; name: string };
 
