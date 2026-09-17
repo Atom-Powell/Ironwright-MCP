@@ -257,5 +257,24 @@ describe("runScan", () => {
     expect(result.searchCrossCheckSkipReason).toBeUndefined();
     const found = result.snapshot.files.find((file) => file.library === "Archive");
     expect(found?.name).toBe("2026-08_CLIENTA_MonthlyTraining.xlsx");
+
+    // The enumeration's own cost (2 to resolve the drive, 1 delta page) stays
+    // 3, the same as a profile with no searchRegion would report, and the
+    // cross-check's cost (2 to list drives again, 1 search call) is reported
+    // as its own figure rather than folded into the enumeration's.
+    expect(result.graphRequests).toBe(3);
+    expect(result.searchCrossCheckGraphRequests).toBe(3);
+  });
+
+  it("does not report a cross-check cost when no searchRegion was configured", async () => {
+    const store = createMemoryStateStore();
+    const client = scriptedClient(
+      baseResponses({ value: [], "@odata.deltaLink": "https://graph.microsoft.com/v1.0/next-link" }),
+    );
+
+    const result = await runScan({ client, store, profile: PROFILE, now: NOW });
+
+    expect(result.searchCrossCheckGraphRequests).toBeUndefined();
+    expect(result.searchCrossCheckSkipReason).toBe("no-region");
   });
 });

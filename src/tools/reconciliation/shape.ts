@@ -37,6 +37,13 @@ export function scanProvenance(result: ScanResult, joined: boolean): ScanProvena
     ...(result.searchCrossCheckSkipReason === undefined
       ? {}
       : { searchCrossCheckSkipReason: result.searchCrossCheckSkipReason }),
+    // Unlike the skip reason, this is a cost, not a fact about the data, so
+    // it follows graphRequestsByThisCall's own rule rather than the skip
+    // reason's: a joiner paid nothing of its own for the cross-check either,
+    // regardless of what the scan it joined happened to spend.
+    ...(joined || result.searchCrossCheckGraphRequests === undefined
+      ? {}
+      : { searchCrossCheckGraphRequestsByThisCall: result.searchCrossCheckGraphRequests }),
   };
 }
 

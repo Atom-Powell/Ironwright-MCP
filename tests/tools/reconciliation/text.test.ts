@@ -117,6 +117,23 @@ describe("reconcileText", () => {
     expect(textFor()).toContain("4 Graph requests");
   });
 
+  it("reports the cross-check's cost as its own figure rather than folding it into the scan's", () => {
+    const output = shapeReport(
+      loadExpectedReport(),
+      { ...PROVENANCE, searchCrossCheckGraphRequestsByThisCall: 3 },
+      {},
+    );
+
+    const text = reconcileText(output).join("\n");
+
+    // Both counts must appear undisturbed: the scan's own 4, and the
+    // cross-check's 3, never summed into a single 7 a reader would have to
+    // pull apart by hand.
+    expect(text).toContain("cost 4 Graph requests");
+    expect(text).toContain("3 Graph requests for the Search cross-check");
+    expect(text).not.toContain("7 Graph request");
+  });
+
   it("uses the singular for one Graph request", () => {
     const output = shapeReport(loadExpectedReport(), { ...PROVENANCE, graphRequestsByThisCall: 1 }, {});
 

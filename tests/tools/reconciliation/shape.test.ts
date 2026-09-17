@@ -113,4 +113,28 @@ describe("scanProvenance", () => {
     expect(provenance.resynced).toBe(true);
     expect(provenance.scanMode).toBe("full");
   });
+
+  it("reports the cross-check's own cost as a separate figure from the scan's", () => {
+    const provenance = scanProvenance(scanResult({ searchCrossCheckGraphRequests: 3 }), false);
+
+    // graphRequestsByThisCall must stay the scan's own cost alone: it is the
+    // figure docs/OPEN-ITEMS.md records a live baseline for, and it must not
+    // grow for a reason that has nothing to do with the delta enumeration.
+    expect(provenance.graphRequestsByThisCall).toBe(7);
+    expect(provenance.searchCrossCheckGraphRequestsByThisCall).toBe(3);
+  });
+
+  it("reports no cross-check cost for a call that joined a scan it did not start", () => {
+    const provenance = scanProvenance(scanResult({ searchCrossCheckGraphRequests: 3 }), true);
+
+    // A joiner paid nothing of its own, for the cross-check the same as for
+    // the enumeration, regardless of what the scan it joined actually spent.
+    expect(provenance.searchCrossCheckGraphRequestsByThisCall).toBeUndefined();
+  });
+
+  it("omits the cross-check cost when no cross-check was attempted", () => {
+    const provenance = scanProvenance(scanResult(), false);
+
+    expect(provenance.searchCrossCheckGraphRequestsByThisCall).toBeUndefined();
+  });
 });

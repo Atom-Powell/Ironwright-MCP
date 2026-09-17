@@ -183,9 +183,20 @@ export function reconcileText(output: ReconcileToolOutput): string[] {
   // that string in its own "This call cost" template produced "This call cost
   // 1 Graph request, this call.", which is exactly the defect this module
   // exists to prevent: correct clause by clause, false once assembled.
+  //
+  // The cross-check's own cost is named as its own clause rather than folded
+  // into the scan's count. Summing them would make an incremental scan
+  // against a profile with searchRegion configured report a materially
+  // larger number than the same scan without one, for a reason that has
+  // nothing to do with the delta enumeration, which is exactly the number
+  // docs/OPEN-ITEMS.md records a live baseline for.
+  const crossCheckCost =
+    output.provenance.searchCrossCheckGraphRequestsByThisCall === undefined
+      ? ""
+      : `, plus ${plural(output.provenance.searchCrossCheckGraphRequestsByThisCall, "Graph request", "Graph requests")} for the Search cross-check`;
   const cost = output.provenance.scanSharedWithConcurrentCall
     ? "issued no Graph request of its own because it shared a scan already running"
-    : `cost ${plural(output.provenance.graphRequestsByThisCall, "Graph request", "Graph requests")}`;
+    : `cost ${plural(output.provenance.graphRequestsByThisCall, "Graph request", "Graph requests")}${crossCheckCost}`;
 
   lines.push(
     `Repository read by ${output.provenance.scanMode} scan at ${output.provenance.scannedAt}` +

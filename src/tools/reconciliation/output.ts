@@ -44,6 +44,20 @@ export interface ScanProvenance {
    * not observe.
    */
   searchCrossCheckSkipReason?: CrossCheckSkipReason;
+  /**
+   * What this call's own cross-check spent, kept apart from
+   * `graphRequestsByThisCall` rather than summed into it. That field is the
+   * figure `docs/OPEN-ITEMS.md` records a live baseline for, and folding the
+   * cross-check's traffic into it would make an incremental scan against a
+   * profile with `searchRegion` configured report a materially larger number
+   * for a reason that has nothing to do with the delta enumeration.
+   *
+   * Absent, like `graphRequestsByThisCall` being zeroed, when this call
+   * joined a scan another call ran: a joiner paid nothing of its own for the
+   * cross-check either. Also absent when no cross-check was attempted at
+   * all, for the same reason it is never reported as zero on `ScanResult`.
+   */
+  searchCrossCheckGraphRequestsByThisCall?: number;
 }
 
 export interface ReconcileToolOutput {
@@ -123,6 +137,13 @@ export const RECONCILE_OUTPUT_SCHEMA = {
         .optional()
         .describe(
           "Present only when the Search cross-check did not complete, naming why. Absent when it completed or never ran, which are not distinguished here because a missing cause is not one this call observed.",
+        ),
+      searchCrossCheckGraphRequestsByThisCall: z
+        .number()
+        .int()
+        .optional()
+        .describe(
+          "What this call's own Search cross-check spent, kept separate from graphRequestsByThisCall so that figure keeps meaning the delta enumeration's cost alone. Absent when this call joined another call's scan or when no cross-check was attempted.",
         ),
     })
     .describe("Where the two inputs came from, and what this call paid for them."),

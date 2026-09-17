@@ -46,6 +46,19 @@ export interface ScanResult {
    * never assert a cause the cross-check itself did not establish.
    */
   searchCrossCheckSkipReason?: CrossCheckSkipReason;
+  /**
+   * What the cross-check itself spent, kept apart from `graphRequests`
+   * rather than folded into it. `graphRequests` is the figure
+   * `docs/OPEN-ITEMS.md` records a live baseline for and the one this
+   * project treats as evidence of what the delta enumeration costs; a
+   * profile with `searchRegion` configured must not make that figure grow
+   * for a reason that has nothing to do with the enumeration. Present only
+   * when the cross-check issued at least one Graph request, which is
+   * exactly when it was attempted at all: a profile with no `searchRegion`
+   * spends nothing on it, and reporting a zero there would invite a reader
+   * to think something ran and cost nothing rather than that nothing ran.
+   */
+  searchCrossCheckGraphRequests?: number;
 }
 
 export async function runScan(dependencies: ScanDependencies): Promise<ScanResult> {
@@ -116,11 +129,15 @@ export async function runScan(dependencies: ScanDependencies): Promise<ScanResul
 
   const records = await store.listInventory(profile.profileId, driveId);
 
-  // Run after the inventory scan rather than in parallel with it: both share
-  // `client`, and `requestsAtStart` above is the baseline `graphRequests`
-  // below is measured against, so the cross-check's own Graph calls must
-  // land inside that measured span rather than racing it.
+  // The enumeration's own cost is measured here, before the cross-check runs,
+  // so `graphRequests` below stays exactly what it always meant: the delta
+  // enumeration's cost alone, comparable to the baseline recorded in
+  // docs/OPEN-ITEMS.md whether or not this profile ever runs a cross-check.
+  const graphRequests = client.requests() - requestsAtStart;
+
+  const requestsBeforeCrossCheck = client.requests();
   const crossCheck = await crossCheckOtherLibraries(client, profile);
+  const searchCrossCheckGraphRequests = client.requests() - requestsBeforeCrossCheck;
 
   return {
     snapshot: assembleSnapshot(records, scannedAt, dependencies.subPath, crossCheck),
@@ -129,11 +146,12 @@ export async function runScan(dependencies: ScanDependencies): Promise<ScanResul
     resynced,
     pages,
     changesApplied,
-    graphRequests: client.requests() - requestsAtStart,
+    graphRequests,
     storeBatches,
     subPath: dependencies.subPath,
     unfilteredFileCount: records.filter((record) => !record.isFolder).length,
     unfilteredFolderCount: records.filter((record) => record.isFolder).length,
     ...(crossCheck.reason === undefined ? {} : { searchCrossCheckSkipReason: crossCheck.reason }),
+    ...(searchCrossCheckGraphRequests > 0 ? { searchCrossCheckGraphRequests } : {}),
   };
 }

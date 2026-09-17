@@ -31,7 +31,7 @@ describe("assembleSnapshot", () => {
     expect(snapshot.scannedAt).toBe("2026-09-13T12:00:00Z");
   });
 
-  it("always reports the Search cross-check as absent, because phase 2a does not run one", () => {
+  it("reports the Search cross-check as absent when no cross-check result is given", () => {
     expect(assembleSnapshot([], "2026-09-13T12:00:00Z").searchCrossCheckIncluded).toBe(false);
   });
 
