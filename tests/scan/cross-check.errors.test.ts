@@ -159,4 +159,46 @@ describe("crossCheckOtherLibraries failures", () => {
     expect(result.complete).toBe(true);
     expect(result.files).toEqual([]);
   });
+
+  it("reports library-not-addressable, not search-failed, for a listed library with no webUrl", async () => {
+    // No request was ever sent for this library: it never reached
+    // searchDriveItems at all, because there is no webUrl to send as a path
+    // scope. Reporting "search-failed" here would tell an operator to
+    // investigate a Graph or network failure that never happened; the real,
+    // different problem is that the drive listing itself did not describe
+    // this library well enough to search it.
+    const noWebUrlDrive: Drive = { id: "drive-no-weburl", name: "No Url" };
+    let searchCalls = 0;
+    const client = fakeClient({ drives: [OWN_DRIVE, noWebUrlDrive], scripts: {} });
+    const countingClient: Pick<GraphClient, "get" | "post"> = {
+      get: client.get,
+      post: async <T,>(path: string, body?: unknown): Promise<T> => {
+        searchCalls += 1;
+        return client.post<T>(path, body);
+      },
+    };
+
+    const result = await crossCheckOtherLibraries(countingClient, profileWithRegion());
+
+    expect(result).toEqual({ files: [], complete: false, reason: "library-not-addressable" });
+    expect(searchCalls).toBe(0);
+  });
+
+  it("still reports search-failed, not library-not-addressable, when a different library both lacks a webUrl and another one fails", async () => {
+    // Both conditions occurred in the same run. search-failed is reported
+    // because it is the more directly actionable of the two: it points at a
+    // request that actually broke, which a retry might resolve and which
+    // could otherwise be masking whether the unaddressable library would
+    // have been reachable at all.
+    const noWebUrlDrive: Drive = { id: "drive-no-weburl", name: "No Url" };
+    const client = fakeClient({
+      drives: [OWN_DRIVE, noWebUrlDrive, ARCHIVE_DRIVE],
+      scripts: { [ARCHIVE_DRIVE.webUrl!]: new Error("search exploded") },
+    });
+
+    const result = await crossCheckOtherLibraries(client, profileWithRegion());
+
+    expect(result.complete).toBe(false);
+    expect(result.reason).toBe("search-failed");
+  });
 });

@@ -152,6 +152,60 @@ describe("crossCheckOtherLibraries", () => {
     expect(result.complete).toBe(true);
   });
 
+  it("excludes the profile's own library by id, not by a name comparison that a same-named decoy would also match", async () => {
+    // Two drives share the exact display name "Compliance Reports", the
+    // profile's own library name, but carry different ids. matchDrive's
+    // exact-then-case-insensitive rule resolves the profile's own library to
+    // whichever one is found first, ownPrimary here, exactly as resolveDrive
+    // would. ownNameDecoy is a second, genuinely different library that
+    // happens to share that display name.
+    //
+    // A filter that excludes by comparing `drive.name` against
+    // `profile.identity.library` directly, instead of comparing ids against
+    // the one drive matchDrive actually resolved, would exclude both drives:
+    // ownNameDecoy's name matches the profile's library name too. That would
+    // make this test fail, because ownNameDecoy would then never be searched
+    // and its file would never appear below. The correct, id-based exclusion
+    // searches ownNameDecoy, since its id is not the resolved own id.
+    const ownPrimary: Drive = {
+      id: "drive-own-primary",
+      name: "Compliance Reports",
+      webUrl: "https://contoso.sharepoint.com/sites/Example/Compliance Reports",
+    };
+    const ownNameDecoy: Drive = {
+      id: "drive-own-name-decoy",
+      name: "Compliance Reports",
+      webUrl: "https://contoso.sharepoint.com/sites/Example/Compliance Reports Decoy",
+    };
+    const searchedScopes: string[] = [];
+    const client = fakeClient({
+      drives: [ownPrimary, ownNameDecoy],
+      scripts: {
+        [ownNameDecoy.webUrl!]: page(
+          [hit("2026-01_CLIENTA_MonthlyTraining.xlsx", ownNameDecoy.id, `${ownNameDecoy.webUrl}/2026-01_CLIENTA_MonthlyTraining.xlsx`)],
+          false,
+        ),
+      },
+      onSearch: (scope) => searchedScopes.push(scope),
+    });
+
+    const result = await crossCheckOtherLibraries(client, profileWithRegion());
+
+    expect(searchedScopes).toEqual([ownNameDecoy.webUrl]);
+    expect(searchedScopes).not.toContain(ownPrimary.webUrl);
+    expect(result.files).toEqual([
+      {
+        path: "2026-01_CLIENTA_MonthlyTraining.xlsx",
+        name: "2026-01_CLIENTA_MonthlyTraining.xlsx",
+        size: 10,
+        modified: "2026-01-01T00:00:00Z",
+        etag: "",
+        library: "Compliance Reports",
+      },
+    ]);
+    expect(result.complete).toBe(true);
+  });
+
   it("issues an unnarrowed search rather than failing when the template's extension is not literal", async () => {
     // The final template segment is "{deliverable}", a placeholder rather
     // than a literal suffix, so no filetype narrowing can be derived from it.

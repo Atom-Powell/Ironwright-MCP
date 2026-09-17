@@ -98,18 +98,30 @@ export async function listDrives(
   return { siteId: site.id, drives, rawCount: rawValue.length };
 }
 
+/**
+ * Exact first. SharePoint permits two libraries whose names differ only in
+ * case, so falling straight to a case-insensitive match could pick the wrong
+ * one.
+ *
+ * Exported as its own pure function, separate from `resolveDrive`, so a
+ * second caller that already has a `drives` list in hand -- the Microsoft
+ * Search cross-check identifying the profile's own drive among a listing it
+ * fetched once -- can reuse the exact rule `resolveDrive` uses rather than
+ * keeping an independent copy that could drift from it.
+ */
+export function matchDrive(drives: readonly SiteDrive[], library: string): SiteDrive | undefined {
+  const exact = drives.find((drive) => drive.name === library);
+  if (exact !== undefined) return exact;
+  return drives.find((drive) => drive.name.toLowerCase() === library.toLowerCase());
+}
+
 export async function resolveDrive(
   client: Pick<GraphClient, "get">,
   siteUrl: string,
   library: string,
 ): Promise<DriveLocation> {
   const { siteId, drives, rawCount } = await listDrives(client, siteUrl);
-
-  // Exact first. SharePoint permits two libraries whose names differ only in
-  // case, so falling straight to a case-insensitive match could pick the wrong one.
-  const exact = drives.find((drive) => drive.name === library);
-  const insensitive = drives.find((drive) => drive.name.toLowerCase() === library.toLowerCase());
-  const matched = exact ?? insensitive;
+  const matched = matchDrive(drives, library);
 
   if (matched === undefined) {
     throw new LibraryNotFoundError(

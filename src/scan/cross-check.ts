@@ -1,5 +1,5 @@
 import type { GraphClient } from "../graph/client.js";
-import { listDrives, resolveDrive, type SiteDrive } from "../graph/drive.js";
+import { listDrives, matchDrive, type SiteDrive } from "../graph/drive.js";
 import { searchDriveItems, type SearchHit } from "../graph/search.js";
 import type { RepositoryFile } from "../domain/reconcile/index.js";
 import type { Profile } from "../domain/profile/schema.js";
@@ -8,10 +8,13 @@ import type { Profile } from "../domain/profile/schema.js";
  * The operator's remedy differs for each, which is the whole reason this is a
  * closed set rather than a message string: "no-region" means configure
  * searchRegion on the profile, "search-failed" means investigate a Graph
- * failure, and "page-cap-reached" means the site has more matching files in
- * one library than this cross-check is willing to page through.
+ * failure that actually occurred, "library-not-addressable" means a listed
+ * library came back with no webUrl to search it by, which is a listing-shape
+ * problem rather than a failed request, and "page-cap-reached" means the site
+ * has more matching files in one library than this cross-check is willing to
+ * page through.
  */
-export type CrossCheckSkipReason = "no-region" | "search-failed" | "page-cap-reached";
+export type CrossCheckSkipReason = "no-region" | "search-failed" | "library-not-addressable" | "page-cap-reached";
 
 export interface CrossCheckResult {
   files: RepositoryFile[];
@@ -53,6 +56,15 @@ function literalExtension(template: string): string | undefined {
  * Returns undefined when the hit's webUrl does not sit under the library's
  * own webUrl at all, or when either URL cannot be parsed: a path this code
  * cannot compute with confidence is worse than a path it does not report.
+ *
+ * The prefix comparison is case sensitive, so a hit whose webUrl differs
+ * from the library's own webUrl only in path casing is skipped rather than
+ * matched. That fails safe: the hit disappears from this cross-check rather
+ * than being mapped to a wrong or malformed path, and the ordinary inventory
+ * scan can still see the file directly if it is in fact in the searched
+ * library. Whether SharePoint normalizes path casing consistently between a
+ * Microsoft Search hit's webUrl and a drive's own webUrl has not been
+ * verified against a live tenant, so this has not been relaxed.
  */
 function relativePathWithinLibrary(hit: SearchHit, libraryWebUrl: string): string | undefined {
   let hitUrl: URL;
@@ -120,16 +132,19 @@ function toRepositoryFile(hit: SearchHit, library: SiteDrive & { webUrl: string 
  * elsewhere, qualified with the library they were found in.
  *
  * The profile's own library is excluded by drive id, resolved through
- * `resolveDrive`, never by comparing library names. This is not a detail:
- * the reconciliation engine treats the mere presence of `RepositoryFile.library`
- * as meaning "not the profile's own library", without re-checking the name
- * against anything. If this function ever stamped the profile's own library
- * name onto a file that was already in the profile's own library, that file
- * would be silently reclassified as misplaced and become permanently exempt
- * from ever being reported as an orphan, with nothing downstream able to
- * notice. Comparing by id, resolved by the one function that already
- * implements the exact-then-case-insensitive matching rule, avoids a second,
- * independent name comparison that could disagree with it.
+ * `matchDrive`, the same exact-then-case-insensitive rule `resolveDrive`
+ * uses, never by comparing library names against the drive listing directly.
+ * This is not a detail: the reconciliation engine treats the mere presence
+ * of `RepositoryFile.library` as meaning "not the profile's own library",
+ * without re-checking the name against anything. If this function ever
+ * stamped the profile's own library name onto a file that was already in the
+ * profile's own library, that file would be silently reclassified as
+ * misplaced and become permanently exempt from ever being reported as an
+ * orphan, with nothing downstream able to notice. `listDrives` is called
+ * once, and its result feeds both the own-drive match and the other-libraries
+ * filter, rather than calling it a second time the way routing the own match
+ * through `resolveDrive` itself would: one listing, one rule, applied twice
+ * to the same data.
  *
  * A failure anywhere in here is caught and reported through `reason`, never
  * thrown: a reconciliation report without a cross-check is still worth
@@ -152,8 +167,12 @@ export async function crossCheckOtherLibraries(
   let ownDriveId: string;
   let drives: SiteDrive[];
   try {
-    ({ driveId: ownDriveId } = await resolveDrive(client, profile.identity.siteUrl, profile.identity.library));
     ({ drives } = await listDrives(client, profile.identity.siteUrl));
+    const own = matchDrive(drives, profile.identity.library);
+    if (own === undefined) {
+      throw new Error(`no drive on the site matched the profile's own library "${profile.identity.library}"`);
+    }
+    ownDriveId = own.id;
   } catch {
     return { files: [], complete: false, reason: "search-failed" };
   }
@@ -162,16 +181,19 @@ export async function crossCheckOtherLibraries(
 
   const files: RepositoryFile[] = [];
   let failed = false;
+  let notAddressable = false;
   let capReached = false;
 
   for (const library of otherLibraries) {
     if (library.webUrl === undefined) {
-      // Graph's own drive resource always carries a webUrl; a listing entry
-      // without one cannot be addressed for a search at all. That is the
-      // same "this library could not be searched" situation a thrown search
-      // failure describes, so it folds into the same signal rather than
-      // inventing a fourth reason for a condition nobody has ever observed.
-      failed = true;
+      // Graph's own drive resource always carries a webUrl in practice, but
+      // this code must not assert a search attempt or a search failure it
+      // never made: no request was ever sent for this library, so it gets
+      // its own reason rather than being folded into "search-failed", which
+      // would tell an operator to investigate a Graph or network failure
+      // that did not happen and hide the actual, different problem: the
+      // drive listing did not describe this library well enough to search it.
+      notAddressable = true;
       continue;
     }
 
@@ -193,12 +215,20 @@ export async function crossCheckOtherLibraries(
     }
   }
 
-  const complete = !failed && !capReached;
-  // search-failed takes precedence in the report when both occurred, because
-  // a Graph failure is the more actionable of the two remedies; nothing in
-  // this task exercises both at once, so the tie is broken here rather than
-  // left to whichever branch happened to run last.
-  const reason: CrossCheckSkipReason | undefined = failed ? "search-failed" : capReached ? "page-cap-reached" : undefined;
+  const complete = !failed && !notAddressable && !capReached;
+  // Ordered by how directly each cause points at a fix: a Graph failure
+  // (search-failed) is investigated first because it can mask the other two
+  // conditions on a retry; an unaddressable library (a listing-shape problem)
+  // next; the page cap last, since it is the only one of the three that means
+  // the cross-check otherwise worked. Nothing in this task exercises more
+  // than one at once, so this order is a choice, not an observed requirement.
+  const reason: CrossCheckSkipReason | undefined = failed
+    ? "search-failed"
+    : notAddressable
+      ? "library-not-addressable"
+      : capReached
+        ? "page-cap-reached"
+        : undefined;
 
   return { files, complete, ...(reason === undefined ? {} : { reason }) };
 }
