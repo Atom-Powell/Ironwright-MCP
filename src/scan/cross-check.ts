@@ -23,6 +23,64 @@ export interface CrossCheckResult {
 }
 
 /**
+ * The cause-and-remedy sentence for one skip reason, written once here because
+ * two callers report it: the reconciliation tool's text formatter and the scan
+ * CLI. This project has already had to correct the same stale claim about this
+ * cross-check in two places; a description that exists in one place cannot
+ * drift into two different, individually plausible, wrong stories about the
+ * same run.
+ *
+ * `reason` is `undefined` for the one caller, the reconciliation tool, whose
+ * own provenance can in principle report the cross-check incomplete without
+ * having recorded why (see its own comment on `searchCrossCheckSkipReason`).
+ * That caller must not upgrade "I do not know why" into any of the four known
+ * causes, so this function gives it a fifth, honest sentence to say instead of
+ * inventing one at the call site. `crossCheckOtherLibraries` itself always
+ * names one of the four reasons whenever it does not complete, so this branch
+ * is unreached from the scan CLI, which reads `reason` straight off that
+ * function's own result.
+ */
+export function describeCrossCheckSkipReason(reason: CrossCheckSkipReason | undefined): string {
+  switch (reason) {
+    case "no-region":
+      return (
+        "The Microsoft Search cross-check did not run because the profile has no searchRegion " +
+        "configured. Configure searchRegion on the profile to enable it."
+      );
+    case "search-failed":
+      return (
+        "The Microsoft Search cross-check failed. Investigate Microsoft Graph access, credentials, " +
+        "or the network."
+      );
+    case "library-not-addressable":
+      return (
+        "The Microsoft Search cross-check could not search every document library, because one was " +
+        "listed without a URL to search it by. That is not a failure and not a misconfiguration."
+      );
+    case "page-cap-reached":
+      return (
+        "The Microsoft Search cross-check did not search a library exhaustively, because it returned " +
+        "more matching files than the page cap allows. The scope is too large for one pass."
+      );
+    default:
+      return "The Microsoft Search cross-check did not complete, for a reason this scan did not record.";
+  }
+}
+
+/**
+ * True only for the one reason that means no Graph request was ever sent:
+ * `crossCheckOtherLibraries` checks for a missing `searchRegion` and returns
+ * before attempting any library, so "no-region" is the sole case where nothing
+ * was learned about any library. Every other reason, an unrecorded one
+ * included, means an attempt reached at least one library, which is why an
+ * operator's next step differs by exactly this split rather than by which of
+ * the five sentences above fired.
+ */
+export function crossCheckNeverAttempted(reason: CrossCheckSkipReason | undefined): boolean {
+  return reason === "no-region";
+}
+
+/**
  * The literal suffix of `naming.template` from its final "." onward, when
  * that suffix names a fixed extension rather than a placeholder. A template
  * ending "...{deliverable}.xlsx" narrows a search to "xlsx"; one ending

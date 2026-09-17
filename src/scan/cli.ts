@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { crossCheckNeverAttempted, describeCrossCheckSkipReason } from "./cross-check.js";
 import type { ScanResult } from "./run.js";
 
 const USAGE = "Usage: npm run scan -- --profile <path to profile json> [--sub-path <library-relative path>]";
@@ -140,11 +141,28 @@ export function formatScanResult(result: ScanResult, storeKind: "azure-table" | 
     );
   }
 
-  lines.push(
-    "The Microsoft Search cross-check did not run, which phase 2a never does. A correctly named " +
-      "file stored outside the expected taxonomy is invisible to this snapshot, so any " +
-      "reconciliation run against it is a degraded scan.",
-  );
+  // `searchCrossCheckSkipReason` absent means `crossCheckOtherLibraries` completed, per its own
+  // contract (see ScanResult's own comment on the field): every reachable way for it to have
+  // never run at all is itself one of the four named reasons, so there is no third state here
+  // to guess at, unlike the reconciliation tool's own provenance.
+  if (result.searchCrossCheckSkipReason === undefined) {
+    lines.push("The Microsoft Search cross-check completed.");
+  } else {
+    const cause = describeCrossCheckSkipReason(result.searchCrossCheckSkipReason);
+    // A cross-check that never sent a request leaves every other library
+    // completely unseen; one that ran but did not finish still leaves this
+    // snapshot with whatever it found before it stopped. Those are different
+    // situations for an operator deciding whether to trust a "missing" file,
+    // so they get different consequence sentences rather than one written to
+    // cover both.
+    const consequence = crossCheckNeverAttempted(result.searchCrossCheckSkipReason)
+      ? "Without it, a correctly named file filed into a different document library of the same " +
+        "site is invisible to this snapshot."
+      : "Because it did not complete, this snapshot may be missing a correctly named file filed " +
+        "into a document library, or a part of one, this cross-check did not reach.";
+
+    lines.push(`${cause} ${consequence}`);
+  }
 
   return lines;
 }

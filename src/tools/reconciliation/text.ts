@@ -1,4 +1,5 @@
 import type { ArtifactState, Period } from "../../domain/reconcile/index.js";
+import { crossCheckNeverAttempted, describeCrossCheckSkipReason } from "../../scan/cross-check.js";
 import type { ReconcileToolOutput } from "./output.js";
 
 function plural(count: number, singular: string, pluralForm: string): string {
@@ -189,20 +190,7 @@ export function reconcileText(output: ReconcileToolOutput): string[] {
     // still carry files from a library that succeeded before a different
     // one's request threw.
     const reason = output.provenance.searchCrossCheckSkipReason;
-    const cause =
-      reason === "no-region"
-        ? "The Microsoft Search cross-check did not run because the profile has no searchRegion configured. " +
-          "Configure searchRegion on the profile to enable it."
-        : reason === "search-failed"
-          ? "The Microsoft Search cross-check failed. Investigate Microsoft Graph access, credentials, or the " +
-            "network."
-          : reason === "library-not-addressable"
-            ? "The Microsoft Search cross-check could not search every document library, because one was " +
-              "listed without a URL to search it by. That is not a failure and not a misconfiguration."
-            : reason === "page-cap-reached"
-              ? "The Microsoft Search cross-check did not search a library exhaustively, because it returned " +
-                "more matching files than the page cap allows. The scope is too large for one pass."
-              : "The Microsoft Search cross-check did not complete, for a reason this scan did not record.";
+    const cause = describeCrossCheckSkipReason(reason);
 
     // A whole-drive delta scan already finds a correctly named file at an
     // unexpected path within the profile's own library, so a misplaced
@@ -214,12 +202,11 @@ export function reconcileText(output: ReconcileToolOutput): string[] {
     // included, means an attempt reached at least one library, so those
     // findings already reflect whatever that attempt found and only the part
     // it did not reach stays uncertain.
-    const consequence =
-      reason === "no-region"
-        ? "Without it, a correctly named file filed into a different document library of the same site is " +
-          "invisible to this scan, so a finding reported missing may in fact exist there."
-        : "Because it did not complete, a finding reported missing may still exist in a document library, or " +
-          "a part of one, this cross-check did not reach.";
+    const consequence = crossCheckNeverAttempted(reason)
+      ? "Without it, a correctly named file filed into a different document library of the same site is " +
+        "invisible to this scan, so a finding reported missing may in fact exist there."
+      : "Because it did not complete, a finding reported missing may still exist in a document library, or " +
+        "a part of one, this cross-check did not reach.";
 
     lines.push(`${cause} ${consequence}`);
   }
