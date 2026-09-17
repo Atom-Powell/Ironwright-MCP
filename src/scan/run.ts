@@ -41,9 +41,11 @@ export interface ScanResult {
   unfilteredFolderCount: number;
   /**
    * Present only when the Search cross-check did not complete, naming why.
-   * Absent covers both a completed cross-check and one that never ran at
-   * all, and those two are not told apart here on purpose: this field must
-   * never assert a cause the cross-check itself did not establish.
+   * `crossCheckOtherLibraries` always names one of the four reasons whenever
+   * it does not complete, "no-region" included, so absent means the
+   * cross-check completed rather than "completed or never ran": every
+   * reachable way for it to have never run at all, such as the profile
+   * carrying no searchRegion, is itself one of the four named reasons.
    */
   searchCrossCheckSkipReason?: CrossCheckSkipReason;
   /**

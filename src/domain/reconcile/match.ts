@@ -144,6 +144,9 @@ function toMatchedFile(candidate: ParsedFileRecognized): MatchedFile {
   if (candidate.recognizerId !== undefined) {
     matched.recognizerId = candidate.recognizerId;
   }
+  if (candidate.file.library !== undefined) {
+    matched.library = candidate.file.library;
+  }
   return matched;
 }
 
@@ -227,7 +230,11 @@ export function matchArtifacts(profile: Profile, expected: ArtifactFinding[], pa
 
     const slot: Slot = { client: expectedFinding.client, deliverable: expectedFinding.deliverable, period: expectedFinding.period };
     for (const loser of losers) {
-      duplicates.push({ path: loser.parsed.file.path, name: loser.parsed.file.name, slot, state: loser.state });
+      const duplicate: DuplicateFinding = { path: loser.parsed.file.path, name: loser.parsed.file.name, slot, state: loser.state };
+      if (loser.parsed.file.library !== undefined) {
+        duplicate.library = loser.parsed.file.library;
+      }
+      duplicates.push(duplicate);
     }
 
     return { ...expectedFinding, state: winner.state, matched: toMatchedFile(winner.parsed) };

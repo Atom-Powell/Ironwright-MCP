@@ -38,31 +38,33 @@ describe("reconcileText", () => {
     expect(textFor()).toContain("5 compliant findings are not listed");
   });
 
-  it("states that the Search cross-check did not run, in words", () => {
+  it("states that the Search cross-check did not complete, in words, when no reason was recorded", () => {
     // The golden fixture has it true, so this is asserted against a report
-    // that says it did not run.
+    // that says it did not complete. This function only ever knows that much
+    // when no reason was recorded: it must not claim the stronger "did not
+    // run at all," since it cannot observe whether an attempt was made.
     const report = loadExpectedReport();
     report.provenance.searchCrossCheckIncluded = false;
 
     const text = reconcileText(shapeReport(report, PROVENANCE, {})).join("\n");
 
-    expect(text).toContain("Microsoft Search cross-check did not run");
-    expect(text).toContain("every missing finding is suspect");
+    expect(text).toContain("Microsoft Search cross-check did not complete");
+    expect(text).not.toContain("did not run");
   });
 
-  it("names no cause when the cross-check did not run and no reason was recorded", () => {
+  it("names no cause when the cross-check did not complete and no reason was recorded", () => {
     const report = loadExpectedReport();
     report.provenance.searchCrossCheckIncluded = false;
 
     const text = reconcileText(shapeReport(report, PROVENANCE, {})).join("\n");
 
-    expect(text).toContain("did not run");
+    expect(text).toContain("did not complete");
     expect(text).not.toContain("searchRegion");
     expect(text).not.toContain("failed");
     expect(text).not.toMatch(/page cap/i);
   });
 
-  it("names the missing region as the reason when that is why the cross-check was skipped", () => {
+  it("names the missing region as the reason when that is why the cross-check was skipped, and says it never ran", () => {
     const report = loadExpectedReport();
     report.provenance.searchCrossCheckIncluded = false;
 
@@ -72,9 +74,12 @@ describe("reconcileText", () => {
 
     expect(text).toContain("searchRegion");
     expect(text).not.toContain("failed");
+    // The only reason meaning the cross-check spent no request at all, so
+    // "Without it" is the honest framing rather than "did not complete".
+    expect(text).toContain("Without it");
   });
 
-  it("says a search failed when that is what happened", () => {
+  it("says a search failed when that is what happened, and does not claim the cross-check never ran", () => {
     const report = loadExpectedReport();
     report.provenance.searchCrossCheckIncluded = false;
 
@@ -83,6 +88,11 @@ describe("reconcileText", () => {
     ).join("\n");
 
     expect(text).toContain("failed");
+    // A search-failed run can still carry files from a library that
+    // succeeded before a different one's request threw, so the consequence
+    // must not say the whole cross-check never ran.
+    expect(text).not.toContain("Without it");
+    expect(text).toContain("did not reach");
   });
 
   it("says a library could not be searched, without calling it a failure, when it had no URL", () => {
@@ -95,9 +105,10 @@ describe("reconcileText", () => {
 
     expect(text).toContain("without a URL");
     expect(text).not.toContain("failed");
+    expect(text).not.toContain("Without it");
   });
 
-  it("says the scan was too large when the page cap was reached", () => {
+  it("says the scan was too large when the page cap was reached, and that it ran rather than never starting", () => {
     const report = loadExpectedReport();
     report.provenance.searchCrossCheckIncluded = false;
 
@@ -106,10 +117,46 @@ describe("reconcileText", () => {
     ).join("\n");
 
     expect(text).toMatch(/too many|page cap|too large/i);
+    // page-cap-reached means every library was at least attempted, so the
+    // files it did find are already in this report; only the tail end of an
+    // over-large library stays uncertain.
+    expect(text).not.toContain("Without it");
+  });
+
+  it("describes what is invisible without a completed cross-check as another library, not the old taxonomy claim", () => {
+    const report = loadExpectedReport();
+    report.provenance.searchCrossCheckIncluded = false;
+
+    const text = reconcileText(
+      shapeReport(report, { ...PROVENANCE, searchCrossCheckSkipReason: "no-region" }, {}),
+    ).join("\n");
+
+    expect(text).toContain("different document library");
+    expect(text).not.toContain("outside the expected taxonomy");
+    expect(text).not.toContain("every misplaced finding is unreliable");
   });
 
   it("says nothing about the Search cross-check when it did run", () => {
     expect(textFor()).not.toContain("Search cross-check");
+  });
+
+  it("names the library a misplaced finding was actually found in, so it is not mistaken for a local misfiling", () => {
+    const report = loadExpectedReport();
+    const misplaced = report.artifacts.find(
+      (artifact) => artifact.client === "CLIENTA" && artifact.deliverable === "monthly-safety" && artifact.period.month === 4,
+    );
+    if (misplaced?.matched === undefined) {
+      throw new Error("the golden fixture no longer has a misplaced CLIENTA April finding to qualify");
+    }
+    misplaced.matched = { ...misplaced.matched, library: "Archive" };
+
+    const text = reconcileText(shapeReport(report, PROVENANCE, {})).join("\n");
+
+    expect(text).toContain('found in another document library rather than the profile\'s own: "Archive"');
+  });
+
+  it("says nothing about another library when every listed finding is in the profile's own", () => {
+    expect(textFor()).not.toContain("another document library");
   });
 
   it("names the scan mode and what this call paid for it", () => {

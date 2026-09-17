@@ -76,10 +76,14 @@ export interface RepositorySnapshot {
   folderPaths: string[];
   scannedAt: string;
   /**
-   * False when the Microsoft Search cross-check did not run. Without it a
-   * correctly named file outside the expected taxonomy is invisible, so every
-   * misplaced finding is unreliable and every missing finding is suspect. The
-   * report carries this so callers cannot present a partial scan as complete.
+   * False when the Microsoft Search cross-check did not run to completion. A
+   * whole-drive delta enumeration already resolves a correctly named file at
+   * an unexpected path within this library to `misplaced`, so that finding is
+   * not what this flag is about. What stays invisible without a completed
+   * cross-check is a correctly named file filed into a different document
+   * library of the same site: nothing about this library's own scan can see
+   * it, so a `missing` finding may in fact exist there. The report carries
+   * this so callers cannot present a partial scan as complete.
    */
   searchCrossCheckIncluded: boolean;
 }
@@ -97,6 +101,17 @@ export interface MatchedFile {
   etag: string;
   /** Present when the name matched a recognizer rather than the canonical template. */
   recognizerId?: string;
+  /**
+   * The document library this file was actually found in, carried through
+   * from `RepositoryFile.library` when the match came from the Microsoft
+   * Search cross-check. Absent means the profile's own library, matching that
+   * field's own meaning. Without this, a misplaced finding renders a bare
+   * library-relative path that is indistinguishable from an ordinary
+   * misfiling inside the profile's own library, and an operator who opens
+   * that library, does not find the file, and has no reason to look anywhere
+   * else concludes the report is wrong rather than incomplete.
+   */
+  library?: string;
 }
 
 export interface Slot {
@@ -118,6 +133,8 @@ export interface DuplicateFinding {
   /** The slot this file also satisfies, already claimed by a better candidate. */
   slot: Slot;
   state: Exclude<ArtifactState, "missing">;
+  /** Same meaning as `MatchedFile.library`: absent is the profile's own library, present names another. */
+  library?: string;
 }
 
 /**

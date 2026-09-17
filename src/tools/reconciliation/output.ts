@@ -38,10 +38,11 @@ export interface ScanProvenance {
   scanSharedWithConcurrentCall: boolean;
   /**
    * Present only when the Search cross-check did not complete, naming why.
-   * Absent means either it completed or it never ran at all; those two are
-   * not distinguished here because the scan itself does not establish a
-   * cause for the second one, and this field must never assert one it did
-   * not observe.
+   * `crossCheckOtherLibraries` always names one of the four reasons whenever
+   * it does not complete, "no-region" included, so absent means the
+   * cross-check completed rather than "completed or never ran": every
+   * reachable way for it to have never run at all, such as the profile
+   * carrying no searchRegion, is itself one of the four named reasons.
    */
   searchCrossCheckSkipReason?: CrossCheckSkipReason;
   /**
@@ -106,7 +107,18 @@ const ArtifactSchema = SlotSchema.extend({
   expectedName: z.string(),
   state: ArtifactStateSchema,
   matched: z
-    .object({ path: z.string(), name: z.string(), etag: z.string(), recognizerId: z.string().optional() })
+    .object({
+      path: z.string(),
+      name: z.string(),
+      etag: z.string(),
+      recognizerId: z.string().optional(),
+      library: z
+        .string()
+        .optional()
+        .describe(
+          "The document library this file was actually found in, present only when it is not the profile's own library. A misplaced or misnamed_and_misplaced finding with this set was found by the Microsoft Search cross-check in another library on the same site, not inside the profile's own library.",
+        ),
+    })
     .optional(),
 });
 
@@ -126,7 +138,7 @@ export const RECONCILE_OUTPUT_SCHEMA = {
       searchCrossCheckIncluded: z
         .boolean()
         .describe(
-          "False until the Microsoft Search cross-check ships. While false, a correctly named file stored outside the expected taxonomy is invisible, so every misplaced finding is unreliable and every missing finding is suspect.",
+          "False when the Microsoft Search cross-check did not run to completion. A misplaced finding within the profile's own library is reliable either way, since the whole-drive scan already finds it. What stays invisible while this is false is a correctly named file filed into a different document library of the same site, so a finding reported missing may in fact exist there.",
         ),
       scanMode: z.enum(["full", "incremental"]),
       resynced: z.boolean(),
@@ -136,7 +148,7 @@ export const RECONCILE_OUTPUT_SCHEMA = {
         .enum(["no-region", "search-failed", "library-not-addressable", "page-cap-reached"])
         .optional()
         .describe(
-          "Present only when the Search cross-check did not complete, naming why. Absent when it completed or never ran, which are not distinguished here because a missing cause is not one this call observed.",
+          "Present only when the Search cross-check did not complete, naming why. Every way it can fail to run at all, including the profile carrying no searchRegion, is itself one of these named reasons, so absent means it completed.",
         ),
       searchCrossCheckGraphRequestsByThisCall: z
         .number()
@@ -177,6 +189,10 @@ export const RECONCILE_OUTPUT_SCHEMA = {
         name: z.string(),
         slot: SlotSchema,
         state: z.enum(["compliant", "misnamed", "misplaced", "misnamed_and_misplaced"]),
+        library: z
+          .string()
+          .optional()
+          .describe("Same meaning as an artifact's matched.library: present when this copy was found in another document library."),
       }),
     )
     .describe("Extra files that also satisfy a slot already claimed by a better candidate."),
