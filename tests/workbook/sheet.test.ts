@@ -88,6 +88,30 @@ describe("sheetToGrid", () => {
     expect(result.grid[0]?.[0]).toBe(UNEVALUABLE);
   });
 
+  it("ignores cols, mergeCells and dimension siblings of sheetData, and ignores the declared dimension", () => {
+    // <col>, <cols>, <conditionalFormatting> and <dimension> all start with
+    // the same "c" as a cell element, or sit right alongside one that does.
+    // The word boundary in CELL_PATTERN is what keeps those from being read
+    // as cells; this is the test proving it, not just the regex asserting
+    // it. <dimension ref="A1:Z100"/> claims a 26 by 100 sheet the part does
+    // not actually carry data for, which is what proves the grid's shape
+    // comes from the cells present rather than from that declared range.
+    const sheet = '<worksheet>' +
+      '<dimension ref="A1:Z100"/>' +
+      '<cols><col min="1" max="3" width="12"/></cols>' +
+      '<sheetData>' +
+      '<row r="1"><c r="A1" t="inlineStr"><is><t>Client</t></is></c></row>' +
+      '<row r="2"><c r="A2" t="inlineStr"><is><t>CLIENTA</t></is></c></row>' +
+      '</sheetData>' +
+      '<mergeCells count="1"><mergeCell ref="A1:B1"/></mergeCells>' +
+      '</worksheet>';
+
+    const result = sheetToGrid(sheet, []);
+
+    expect(result.grid).toEqual([["Client"], ["CLIENTA"]]);
+    expect(result.firstRow).toBe(1);
+  });
+
   it("reads an empty worksheet as an empty grid", () => {
     const result = sheetToGrid("<worksheet><sheetData></sheetData></worksheet>", []);
 

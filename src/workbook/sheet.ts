@@ -112,12 +112,19 @@ function readCells(sheetXml: string, sharedStrings: string[]): PlacedCell[] {
  *
  * With no `bounds`, the row range is trimmed to the rows that actually carry
  * a cell, and that trim is what `firstRow` reports back. The column range is
- * not trimmed the same way: it always starts at column 1, because the
- * returned shape carries only `firstRow`, not a matching `firstColumn`, and a
- * caller reading a column by its letter through columnLabelToIndex needs the
- * grid's column 0 to be column A for that lookup to mean anything. `bounds`
- * fixes both a firstRow and an implied firstColumn explicitly, so this
- * asymmetry only exists in the unbounded case.
+ * deliberately NOT trimmed the same way: it always starts at column 1 (grid
+ * column 0 is always column A), even though the row range is trimmed to
+ * where the data starts. This is an intentional asymmetry, not an
+ * oversight, and there is no matching `firstColumn` in the return value to
+ * pair with it. A bounded read is unaffected: `bounds` fixes both a firstRow
+ * and a firstColumn explicitly, so the asymmetry exists only in the
+ * unbounded case. It is safe because no caller needs an absolute column
+ * origin for the unbounded case: `readWorkbookGrid` in `read.ts`, the one
+ * consumer of an unbounded grid, locates its columns by matching header text
+ * within the header row, never by absolute column index, so where column 0
+ * of the grid falls relative to the sheet is not load bearing for
+ * correctness there. If a future caller needs an absolute column origin,
+ * that caller needs its own bounds, not a change to this default.
  */
 export function sheetToGrid(
   sheetXml: string,
