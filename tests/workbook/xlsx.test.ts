@@ -93,6 +93,46 @@ describe("parseWorkbookGrid, resolving a range", () => {
     expect(result.grid).toEqual([["Client", "Monthly", "Notes"]]);
   });
 
+  // The r:id and rels indirection is the only authority on which part a
+  // named sheet actually lives in. Every other fixture keeps a sheet's
+  // declaration position, its r:id and its part number in lockstep, which a
+  // shortcut (take the first <sheet>, or derive the part number from
+  // position) would satisfy just as well as the real resolution. This
+  // fixture deliberately breaks all three correspondences at once: the
+  // target sheet is declared second, its r:id does not match its position,
+  // and its part number matches neither.
+  it("resolves a worksheet by its r:id, not by its declaration order or a positional part number", () => {
+    const bytes = buildWorkbook({
+      sheets: [
+        { name: "Decoy", rowsXml: '<row r="1"><c r="A1"><v>999</v></c></row>', rId: "rId7", partNumber: 3 },
+        { name: "Target", rowsXml: '<row r="1"><c r="A1"><v>42</v></c></row>', rId: "rId2", partNumber: 9 },
+      ],
+    });
+
+    const result = parseWorkbookGrid(bytes, { kind: "worksheet", name: "Target" });
+
+    expect(result.grid).toEqual([[42]]);
+  });
+
+  it("resolves a table to its real owning worksheet even when that worksheet is not the first declared", () => {
+    const bytes = buildWorkbook({
+      sheets: [
+        { name: "Decoy", rowsXml: '<row r="1"><c r="A1"><v>999</v></c></row>', rId: "rId7", partNumber: 3 },
+        {
+          name: "Target",
+          rowsXml: '<row r="1"><c r="A1" t="inlineStr"><is><t>CLIENTA</t></is></c></row>',
+          rId: "rId2",
+          partNumber: 9,
+        },
+      ],
+      tables: [{ name: "ClientTable", ref: "A1:A1", sheetIndex: 1 }],
+    });
+
+    const result = parseWorkbookGrid(bytes, { kind: "table", name: "ClientTable" });
+
+    expect(result.grid).toEqual([["CLIENTA"]]);
+  });
+
   it("reads shared strings referenced from the resolved sheet", () => {
     const bytes = buildWorkbook({
       sheets: [{ name: "Sheet1", rowsXml: '<row r="1"><c r="A1" t="s"><v>0</v></c></row>' }],
