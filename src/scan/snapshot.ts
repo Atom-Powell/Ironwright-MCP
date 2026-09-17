@@ -1,5 +1,6 @@
 import type { RepositoryFile, RepositorySnapshot } from "../domain/reconcile/index.js";
 import type { InventoryRecord } from "../store/types.js";
+import type { CrossCheckResult } from "./cross-check.js";
 
 /**
  * Ordinary code-unit comparison rather than `localeCompare`, matching the
@@ -19,17 +20,25 @@ function withinSubPath(path: string, subPath: string): boolean {
   return path === subPath || path.startsWith(`${subPath}/`);
 }
 
+/**
+ * `crossCheck` is optional, and absent means exactly what an always-false
+ * flag used to mean before this parameter existed: no cross-check files are
+ * joined in, and `searchCrossCheckIncluded` is false. Every caller that has
+ * not been wired to run the cross-check yet is therefore unaffected by this
+ * parameter existing at all.
+ */
 export function assembleSnapshot(
   records: readonly InventoryRecord[],
   scannedAt: string,
   subPath?: string,
+  crossCheck?: CrossCheckResult,
 ): RepositorySnapshot {
   const scoped =
     subPath === undefined || subPath.length === 0
       ? [...records]
       : records.filter((record) => withinSubPath(record.path, subPath));
 
-  const files: RepositoryFile[] = scoped
+  const localFiles: RepositoryFile[] = scoped
     .filter((record) => !record.isFolder)
     .map((record) => ({
       path: record.path,
@@ -37,8 +46,16 @@ export function assembleSnapshot(
       size: record.size,
       modified: record.modified,
       etag: record.etag,
-    }))
-    .sort((a, b) => compareStrings(a.path, b.path));
+    }));
+
+  // The cross-check's files are joined in unconditionally rather than
+  // filtered by subPath. They were found in a library other than the one
+  // subPath narrows, so no subtree of this library's own scan ever held
+  // them, and there is no sense in which a filter over this library's own
+  // tree should be allowed to hide them.
+  const files: RepositoryFile[] = [...localFiles, ...(crossCheck?.files ?? [])].sort((a, b) =>
+    compareStrings(a.path, b.path),
+  );
 
   const folderPaths = scoped
     .filter((record) => record.isFolder)
@@ -49,8 +66,10 @@ export function assembleSnapshot(
     files,
     folderPaths,
     scannedAt,
-    // Phase 2a runs no Microsoft Search cross-check, so every snapshot it
-    // produces is a degraded scan by the engine's own definition and says so.
-    searchCrossCheckIncluded: false,
+    // True only when the cross-check ran to completion. A cross-check that
+    // never ran, failed outright, hit a library it could not address, or was
+    // cut off by the page cap before finishing is still a degraded scan by
+    // the engine's own definition, so only full completion earns the flag.
+    searchCrossCheckIncluded: crossCheck?.complete === true,
   };
 }

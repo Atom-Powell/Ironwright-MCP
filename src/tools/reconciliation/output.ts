@@ -7,6 +7,7 @@ import type {
   Period,
   RejectedWorkbookRow,
 } from "../../domain/reconcile/index.js";
+import type { CrossCheckSkipReason } from "../../scan/cross-check.js";
 
 /**
  * The most non-compliant artifact findings one call returns.
@@ -35,6 +36,14 @@ export interface ScanProvenance {
    */
   graphRequestsByThisCall: number;
   scanSharedWithConcurrentCall: boolean;
+  /**
+   * Present only when the Search cross-check did not complete, naming why.
+   * Absent means either it completed or it never ran at all; those two are
+   * not distinguished here because the scan itself does not establish a
+   * cause for the second one, and this field must never assert one it did
+   * not observe.
+   */
+  searchCrossCheckSkipReason?: CrossCheckSkipReason;
 }
 
 export interface ReconcileToolOutput {
@@ -109,6 +118,12 @@ export const RECONCILE_OUTPUT_SCHEMA = {
       resynced: z.boolean(),
       graphRequestsByThisCall: z.number().int(),
       scanSharedWithConcurrentCall: z.boolean(),
+      searchCrossCheckSkipReason: z
+        .enum(["no-region", "search-failed", "library-not-addressable", "page-cap-reached"])
+        .optional()
+        .describe(
+          "Present only when the Search cross-check did not complete, naming why. Absent when it completed or never ran, which are not distinguished here because a missing cause is not one this call observed.",
+        ),
     })
     .describe("Where the two inputs came from, and what this call paid for them."),
   scope: z

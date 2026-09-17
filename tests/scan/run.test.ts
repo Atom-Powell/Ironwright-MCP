@@ -182,4 +182,80 @@ describe("runScan", () => {
     expect(second.graphRequests).toBe(3);
     expect(client.requests()).toBe(6);
   });
+
+  it("wires the Search cross-check into the assembled snapshot", async () => {
+    // A wiring test rather than a duplicate of cross-check.test.ts's own
+    // coverage: this proves runScan actually calls crossCheckOtherLibraries
+    // and passes its result on to assembleSnapshot, which a unit test of
+    // either function alone cannot catch if the two are wired together
+    // wrong or not wired together at all.
+    const rawProfile = JSON.parse(
+      readFileSync(new URL("../../examples/profiles/example.json", import.meta.url), "utf8"),
+    );
+    const profileWithRegion = loadProfile({
+      ...rawProfile,
+      identity: { ...rawProfile.identity, searchRegion: "NAM" },
+    });
+
+    const store = createMemoryStateStore();
+    const drives = [
+      {
+        id: "drive-1",
+        name: "Compliance Reports",
+        webUrl: "https://contoso.sharepoint.com/sites/Example/Compliance Reports",
+      },
+      { id: "drive-2", name: "Archive", webUrl: "https://contoso.sharepoint.com/sites/Example/Archive" },
+    ];
+
+    let requests = 0;
+    const client: GraphClient = {
+      requests: () => requests,
+      get: async <T,>(path: string): Promise<T> => {
+        requests += 1;
+        if (path === SITE) return { id: "site-1" } as T;
+        if (path === DRIVES) return { value: drives } as T;
+        if (path === "/drives/drive-1/root/delta") {
+          return { value: [], "@odata.deltaLink": "https://graph.microsoft.com/v1.0/next-link" } as T;
+        }
+        throw new Error(`unexpected get ${path}`);
+      },
+      post: async <T,>(path: string): Promise<T> => {
+        requests += 1;
+        if (path !== "/search/query") throw new Error(`unexpected post ${path}`);
+        return {
+          value: [
+            {
+              hitsContainers: [
+                {
+                  hits: [
+                    {
+                      resource: {
+                        name: "2026-08_CLIENTA_MonthlyTraining.xlsx",
+                        webUrl:
+                          "https://contoso.sharepoint.com/sites/Example/Archive/2026-08_CLIENTA_MonthlyTraining.xlsx",
+                        size: 10,
+                        lastModifiedDateTime: "2026-08-01T00:00:00Z",
+                        parentReference: { driveId: "drive-2" },
+                      },
+                    },
+                  ],
+                  moreResultsAvailable: false,
+                },
+              ],
+            },
+          ],
+        } as T;
+      },
+      getBytes: async (): Promise<Uint8Array> => {
+        throw new Error("this fake does not implement getBytes");
+      },
+    };
+
+    const result = await runScan({ client, store, profile: profileWithRegion, now: NOW });
+
+    expect(result.snapshot.searchCrossCheckIncluded).toBe(true);
+    expect(result.searchCrossCheckSkipReason).toBeUndefined();
+    const found = result.snapshot.files.find((file) => file.library === "Archive");
+    expect(found?.name).toBe("2026-08_CLIENTA_MonthlyTraining.xlsx");
+  });
 });

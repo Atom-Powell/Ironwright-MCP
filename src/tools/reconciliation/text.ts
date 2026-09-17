@@ -149,10 +149,31 @@ export function reconcileText(output: ReconcileToolOutput): string[] {
   }
 
   if (!output.provenance.searchCrossCheckIncluded) {
+    // Four causes, four remedies, and never more than the one the cross-check
+    // itself established. `searchCrossCheckSkipReason` absent means the code
+    // never learned why, which is the only case allowed to name no cause: a
+    // sentence that invented one here would be exactly the defect the
+    // message-audit practice exists to prevent, an assertion this function
+    // cannot observe to be true.
+    const reason = output.provenance.searchCrossCheckSkipReason;
+    const cause =
+      reason === "no-region"
+        ? "The Microsoft Search cross-check did not run because the profile has no searchRegion configured. " +
+          "Configure searchRegion on the profile to enable it."
+        : reason === "search-failed"
+          ? "The Microsoft Search cross-check failed. Investigate Microsoft Graph access, credentials, or the " +
+            "network."
+          : reason === "library-not-addressable"
+            ? "The Microsoft Search cross-check could not search every document library, because one was " +
+              "listed without a URL to search it by. That is not a failure and not a misconfiguration."
+            : reason === "page-cap-reached"
+              ? "The Microsoft Search cross-check did not search a library exhaustively, because it returned " +
+                "more matching files than the page cap allows. The scope is too large for one pass."
+              : "The Microsoft Search cross-check did not run.";
+
     lines.push(
-      "The Microsoft Search cross-check did not run. Without it a correctly named file stored outside the " +
-        "expected taxonomy is invisible to this scan, so every misplaced finding is unreliable and every missing " +
-        "finding is suspect.",
+      `${cause} Without it a correctly named file stored outside the expected taxonomy is invisible to this ` +
+        "scan, so every misplaced finding is unreliable and every missing finding is suspect.",
     );
   }
 

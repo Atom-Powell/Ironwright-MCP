@@ -31,6 +31,12 @@ export function scanProvenance(result: ScanResult, joined: boolean): ScanProvena
     resynced: result.resynced,
     graphRequestsByThisCall: joined ? 0 : result.graphRequests,
     scanSharedWithConcurrentCall: joined,
+    // Carried through unchanged regardless of joined, for the same reason
+    // scanMode and resynced are: it describes the shared inventory the
+    // report is built on, not what this particular caller paid.
+    ...(result.searchCrossCheckSkipReason === undefined
+      ? {}
+      : { searchCrossCheckSkipReason: result.searchCrossCheckSkipReason }),
   };
 }
 

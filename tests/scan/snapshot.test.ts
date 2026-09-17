@@ -58,4 +58,35 @@ describe("assembleSnapshot", () => {
 
     expect(file).toEqual({ path: "a.xlsx", name: "a.xlsx", size: 99, modified: "2026-08-01T00:00:00Z", etag: "etag-9" });
   });
+
+  it("marks the snapshot complete only when the cross-check completed", () => {
+    expect(assembleSnapshot([], "2026-09-13T12:00:00Z", undefined, { files: [], complete: true }).searchCrossCheckIncluded).toBe(
+      true,
+    );
+    expect(
+      assembleSnapshot([], "2026-09-13T12:00:00Z", undefined, { files: [], complete: false, reason: "no-region" })
+        .searchCrossCheckIncluded,
+    ).toBe(false);
+  });
+
+  it("joins the cross-check's files into the snapshot's own file list", () => {
+    const crossCheckFile = {
+      path: "2026/b.xlsx",
+      name: "b.xlsx",
+      size: 5,
+      modified: "2026-08-15T00:00:00Z",
+      etag: "",
+      library: "Other Library",
+    };
+
+    const snapshot = assembleSnapshot(
+      [record({ path: "2026/a.xlsx", name: "a.xlsx" })],
+      "2026-09-13T12:00:00Z",
+      undefined,
+      { files: [crossCheckFile], complete: true },
+    );
+
+    expect(snapshot.files.map((file) => file.path)).toEqual(["2026/a.xlsx", "2026/b.xlsx"]);
+    expect(snapshot.files.find((file) => file.path === "2026/b.xlsx")).toEqual(crossCheckFile);
+  });
 });

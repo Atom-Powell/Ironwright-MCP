@@ -6,6 +6,7 @@ import type { RepositorySnapshot } from "../domain/reconcile/index.js";
 import type { StateStore } from "../store/types.js";
 import { changesFromDeltaItems } from "./changes.js";
 import { assembleSnapshot } from "./snapshot.js";
+import { crossCheckOtherLibraries, type CrossCheckSkipReason } from "./cross-check.js";
 
 export interface ScanDependencies {
   client: GraphClient;
@@ -38,6 +39,13 @@ export interface ScanResult {
    */
   unfilteredFileCount: number;
   unfilteredFolderCount: number;
+  /**
+   * Present only when the Search cross-check did not complete, naming why.
+   * Absent covers both a completed cross-check and one that never ran at
+   * all, and those two are not told apart here on purpose: this field must
+   * never assert a cause the cross-check itself did not establish.
+   */
+  searchCrossCheckSkipReason?: CrossCheckSkipReason;
 }
 
 export async function runScan(dependencies: ScanDependencies): Promise<ScanResult> {
@@ -108,8 +116,14 @@ export async function runScan(dependencies: ScanDependencies): Promise<ScanResul
 
   const records = await store.listInventory(profile.profileId, driveId);
 
+  // Run after the inventory scan rather than in parallel with it: both share
+  // `client`, and `requestsAtStart` above is the baseline `graphRequests`
+  // below is measured against, so the cross-check's own Graph calls must
+  // land inside that measured span rather than racing it.
+  const crossCheck = await crossCheckOtherLibraries(client, profile);
+
   return {
-    snapshot: assembleSnapshot(records, scannedAt, dependencies.subPath),
+    snapshot: assembleSnapshot(records, scannedAt, dependencies.subPath, crossCheck),
     driveId,
     mode,
     resynced,
@@ -120,5 +134,6 @@ export async function runScan(dependencies: ScanDependencies): Promise<ScanResul
     subPath: dependencies.subPath,
     unfilteredFileCount: records.filter((record) => !record.isFolder).length,
     unfilteredFolderCount: records.filter((record) => record.isFolder).length,
+    ...(crossCheck.reason === undefined ? {} : { searchCrossCheckSkipReason: crossCheck.reason }),
   };
 }

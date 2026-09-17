@@ -50,6 +50,64 @@ describe("reconcileText", () => {
     expect(text).toContain("every missing finding is suspect");
   });
 
+  it("names no cause when the cross-check did not run and no reason was recorded", () => {
+    const report = loadExpectedReport();
+    report.provenance.searchCrossCheckIncluded = false;
+
+    const text = reconcileText(shapeReport(report, PROVENANCE, {})).join("\n");
+
+    expect(text).toContain("did not run");
+    expect(text).not.toContain("searchRegion");
+    expect(text).not.toContain("failed");
+    expect(text).not.toMatch(/page cap/i);
+  });
+
+  it("names the missing region as the reason when that is why the cross-check was skipped", () => {
+    const report = loadExpectedReport();
+    report.provenance.searchCrossCheckIncluded = false;
+
+    const text = reconcileText(
+      shapeReport(report, { ...PROVENANCE, searchCrossCheckSkipReason: "no-region" }, {}),
+    ).join("\n");
+
+    expect(text).toContain("searchRegion");
+    expect(text).not.toContain("failed");
+  });
+
+  it("says a search failed when that is what happened", () => {
+    const report = loadExpectedReport();
+    report.provenance.searchCrossCheckIncluded = false;
+
+    const text = reconcileText(
+      shapeReport(report, { ...PROVENANCE, searchCrossCheckSkipReason: "search-failed" }, {}),
+    ).join("\n");
+
+    expect(text).toContain("failed");
+  });
+
+  it("says a library could not be searched, without calling it a failure, when it had no URL", () => {
+    const report = loadExpectedReport();
+    report.provenance.searchCrossCheckIncluded = false;
+
+    const text = reconcileText(
+      shapeReport(report, { ...PROVENANCE, searchCrossCheckSkipReason: "library-not-addressable" }, {}),
+    ).join("\n");
+
+    expect(text).toContain("without a URL");
+    expect(text).not.toContain("failed");
+  });
+
+  it("says the scan was too large when the page cap was reached", () => {
+    const report = loadExpectedReport();
+    report.provenance.searchCrossCheckIncluded = false;
+
+    const text = reconcileText(
+      shapeReport(report, { ...PROVENANCE, searchCrossCheckSkipReason: "page-cap-reached" }, {}),
+    ).join("\n");
+
+    expect(text).toMatch(/too many|page cap|too large/i);
+  });
+
   it("says nothing about the Search cross-check when it did run", () => {
     expect(textFor()).not.toContain("Search cross-check");
   });
