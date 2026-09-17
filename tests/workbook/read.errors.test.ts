@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readWorkbookGrid, WorkbookMappingError } from "../../src/workbook/read.js";
+import { UNEVALUABLE } from "../../src/workbook/cells.js";
 import { loadProfile } from "../../src/domain/profile/load.js";
 import { readFileSync } from "node:fs";
 
@@ -64,6 +65,81 @@ describe("readWorkbookGrid failures", () => {
     // does, and nothing here reads that offset from Graph.
     expect(result.rejectedRows).toHaveLength(1);
     expect(result.rejectedRows[0]?.row).toBe(3);
+  });
+
+  it("numbers a rejected row by its sheet row when a row offset is given", () => {
+    // A table starting at sheet row 12: header on row 12, first data row on
+    // row 13. The default offset used everywhere else in this file numbers
+    // the same row 3, relative to the range rather than the sheet.
+    const result = readWorkbookGrid([HEADER, ["CLIENTB", true, false, "nonsense"]], PROFILE, 12);
+
+    expect(result.rejectedRows).toHaveLength(1);
+    expect(result.rejectedRows[0]?.row).toBe(13);
+  });
+
+  it("rejects a row whose mapped cell could not be read, rather than recording it as empty", () => {
+    // Folding an unevaluable cell into null would read as a client having
+    // nothing recorded for that column, which is the silent substitution
+    // this rejection exists to prevent.
+    const result = readWorkbookGrid([HEADER, ["CLIENTA", UNEVALUABLE, false, 45231]], PROFILE);
+
+    expect(result.rows).toHaveLength(0);
+    expect(result.rejectedRows).toHaveLength(1);
+    expect(result.rejectedRows[0]?.client).toBe("CLIENTA");
+    expect(result.rejectedRows[0]?.reason).toMatch(/could not be read from the workbook/);
+    expect(result.rejectedRows[0]?.reason).toMatch(/Monthly Training/);
+  });
+
+  it("rejects a row whose client cell could not be read, with its own wording rather than quoting a symbol", () => {
+    // JSON.stringify of the UNEVALUABLE symbol returns undefined, so the
+    // not-text branch's wording would read "was not text: undefined", which
+    // names no cause. This case gets a message that does.
+    const result = readWorkbookGrid([HEADER, [UNEVALUABLE, true, false, 45231]], PROFILE);
+
+    expect(result.rows).toHaveLength(0);
+    expect(result.rejectedRows).toHaveLength(1);
+    expect(result.rejectedRows[0]?.client).toBeUndefined();
+    expect(result.rejectedRows[0]?.reason).toMatch(/could not be read from the workbook/);
+    expect(result.rejectedRows[0]?.reason).toMatch(/Client/);
+    expect(result.rejectedRows[0]?.reason).not.toMatch(/undefined/);
+  });
+
+  it("rejects a row whose effectiveFrom cell could not be read, when the profile respects that column", () => {
+    const result = readWorkbookGrid([HEADER, ["CLIENTA", true, false, UNEVALUABLE]], PROFILE);
+
+    expect(result.rows).toHaveLength(0);
+    expect(result.rejectedRows).toHaveLength(1);
+    expect(result.rejectedRows[0]?.client).toBe("CLIENTA");
+    expect(result.rejectedRows[0]?.reason).toMatch(/could not be read from the workbook/);
+    expect(result.rejectedRows[0]?.reason).toMatch(/Onboarded/);
+    expect(result.rejectedRows[0]?.reason).not.toMatch(/undefined/);
+  });
+
+  it("keeps a row whose effectiveFrom cell could not be read, when the profile does not respect that column", () => {
+    // Same reasoning as a malformed effectiveFrom with the flag off: nothing
+    // downstream consults the field, so rejecting the row would drop a
+    // client out of a compliance report over a cell nothing reads.
+    const result = readWorkbookGrid(
+      [HEADER, ["CLIENTA", true, false, UNEVALUABLE]],
+      PROFILE_IGNORING_EFFECTIVE_FROM,
+    );
+
+    expect(result.rejectedRows).toEqual([]);
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]?.client).toBe("CLIENTA");
+    expect(result.rows[0]?.effectiveFrom).toBeUndefined();
+  });
+
+  it("rejects the whole row when an unevaluable cell coexists with otherwise valid data", () => {
+    // Proves the row is refused entirely rather than half recorded: the
+    // client name and the other mapped field are both readable here, and
+    // still nothing from this row reaches `rows`.
+    const result = readWorkbookGrid([HEADER, ["CLIENTA", true, UNEVALUABLE, 45231]], PROFILE);
+
+    expect(result.rows).toHaveLength(0);
+    expect(result.rejectedRows).toHaveLength(1);
+    expect(result.rejectedRows[0]?.client).toBe("CLIENTA");
+    expect(result.rejectedRows[0]?.reason).toMatch(/Quarterly Phishing/);
   });
 
   it("rejects a row whose client cell holds a value that is not text, rather than skipping it", () => {

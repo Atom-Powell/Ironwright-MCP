@@ -23,18 +23,11 @@ export interface ClientRecord {
 /** A workbook row the reader could not turn into a `ClientRecord`. */
 export interface RejectedWorkbookRow {
   /**
-   * 1-based row number within the range that was read, which is not always
-   * the sheet row the operator sees. A table is read through
-   * `/workbook/tables/{name}/range`, and that returns the table's own range,
-   * so a table starting at sheet row 12 numbers its first row 1 here. A
-   * worksheet's used range is usually, but not necessarily, flush with the
-   * top of the sheet.
-   *
-   * Making this absolute needs the range's own offset from Graph, which
-   * nothing in this repository reads yet. It is not inferred here: no call
-   * has been made against a tenant, so what a real Range response carries has
-   * never been seen, and a number derived from a field nobody has observed
-   * would be the same wrong claim in a more confident form.
+   * The row's own number on the sheet, one-based, the way the operator will
+   * see it if they open the workbook and look. `readWorkbookGrid` derives it
+   * from the row offset `parseWorkbookGrid` resolves for the range or table
+   * it read, so a table starting at sheet row 12 reports its first data row
+   * as row 13, not as row 2 within the range.
    */
   row: number;
   /** The client the row named, when that cell was readable. */

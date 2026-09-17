@@ -1,6 +1,7 @@
 import type { Profile } from "../domain/profile/schema.js";
 import { isIsoEffectiveFrom } from "../domain/reconcile/index.js";
 import type { ClientRecord, RejectedWorkbookRow } from "../domain/reconcile/index.js";
+import { UNEVALUABLE } from "./cells.js";
 
 /**
  * A mapping failure, not a data failure. The distinction is the load-bearing
@@ -67,7 +68,7 @@ function cellToField(value: unknown): string | number | boolean | null {
   return null;
 }
 
-export function readWorkbookGrid(grid: unknown[][], profile: Profile): ReadResult {
+export function readWorkbookGrid(grid: unknown[][], profile: Profile, rowOffset = 1): ReadResult {
   const headerRowIndex = profile.workbookMapping.headerRow - 1;
   const header = grid[headerRowIndex];
   if (header === undefined) {
@@ -170,12 +171,14 @@ export function readWorkbookGrid(grid: unknown[][], profile: Profile): ReadResul
   const rejectedRows: RejectedWorkbookRow[] = [];
 
   for (let index = headerRowIndex + 1; index < grid.length; index += 1) {
-    // Numbered within the range Graph returned, not within the sheet. For a
-    // table the range is the table's own, so a table starting at sheet row 12
-    // numbers its header row 1 here and its first data row 2.
-    // `RejectedWorkbookRow` carries the same caveat at the field an operator
-    // reads, and says what it would take to make the number absolute.
-    const rangeRow = index + 1;
+    // `index` is the row's position within `grid`, which starts at 0 wherever
+    // the parsed range itself started on the sheet. `rowOffset` is that
+    // range's own first sheet row, supplied by the caller from what
+    // `parseWorkbookGrid` resolved, so adding it turns a grid position into
+    // the row number an operator will actually find when they open the
+    // workbook. The default of 1 reproduces the old, range-relative numbering
+    // for a caller that has no sheet row to give.
+    const sheetRow = index + rowOffset;
     const cells = grid[index];
     if (cells === undefined) continue;
 
@@ -193,9 +196,21 @@ export function readWorkbookGrid(grid: unknown[][], profile: Profile): ReadResul
     // A rejection is visible, and the operator decides.
     if (clientCell === undefined || clientCell === null) continue;
 
+    if (clientCell === UNEVALUABLE) {
+      // Distinct from the not-text case below: this cell was never seen well
+      // enough to say what it held, so quoting it would quote nothing, and
+      // JSON.stringify of a symbol returns undefined, which reads as though
+      // no cause were named at all.
+      rejectedRows.push({
+        row: sheetRow,
+        reason: `the column headed "${profile.workbookMapping.columns.client}" could not be read from the workbook`,
+      });
+      continue;
+    }
+
     if (typeof clientCell !== "string") {
       rejectedRows.push({
-        row: rangeRow,
+        row: sheetRow,
         reason: `the client cell was not text: ${JSON.stringify(clientCell)}`,
       });
       continue;
@@ -214,6 +229,11 @@ export function readWorkbookGrid(grid: unknown[][], profile: Profile): ReadResul
 
       if (field === "effectiveFrom") {
         if (cell === undefined || cell === null || cell === "") continue;
+        // UNEVALUABLE falls through the same path as a malformed date: it is
+        // neither a number nor a string, so the conversion below leaves
+        // candidate unset and the row is rejected only when respectEffectiveFrom
+        // is on, exactly as a malformed value is. Only the message differs,
+        // below, because this layer never learns why the cell was unreadable.
 
         // One screen over both shapes a date arrives in, against the engine's
         // own predicate rather than a pattern of this module's, because a
@@ -231,15 +251,35 @@ export function readWorkbookGrid(grid: unknown[][], profile: Profile): ReadResul
         if (candidate !== undefined && isIsoEffectiveFrom(candidate)) {
           effectiveFrom = candidate;
         } else if (respectEffectiveFrom) {
-          // Two wordings because an operator faces two different repairs: a
-          // number the sheet holds as a date that cannot be used as one, and a
-          // cell whose contents are not a date at all. Both quote the cell as
-          // the workbook holds it rather than whatever it converted to, since
-          // that is what the operator has to go and find.
-          rejection =
-            typeof cell === "number"
-              ? `effectiveFrom was not a usable date: ${JSON.stringify(cell)}`
-              : `effectiveFrom was not a date: ${JSON.stringify(cell)}`;
+          // Three wordings, not two: an unevaluable cell gets its own,
+          // because JSON.stringify of the UNEVALUABLE symbol returns
+          // undefined, and quoting that would read as though no cause were
+          // named at all. The other two remain quoted as the workbook holds
+          // them rather than whatever they converted to, since that is what
+          // the operator has to go and find.
+          if (cell === UNEVALUABLE) {
+            rejection =
+              `the column headed "${profile.workbookMapping.columns.effectiveFrom}" ` +
+              "could not be read from the workbook";
+          } else {
+            rejection =
+              typeof cell === "number"
+                ? `effectiveFrom was not a usable date: ${JSON.stringify(cell)}`
+                : `effectiveFrom was not a date: ${JSON.stringify(cell)}`;
+          }
+        }
+        continue;
+      }
+
+      if (cell === UNEVALUABLE) {
+        // Rejected here, in the layer that knows which columns the mapping
+        // reads, rather than in cellToField: cellToField cannot tell an
+        // unevaluable cell from any other value it does not recognize, and
+        // folding it into null would be the exact silent substitution this
+        // phase exists to prevent. Guarded so the row's first unreadable
+        // column is the one reported, rather than the last one iterated.
+        if (rejection === undefined) {
+          rejection = `the column headed "${profile.workbookMapping.columns[field]}" could not be read from the workbook`;
         }
         continue;
       }
@@ -248,7 +288,7 @@ export function readWorkbookGrid(grid: unknown[][], profile: Profile): ReadResul
     }
 
     if (rejection !== undefined) {
-      rejectedRows.push({ row: rangeRow, client, reason: rejection });
+      rejectedRows.push({ row: sheetRow, client, reason: rejection });
       continue;
     }
 
