@@ -1314,13 +1314,13 @@ a check nobody can vouch for.
 
 Phase 4b wired `inventory_tree`, `query_repository` and `validate_structure` onto the execution
 layer phase 4a built, on branch `phase-4b-read-tools`, with the suite at 1800 tests across 126
-files when the eight tasks finished and 1818 across 127 after the whole-branch fix wave of
-2026-09-18, all gates green at both points. No call this phase's own code makes has reached a tenant. Every layer
-it composes was verified live in an earlier phase: the Graph and scan layer from 2a, the workbook
-bytes reader from 2b-2, the cross-check from 2c, and the reconciliation engine from phase 3. That
-verification does not transfer to this phase's own code, which is covered by fakes and fixtures
-only, in the same position phase 4a's own read tool was in before "The second live tenant sitting,
-2026-09-17" above.
+files when the eight tasks finished and 1821 across 127 after the whole-branch fix wave of
+2026-09-18, all gates green at both points. No call this phase's own code makes has reached a
+tenant. Every layer it composes was verified live in an earlier phase: the Graph and scan layer
+from 2a, the workbook bytes reader from 2b-2, the cross-check from 2c, and the reconciliation
+engine from phase 3. That verification does not transfer to this phase's own code, which is covered
+by fakes and fixtures only, in the same position phase 4a's own read tool was in before "The second
+live tenant sitting, 2026-09-17" above.
 
 **What is covered.** Per tool: the handler's own input validation, the run composition against a
 fake Graph transport and the in-memory `StateStore`, the shaping module's truncation and omission
@@ -1408,27 +1408,38 @@ inventory and stamp the answer with the previous scan's timestamp. That is the s
 
 The coordinator gained two methods. `settle` awaits a scan already in flight for the profile and
 reports whether it failed, and `scansStarted` is a monotonic per-profile count of scans started.
-`loadSnapshot` settles first, refuses outright when the scan it waited for failed, since a scan
-that fails after its resync has cleared the inventory leaves a store that looks exactly like a
-smaller library, and then brackets its own two store reads with the counter. A count that changed
-across them means a scan began during the read, which `settle` cannot prevent because there was
-nothing in flight to wait for, and that too is a refusal rather than an answer. Neither method
-calls Graph, so the tool's zero-request property is intact.
+`loadSnapshot` reads the baseline count before calling `settle` at all, not after: `settle`'s own
+`await` is itself a microtask checkpoint, and a scan can start inside it, either while this call is
+waiting on one already in flight or in the gap after that scan clears from the coordinator's map
+but before `settle`'s continuation resumes. A baseline taken after that await would already count
+such a scan, and the guard would then compare the counter to itself. `loadSnapshot` settles next,
+refuses outright when the scan it waited for failed, since a scan that fails after its resync has
+cleared the inventory leaves a store that looks exactly like a smaller library, and then takes a
+second reading after its two store reads. A count that changed between the baseline and that second
+reading means a scan began somewhere in between, whether during `settle` itself or during the reads
+that follow it, and that too is a refusal rather than an answer. Neither method calls Graph, so the
+tool's zero-request property is intact.
 
 What that leaves open is worth stating plainly, because "fixed" here means fixed within one
-replica. The counter closes the in-replica window completely: a scan that starts and finishes
-entirely between the two store reads still increments it. It cannot see a scan run by another
+replica. The counter now closes the in-replica window completely: a scan that starts and finishes
+anywhere between the baseline read and the second reading, including entirely inside `settle`
+itself, still increments the monotonic counter and gets caught. It cannot see a scan run by another
 replica against the same Table Storage, nor one run by the `scan` CLI, which calls `runScan`
-directly and is outside any coordinator. Both are the same one-replica constraint this file
-already carries for the coordinator itself, and neither is detectable from inside this process.
-A second replica makes `query_repository` silently racy again, so the minimum-one-replica
-constraint is now load bearing for correctness and not only for the delta link.
+directly and is outside any coordinator. Both are the same one-replica constraint this file already
+carries for the coordinator itself, and neither is detectable from inside this process. A second
+replica makes `query_repository` silently racy again, so the minimum-one-replica constraint is load
+bearing for correctness and not only for the delta link.
 
 The interleaving is exercised rather than asserted. `tests/tools/query/concurrency.test.ts` drives
 the real coordinator and the real in-memory store against the real handler, with a scan fake that
 clears and rebuilds in the order `runScan` does, and records what the store actually held at the
-moment the handler reached it, so a pass means the race was live. Three of its four cases fail
-against the code as it stood before the fix; the fourth is the control that must keep passing.
+moment the handler reached it, so a pass means the race was live. Three of its first four cases
+fail against code with no settle-and-counter mechanism at all; the fourth is the control that must
+keep passing regardless. A fifth case drives the interleaving those four cannot reach: a scan that
+starts inside `settle`'s own microtask checkpoint, after the underlying wait has already resolved
+but before `loadSnapshot` resumes. It fails against a coordinator that has the counter mechanism
+but reads the baseline after `settle` rather than before, and passes once the baseline read moves
+ahead of that `await`.
 
 **The live sitting this phase still owes.** This phase is covered by fakes until it has run
 against a tenant, and the branch does not merge until it has. Against the existing seeded

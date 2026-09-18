@@ -185,6 +185,76 @@ describe("query_repository against a concurrent scan", () => {
     expect(textOf(result)).toContain("started while this call was reading the stored inventory");
   });
 
+  it("refuses to answer when a scan begins during settle itself, before this call resumes", async () => {
+    // The interleaving the old baseline placement missed entirely: nothing is
+    // in flight when this call arrives, so `settle` resolves immediately, but
+    // a scan starts inside the microtask checkpoint that `await settle(...)`
+    // itself creates, before the next line of `loadSnapshot` runs. A baseline
+    // read after that await already counts this scan; only a baseline read
+    // before `settle` is called can still catch it.
+    const store = createMemoryStateStore();
+    await fill(store);
+    await markScanned(store);
+
+    let clearedSignal!: () => void;
+    const cleared = new Promise<void>((resolve) => {
+      clearedSignal = resolve;
+    });
+    let releaseFill!: () => void;
+    const fillGate = new Promise<void>((resolve) => {
+      releaseFill = resolve;
+    });
+
+    const real = createScanCoordinator({
+      client: {} as GraphClient,
+      store,
+      now: () => new Date(SCANNED_AT),
+      scan: async () => {
+        await store.clearInventory(PROFILE_ID, DRIVE_ID);
+        clearedSignal();
+        await fillGate;
+        await fill(store);
+        return scanResult();
+      },
+    });
+
+    const observed: string[] = [];
+    let scanning: Promise<unknown> | undefined;
+
+    const coordinator: ScanCoordinator = {
+      run: (profile) => real.run(profile),
+      settle: async (profile) => {
+        const settled = await real.settle(profile);
+        // Started only now, after the real `settle` above has already
+        // resolved with nothing to wait for. This is the scan the fix must
+        // still catch even though it began entirely inside `settle`.
+        scanning = real.run(profile);
+        await cleared;
+        observed.push(
+          `store held ${(await store.listInventory(PROFILE_ID, DRIVE_ID)).length} records once the new scan's resync had landed`,
+        );
+        releaseFill();
+        return settled;
+      },
+      scansStarted: (profile) => real.scansStarted(profile),
+    };
+
+    const base = createFakeToolContext();
+    const context: ToolContext = { ...base, store, scans: coordinator };
+
+    const result = await runQueryRepository({ profileId: PROFILE_ID, question: "empty_folders" }, context);
+    expect(scanning).toBeDefined();
+    await scanning;
+
+    // The resync really had cleared the store by the time settle resumed, so
+    // a pass here proves the race was live rather than that the timing never
+    // lined up.
+    expect(observed).toEqual(["store held 0 records once the new scan's resync had landed"]);
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toBeUndefined();
+    expect(textOf(result)).toContain("started while this call was reading the stored inventory");
+  });
+
   it("answers normally through the same store wrapper when no scan starts during the read", async () => {
     // The control for the test above. Without it, a refusal caused by the
     // wrapper itself rather than by the interleaving would read as a pass.

@@ -114,13 +114,20 @@ function compareDrivesNewestFirst(a: ScannedDrive, b: ScannedDrive): number {
  * property the tool advertises survives intact.
  */
 async function loadSnapshot(context: ToolContext, profile: Profile): Promise<{ snapshot: RepositorySnapshot; driveId: string }> {
+  // Taken before `settle` is awaited, not after. `settle`'s own `await` is a
+  // microtask checkpoint: a scan can start inside it, either while this call
+  // is waiting on one already in flight or in the gap after that scan clears
+  // `inFlight` but before `settle`'s continuation resumes. A baseline read
+  // after the await would already count that scan, so the guard below would
+  // compare the counter to itself and pass while the scan is still live
+  // across both store reads. Reading first means any scan already in flight
+  // on entry is already included here, so `settle` waiting for it does not
+  // move the count, while anything that starts during or after `settle` is
+  // still caught by the second reading.
+  const startedBeforeRead = context.scans.scansStarted(profile);
+
   const settled = await context.scans.settle(profile);
   if (settled.failed) throw new ConcurrentScanFailedError(profile.profileId);
-
-  // Read in the same synchronous block the `await` above resumed into, so no
-  // other handler can have started a scan between the wait ending and this
-  // baseline being taken.
-  const startedBeforeRead = context.scans.scansStarted(profile);
 
   const drives = await context.store.getScannedDrives(profile.profileId);
   if (drives.length === 0) throw new NeverScannedError(profile.profileId);
