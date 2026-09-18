@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { UnsafeKeyError } from "../../src/store/keys.js";
 import type { InventoryRecord, StateStore } from "../../src/store/types.js";
 
 export function record(overrides: Partial<InventoryRecord> = {}): InventoryRecord {
@@ -196,5 +197,14 @@ export function stateStoreConformance(create: () => StateStore): void {
     await expect(store.getScannedDrives("clienta")).resolves.toEqual([
       { driveId: "drive-1", lastScanAt: "2026-09-17T10:00:00.000Z" },
     ]);
+  });
+
+  it("refuses a malformed profile id before answering, the same for every implementation", async () => {
+    // A StateStore caller cannot tell which implementation is behind it, so an
+    // id every other store method rejects must not be the one input where one
+    // implementation throws and the other quietly resolves to an empty
+    // result, since an empty result is indistinguishable from "never scanned".
+    const store = create();
+    await expect(store.getScannedDrives("bad/id")).rejects.toThrow(UnsafeKeyError);
   });
 }

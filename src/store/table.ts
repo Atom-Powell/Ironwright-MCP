@@ -189,6 +189,17 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
     },
 
     async getScannedDrives(profileId): Promise<ScannedDrive[]> {
+      // Neither this table's partition key nor its sibling deltaLinks methods
+      // (getDeltaLink, setDeltaLink, getLastScanAt) validate profileId, since
+      // Table Storage keeps partition and row key separate and none of them
+      // needs inventoryPartitionKey's join. This call is deliberately out of
+      // step with those siblings anyway: a StateStore caller must not be able
+      // to tell which implementation answered, and the memory implementation
+      // now rejects a malformed profile id before it looks anywhere, so this
+      // one must refuse the same input before it queries, not answer with an
+      // empty result a caller cannot distinguish from "never scanned". The
+      // driveId argument is unused here; only profileId's safety matters.
+      inventoryPartitionKey(profileId, "");
       const drives: ScannedDrive[] = [];
       for await (const entity of clients.deltaLinks.listEntities({
         queryOptions: { filter: partitionFilter(profileId) },
