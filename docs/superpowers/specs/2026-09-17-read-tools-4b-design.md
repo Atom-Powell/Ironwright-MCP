@@ -188,8 +188,15 @@ Each answer reuses the existing pure domain function rather than reimplementing 
 Reusing those two modules is not a breach of the rule that reconcile's four stages stay internal.
 That rule exists so two tools cannot disagree about a compliance verdict; sharing one definition of
 "empty folder" is how agreement is guaranteed, and reimplementing it is what would break the rule.
-Neither module gains a new public entry point into the engine, and neither is re-exported from
-`src/domain/reconcile/index.ts`.
+**Amended 2026-09-17 during execution.** This paragraph originally ended by requiring that neither
+module be re-exported from `src/domain/reconcile/index.ts`. That is not implementable: an ESLint rule
+in this repository forbids importing a stage module directly from outside `src/domain/**`, stating
+that the engine has one entry point. The two requirements are contradictory and the lint rule is the
+older and the enforced one. `findEmptyFolders` and `createFileParser` are therefore exported from
+`index.ts`, following the precedent `isIsoEffectiveFrom` already set, with a comment recording that
+neither export lets a caller reach `deriveExpected` or `matchArtifacts`. The Decision Record's intent
+holds: what stays unreachable is the ability to compute a compliance verdict, not the primitives the
+verdict is built from.
 
 **No snapshot is a failure, not an empty answer.** If the profile has never been scanned,
 `getScannedDrives` returns an empty array and the tool fails with a message naming
