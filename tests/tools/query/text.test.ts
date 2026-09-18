@@ -15,7 +15,7 @@ const truncated: QueryToolOutput = {
   scannedAt: "2026-09-17T00:00:00.000Z",
   totals: { findings: 913 },
   findings: [],
-  listing: { returned: 481, omitted: 432, cap: 481, truncated: true },
+  listing: { returned: 481, omitted: 432, cap: 520, truncated: true },
   graphRequests: 0,
 };
 
@@ -45,11 +45,11 @@ describe("queryText", () => {
   it("states the truncation sentence with the returned count, the omitted count, and the cap each in their own place", () => {
     const lines = queryText(truncated, NOW);
 
-    expect(lines[2]).toBe("Listing 481 findings of that total; 432 more were left out to keep this response bounded at 481.");
+    expect(lines[2]).toBe("Listing 481 findings of that total; 432 more were left out to keep this response bounded at 520.");
   });
 
   it("states the non-truncated listing sentence on its own wording, not merely without the truncated one's word", () => {
-    const whole: QueryToolOutput = { ...truncated, listing: { returned: 42, omitted: 0, cap: 481, truncated: false } };
+    const whole: QueryToolOutput = { ...truncated, listing: { returned: 42, omitted: 0, cap: 520, truncated: false } };
     const lines = queryText(whole, NOW);
 
     expect(lines[2]).toBe("Listing every finding counted above, 42 in all.");

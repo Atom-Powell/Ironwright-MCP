@@ -65,4 +65,18 @@ describe("shapeQuery", () => {
     expect(output.totals).toEqual({ findings: 0 });
     expect(output.listing).toEqual({ returned: 0, omitted: 0, cap: MAX_QUERY_FINDINGS, truncated: false });
   });
+
+  it("is not truncated when the result set lands exactly on the cap", () => {
+    // The off-by-one this guards is `listed.length < findings.length` reading
+    // as `<=` by mistake, which would mark a set exactly as large as the cap
+    // truncated even though nothing was actually left out.
+    const exact: Finding[] = [findings[0]!, findings[1]!];
+
+    const output = shapeQuery("example", "Compliance Reports", "empty_folders", "drive-1", "2026-09-17T00:00:00.000Z", exact, {
+      maxFindings: 2,
+    });
+
+    expect(output.totals).toEqual({ findings: 2 });
+    expect(output.listing).toEqual({ returned: 2, omitted: 0, cap: 2, truncated: false });
+  });
 });

@@ -17,11 +17,27 @@ import type { InventoryRecord, ScannedDrive, StateStore } from "../../src/store/
  * entirely well formed.
  */
 export function createFakeToolContext(overrides: Partial<ToolContext> = {}): ToolContext {
+  // A real counter rather than a hardcoded zero: a test that asserts "no Graph
+  // request happened" by reading this count must be able to fail, and a
+  // constant can't. Each method increments before it rejects, so a caller
+  // that reaches any of the three still gets charged for it even though the
+  // call never completes.
+  let requestCount = 0;
+
   const graph: GraphClient = {
-    get: () => Promise.reject(new Error("the fake Graph client was called")),
-    post: () => Promise.reject(new Error("the fake Graph client was called")),
-    getBytes: () => Promise.reject(new Error("the fake Graph client was called")),
-    requests: () => 0,
+    get: () => {
+      requestCount += 1;
+      return Promise.reject(new Error("the fake Graph client was called"));
+    },
+    post: () => {
+      requestCount += 1;
+      return Promise.reject(new Error("the fake Graph client was called"));
+    },
+    getBytes: () => {
+      requestCount += 1;
+      return Promise.reject(new Error("the fake Graph client was called"));
+    },
+    requests: () => requestCount,
   };
 
   const scans: ScanCoordinator = {
