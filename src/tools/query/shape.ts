@@ -3,7 +3,12 @@ import { MAX_QUERY_FINDINGS, type Finding, type QueryToolOutput, type Question }
 export { MAX_QUERY_FINDINGS };
 
 export interface QueryShapeOptions {
-  /** Overridden only by tests, so the truncation rule runs on a small fixture. */
+  /**
+   * Defaults to MAX_QUERY_FINDINGS. `run.ts` overrides this for
+   * `recent_reports`, whose own cap is tighter than the other two questions'
+   * shared safety cap; tests override it too, so the truncation rule runs on
+   * a small fixture without needing 201 rows to exercise it.
+   */
   maxFindings?: number;
 }
 

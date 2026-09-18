@@ -135,6 +135,53 @@ describe("runQueryRepository", () => {
     expect(structured.findings[0]?.detail).toBe("Parsed as the MonthlyTraining deliverable.");
   });
 
+  it("answers recent_reports with the true total and an honest omitted count when more files parse than the cap", async () => {
+    // 61 parseable files against a 50-item cap: three figures the assertions
+    // below must keep straight (61 total, 50 returned/cap, 11 omitted) rather
+    // than the pre-fix behavior, which silently cut the array to 50 before
+    // shapeQuery ever computed a total and then reported the cap itself as
+    // both the count and the whole answer.
+    const recognizedCount = 61;
+    const recognized: InventoryRecord[] = Array.from({ length: recognizedCount }, (_, index) => {
+      const client = `CLIENT${String(index).padStart(3, "0")}`;
+      // Distinct, strictly increasing timestamps: a higher index is more
+      // recently modified, so the cap keeps indices 11-60 and omits 0-10.
+      const modified = new Date(Date.UTC(2026, 0, 1, 0, 0, 0) + index * 60_000).toISOString();
+      return {
+        itemId: `recent-${index}`,
+        path: `2026/${client}/2026-01_${client}_MonthlyTraining.xlsx`,
+        name: `2026-01_${client}_MonthlyTraining.xlsx`,
+        isFolder: false,
+        size: 10,
+        modified,
+        etag: `etag-${index}`,
+      };
+    });
+
+    const context = makeFakeContext({
+      scannedDrives: [{ driveId: "d1", lastScanAt: "2026-09-17T00:00:00.000Z" }],
+      inventory: recognized,
+    });
+
+    const result = await runQueryRepository({ profileId: "example", question: "recent_reports" }, context);
+    const structured = result.structuredContent as {
+      totals: { findings: number };
+      findings: Array<{ path: string }>;
+      listing: { returned: number; omitted: number; cap: number; truncated: boolean };
+    };
+
+    expect(structured.totals).toEqual({ findings: 61 });
+    expect(structured.listing).toEqual({ returned: 50, omitted: 11, cap: 50, truncated: true });
+    expect(structured.findings).toHaveLength(50);
+
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("Found 61 findings for this question.");
+    expect(text).toContain(
+      "Listing 50 findings of that total; 11 more were left out to keep this response bounded at 50.",
+    );
+    expect(text).not.toContain("Listing every finding counted above");
+  });
+
   it("treats a folder as occupied once a real inventory record lands under it", async () => {
     const context = makeFakeContext({
       scannedDrives: [{ driveId: "d1", lastScanAt: "2026-09-17T00:00:00.000Z" }],

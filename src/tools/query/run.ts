@@ -17,6 +17,15 @@ import { QUESTIONS, type Finding, type Question } from "./output.js";
 import { shapeQuery } from "./shape.js";
 import { queryText } from "./text.js";
 
+/**
+ * The cap `recent_reports` answers with. Passed to `shapeQuery` as that
+ * call's `maxFindings`, never applied as a slice here: a slice taken before
+ * `shapeQuery` sees the array would make it compute `totals.findings` over
+ * the already-cut list, reporting the cap as the true count and hiding how
+ * many parseable files were left out. It is tighter than `MAX_QUERY_FINDINGS`
+ * by design, since "recent" names a bounded top-N answer regardless of how
+ * far the safety cap on the other two questions sits.
+ */
 export const RECENT_REPORTS_LIMIT = 50;
 
 export const QUERY_INPUT_SCHEMA = {
@@ -184,12 +193,14 @@ function isRecognizedEntry(entry: { file: RepositoryFile; parsed: ParsedFile }):
 
 function recentReports(profile: Profile, snapshot: RepositorySnapshot): Finding[] {
   const parse = createFileParser(profile);
+  // The full sorted set, uncapped. `shapeQuery` applies RECENT_REPORTS_LIMIT
+  // and reports it honestly; capping here would hide the true count from the
+  // totals it computes.
   return snapshot.files
     .filter((file) => file.library === undefined)
     .map((file) => ({ file, parsed: parse(file) }))
     .filter(isRecognizedEntry)
     .sort((a, b) => (a.file.modified < b.file.modified ? 1 : -1))
-    .slice(0, RECENT_REPORTS_LIMIT)
     .map((entry) => ({
       path: entry.file.path,
       name: entry.file.name,
@@ -230,6 +241,13 @@ export async function runQueryRepository(input: unknown, context: ToolContext): 
     const { snapshot, driveId } = await loadSnapshot(context, profile);
     const findings = answer(args.question, profile, snapshot);
 
+    // recent_reports carries its own, tighter cap than the other two
+    // questions' shared safety cap; naming it here rather than inside
+    // shapeQuery keeps the choice of which cap governs a property of the
+    // question, visible at the one call site that knows which question this
+    // answer is for.
+    const maxFindings = args.question === "recent_reports" ? RECENT_REPORTS_LIMIT : undefined;
+
     const output = shapeQuery(
       args.profileId,
       profile.identity.library,
@@ -237,7 +255,7 @@ export async function runQueryRepository(input: unknown, context: ToolContext): 
       driveId,
       snapshot.scannedAt,
       findings,
-      {},
+      { maxFindings },
     );
 
     return {
