@@ -123,42 +123,65 @@ describe("tool surface completeness", () => {
 });
 
 /**
- * A refinement does not survive conversion to JSON Schema, so a caller and the
- * model driving it never see it. An unstated one is a rejection the caller
- * could not have predicted, which is why the prose is mandatory rather than
- * encouraged.
+ * True only for a `ZodEffects`, the schema `.refine()` or `.superRefine()`
+ * produce on top of an object schema. Named for what it detects rather than
+ * for the rule that consumes it, so the ban below and its own non-vacuousness
+ * proof can both ask the same question through one function instead of two
+ * copies of the same `instanceof` check drifting apart.
  */
-function isRefined(schema: z.ZodTypeAny): boolean {
-  return !(schema instanceof z.ZodObject);
+function isZodEffects(schema: z.ZodTypeAny): boolean {
+  return schema instanceof z.ZodEffects;
 }
 
 describe("input schema contract", () => {
-  it("every tool's input schema is an object, refined or plain", () => {
+  it("every tool's input schema is a plain object", () => {
     for (const tool of ALL_TOOLS) {
-      const base = tool.inputSchema instanceof z.ZodEffects ? tool.inputSchema.innerType() : tool.inputSchema;
-      expect(base, `${tool.name} input schema must be an object`).toBeInstanceOf(z.ZodObject);
+      expect(tool.inputSchema, `${tool.name} input schema must be an object`).toBeInstanceOf(z.ZodObject);
     }
   });
 
-  it("a refined input schema states its constraint in the description", () => {
+  it("no tool's input schema is a ZodEffects (a top-level refinement)", () => {
+    // The plan that introduced the wider ToolDefinition.inputSchema type
+    // assumed a refinement would only lose its constraint at the JSON Schema
+    // boundary. Registering a fixture tool through buildServer proved
+    // otherwise: MCP SDK 1.30.0's normalizeObjectSchema recognizes an object
+    // schema only by a bare `.shape` property, which a ZodEffects keeps on
+    // `.innerType()` instead, so listTools advertises such a tool as
+    // {type: "object", properties: {}} and every field disappears, not just
+    // the constraint. A tool a caller cannot see the fields of is worse than
+    // one with no cross-field rule at all, so this bans the shape outright
+    // rather than requiring it to be documented. See
+    // tests/mcp/build-server.test.ts for the characterization test this rule
+    // is built on, and src/tools/types.ts for where a handler-enforced
+    // constraint belongs instead.
     for (const tool of ALL_TOOLS) {
-      if (!isRefined(tool.inputSchema)) continue;
-      expect(tool.inputConstraints, `${tool.name} is refined and must set inputConstraints`).toBeTruthy();
-      expect(tool.description).toContain(tool.inputConstraints as string);
+      expect(
+        isZodEffects(tool.inputSchema),
+        `${tool.name} input schema is a ZodEffects, built with .refine() or .superRefine(). ` +
+          "MCP SDK 1.30.0 cannot advertise its fields at listTools time (see the comment above " +
+          "this loop), so enforce any cross-field constraint inside the handler's own parse " +
+          "instead, and state it through inputConstraints and the description.",
+      ).toBe(false);
     }
   });
 
-  it("the refinement rule actually fails a refined tool that omits the prose", () => {
+  it("the ban actually fails a tool whose input schema is a ZodEffects", () => {
+    // Without this fixture, the rule above passes on an empty search: no tool
+    // in this phase carries a refinement, so the loop finding nothing proves
+    // nothing about whether isZodEffects can tell a ZodEffects from a plain
+    // object. Building one here and confirming the detector flags it is what
+    // makes the rule's pass mean something.
     const bad: ToolDefinition = {
       name: "fixture_tool",
       kind: "read",
       title: "Fixture",
-      description: "A fixture with no constraint prose.",
+      description: "A fixture whose input schema is a refinement, which this project forbids.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-      inputSchema: z.object({ a: z.string().optional(), b: z.string().optional() }).refine((v) => v.a !== undefined || v.b !== undefined),
+      inputSchema: z
+        .object({ a: z.string().optional(), b: z.string().optional() })
+        .refine((value) => value.a !== undefined || value.b !== undefined),
       outputSchema: { ok: z.boolean() },
     };
-    expect(isRefined(bad.inputSchema)).toBe(true);
-    expect(bad.inputConstraints).toBeUndefined();
+    expect(isZodEffects(bad.inputSchema)).toBe(true);
   });
 });

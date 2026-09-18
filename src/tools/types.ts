@@ -16,17 +16,28 @@ export interface ToolDefinition {
   description: string;
   annotations: ToolAnnotations;
   /**
-   * A full schema rather than a raw shape, because a raw shape is a bag of
-   * per-field schemas and structurally cannot express a constraint spanning
-   * two fields. `generate_move_plan` needs one: nothing otherwise enforces
-   * that `scopeValue` is present when `scope` is `client` or `deliverable`.
-   * The SDK accepts either form, so this passes straight through.
+   * A full schema rather than a raw shape, so this holds a real
+   * `z.object({...})` instead of a bag of per-field schemas with no way to
+   * express a shared identity between fields. Measured against MCP SDK
+   * 1.30.0 rather than assumed: `registerTool` accepts a `ZodEffects` (the
+   * shape `.refine()` or `.superRefine()` produce on top of an object) at
+   * registration time without throwing, but that is not the whole story.
+   * `listTools`'s conversion to JSON Schema recognizes an object schema only
+   * by a bare `.shape` property, which a `ZodEffects` keeps on
+   * `.innerType()` instead, so the SDK silently advertises such a tool as
+   * `{type: "object", properties: {}}` and every field it declares
+   * disappears from what a caller, model included, can see. That is why a
+   * `ZodEffects` at this level is forbidden by a test in
+   * `tests/tools/contract.test.ts` rather than merely discouraged: keep this
+   * a plain `z.object({...})` per tool unless that SDK behavior changes.
    */
   inputSchema: z.ZodTypeAny;
   /**
-   * The cross-field constraint, in the words the description uses. Required
-   * when `inputSchema` carries a refinement and meaningless otherwise, because
-   * a refinement is invisible in the JSON Schema the caller receives.
+   * A cross-field constraint the tool's own handler enforces during its own
+   * parse, for a check a plain object schema cannot express and a top-level
+   * refinement is no longer allowed to express either. No encoding of the
+   * advertised schema can show this constraint, so the words belong in the
+   * tool's description or a caller has no way to predict the rejection.
    */
   inputConstraints?: string;
   outputSchema: z.ZodRawShape;

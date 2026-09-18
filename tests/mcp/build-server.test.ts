@@ -48,18 +48,20 @@ delete (STUBBED as { handler?: unknown }).handler;
 const REFINED_CONSTRAINT = "at least one of a or b must be set";
 
 /**
- * The one fixture in this suite whose input schema is a ZodEffects rather than
- * a plain ZodObject. The tool contract widening this task adds exists so a
- * schema like this can reach `registerTool` at all; a fixture that never
- * builds one would leave that claim unexercised, which is exactly the failure
- * mode `docs/OPEN-ITEMS.md` records from the Excel session work: a capability
- * built and reviewed without ever calling the API it depends on.
+ * The one fixture in this suite whose input schema is a ZodEffects. Never
+ * added to ALL_TOOLS or the registry, because tests/tools/contract.test.ts
+ * now bans that shape at the top level. It exists here only to pin the exact
+ * SDK behavior that ban routes around, rather than take it on faith: a
+ * fixture that never builds one would leave the claim unexercised, which is
+ * the failure mode docs/OPEN-ITEMS.md already records once from the Excel
+ * session work, a capability built and reviewed without ever calling the API
+ * it depends on.
  */
 const REFINED: ToolDefinition = {
   name: "refined_tool",
   kind: "read",
   title: "Refined",
-  description: `Exercises a refined input schema at registration time. ${REFINED_CONSTRAINT}. Read-only: this tool makes no changes and is safe to repeat.`,
+  description: `Characterizes a refined input schema this project forbids. ${REFINED_CONSTRAINT}. Read-only: this tool makes no changes and is safe to repeat.`,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   inputSchema: z
     .object({
@@ -111,13 +113,13 @@ describe("buildServer", () => {
     expect(ALL_TOOLS.length).toBeGreaterThan(0);
   });
 
-  it("registers a refined (ZodEffects) input schema without throwing, though its fields do not survive the advertised listing", async () => {
-    // If the installed SDK refused a ZodEffects schema outright, this call
-    // would throw here, before a client ever connects. Asserting that
-    // explicitly, rather than only letting an uncaught throw fail the test,
-    // names the exact claim under test: this is the mechanism phase 6 depends
-    // on, and it must be exercised once rather than assumed, per the lesson
-    // this project already learned once from the Excel session work.
+  it("characterizes MCP SDK 1.30.0's handling of a ZodEffects input schema: registration succeeds, but the advertised schema loses every field", async () => {
+    // This is a characterization test, not a demonstration of a capability
+    // this project uses. It pins the exact installed-SDK behavior behind the
+    // ban in tests/tools/contract.test.ts, so an SDK upgrade that fixes
+    // normalizeObjectSchema's ZodEffects blind spot shows up here as a
+    // failing assertion, which is the point: this test failing later is how
+    // the ban gets revisited, rather than staying frozen on an assumption.
     const build = () => buildServer({ allowWrites: true, context: createFakeToolContext(), tools: [REFINED] });
     expect(build).not.toThrow();
 
@@ -131,23 +133,26 @@ describe("buildServer", () => {
       const tool = listed.tools.find((entry) => entry.name === "refined_tool");
       expect(tool).toBeDefined();
 
-      // This is the finding, pinned rather than worked around. The installed
-      // SDK (1.30.0) converts a tool's inputSchema to JSON Schema through
-      // normalizeObjectSchema, which recognizes an already-built object
-      // schema only by a bare `.shape` property. A ZodEffects, which is what
-      // `.refine()` produces, keeps that on `.innerType()` instead, so
-      // normalizeObjectSchema returns undefined and the SDK falls back to an
-      // empty object schema for the whole tool. Both fields this tool
-      // declares are absent from what a caller, model included, would see.
+      // The behavior being pinned. The installed SDK converts a tool's
+      // inputSchema to JSON Schema through normalizeObjectSchema, which
+      // recognizes an already-built object schema only by a bare `.shape`
+      // property. A ZodEffects, which is what `.refine()` produces, keeps
+      // that on `.innerType()` instead, so normalizeObjectSchema returns
+      // undefined and the SDK falls back to an empty object schema for the
+      // whole tool. Both fields this fixture declares are absent from what a
+      // caller, model included, would see, which is why this project forbids
+      // the shape rather than documenting around it.
       expect(tool?.inputSchema?.properties).toEqual({});
 
-      // The gap is confined to the advertised listing. Call-time validation
-      // takes the same fallback path but lands differently: mcp.js's
-      // validateToolInput also calls normalizeObjectSchema, gets undefined for
-      // the same reason, and then parses against tool.inputSchema itself
-      // rather than an empty schema, so the ZodEffects and its refinement run
-      // for real. A call satisfying neither field is rejected server-side even
-      // though nothing in the advertised schema told the caller that.
+      // The gap is confined to the advertised listing, not the parse. Pinning
+      // both halves is what makes this a full characterization: the danger
+      // the contract rule guards against is specifically the silent one, a
+      // rejection a caller could not predict from the schema it was shown,
+      // not an outright inability to enforce the constraint. mcp.js's
+      // validateToolInput also calls normalizeObjectSchema, also gets
+      // undefined, and then parses against tool.inputSchema itself rather
+      // than an empty schema, so the ZodEffects and its refinement still run
+      // for real.
       const rejected = await client.callTool({ name: "refined_tool", arguments: {} });
       expect(rejected.isError).toBe(true);
 
