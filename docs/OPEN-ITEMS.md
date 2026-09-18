@@ -1741,6 +1741,20 @@ part, so all four now say what they actually cover: what this tool resolved, not
 declares. `tests/workbook/introspect.test.ts` and `tests/tools/describe/run.test.ts` each pin the
 gap directly, with a fixture flag (`TableSpec.omitName`) that builds exactly this table shape.
 
+The first pass at this fix missed one instance of its own, in the same file: `output.ts`'s `mode`
+field description read "\"inventory\" lists every worksheet and table the workbook declares," the
+identical claim in a fifth place, read by a model deciding how to call the tool rather than by an
+operator reading a response. A second search of `output.ts` for the same claim, rather than trusting
+the four-item list from memory, found one more: the `unresolved` field's own description said a
+partly broken workbook "must not read as a workbook with fewer sheets or tables than it actually
+declares," which is the exact guarantee this defect violates, stated as a promise rather than as a
+count. Both are narrowed the same way, to what this tool tracked rather than what the workbook
+declares. The search covered every `.describe()` string in `output.ts`, `describe-workbook.ts`'s
+static description, and a repo-wide grep for the same phrasing; nothing else in the tree carries
+this claim. The other hits that phrase turns up, `introspect.ts`'s `unownedTableReason` and
+`zip.ts`'s declared-byte-count message, state an observed count rather than claim totality, and are
+not instances of the same defect.
+
 One piece of the reasoning above is worth correcting, since it argued the gap has nowhere to be
 reported. It does not follow that a nameless table has no identifier to report it under. The sheet
 path already handles the equivalent case: `listSheetEntries` reports a `<sheet>` entry with no

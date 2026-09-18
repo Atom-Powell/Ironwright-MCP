@@ -107,7 +107,7 @@ export const DESCRIBE_OUTPUT_SCHEMA = {
   mode: z
     .enum(DESCRIBE_MODES)
     .describe(
-      "\"inventory\" lists every worksheet and table the workbook declares; \"source\" describes the one " +
+      "\"inventory\" lists every worksheet and table this tool resolved; \"source\" describes the one " +
         "table or worksheet this call named.",
     ),
   sheets: z
@@ -161,10 +161,10 @@ export const DESCRIBE_OUTPUT_SCHEMA = {
     )
     .optional()
     .describe(
-      "A sheet or table the workbook's own sheet list or table list named, that this tool could not resolve, " +
-        "with why. Present only in inventory mode. Never dropped silently: a workbook whose internal wiring is " +
-        "partly broken must not read as a workbook with fewer sheets or tables than it actually declares. " +
-        "Always the complete set; this list is never capped.",
+      "A sheet or table this tool found named in the workbook's own sheet list or table list, that it could " +
+        "not resolve, with why. Present only in inventory mode. Never dropped silently: a sheet or table this " +
+        "tool found is never left out of both this list and the resolved lists above with no trace. Always the " +
+        "complete set of what this tool found unresolved; this list is never capped.",
     ),
   source: z
     .object({ kind: z.enum(DESCRIBE_SOURCE_KINDS), name: z.string() })
