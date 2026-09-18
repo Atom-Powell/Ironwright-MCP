@@ -15,6 +15,17 @@ export function createApp(opts: AppOptions): express.Express {
 
   // Kept separate from the MCP route because container probes issue GET and the
   // MCP endpoint only answers POST.
+  //
+  // This endpoint answers exactly one question: can this process serve at all.
+  // It does not mean the tenant, Graph, or the state store is reachable, and it
+  // must never be extended to check any of them. Configuration and profile
+  // problems already exit the process before the port binds, so a process that
+  // is answering here has already passed everything worth checking. A health
+  // check that depends on a third party turns that party's outage into a
+  // restart loop: the platform kills the instance, the replacement fails the
+  // same check, and one degraded dependency becomes a total outage of a server
+  // that could have kept answering most callers. Serving one caller an error is
+  // strictly better.
   app.get("/health", (_req, res) => {
     res.status(200).json({ status: "ok" });
   });

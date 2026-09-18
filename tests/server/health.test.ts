@@ -20,4 +20,23 @@ describe("GET /health", () => {
 
     expect(response.status).toBe(404);
   });
+
+  it("answers healthy without building a tool server or reaching any dependency", async () => {
+    let serverFactoryCalls = 0;
+    const app = createApp({
+      serverFactory: () => {
+        serverFactoryCalls += 1;
+        return new McpServer({ name: "test", version: "0.0.0" });
+      },
+    });
+
+    const response = await request(app).get("/health");
+
+    expect(response.status).toBe(200);
+    // A health check that depends on a third party turns that party's outage
+    // into a restart loop, which is strictly worse than serving one caller an
+    // error. This pins the route to reaching nothing, so the next attempt to
+    // make it "more useful" with a Graph or state store check fails here.
+    expect(serverFactoryCalls).toBe(0);
+  });
 });
