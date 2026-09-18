@@ -1,19 +1,23 @@
-# Phase 5a: the production image
+# Phase 5a: making the server deployable
 
 Design spec. Written 2026-09-18, after phase 4c merged and `main` reached `2bba197`.
 
 ## What this phase delivers
 
-Everything that turns this repository into a shippable artifact and can be proven without a cloud
-account:
+The changes a deployment needs that can be proven on a development machine:
 
-- A production container image, and the build defect that currently prevents one.
+- A production compile separated from the development one, which is the build defect that currently
+  stops any image being built at all.
 - A bounded shutdown.
-- Health endpoints shaped for the platform that will run it.
-- An explicit configuration contract, including where profiles come from when the image ships none.
+- Health settled as an instance-local check, because a platform will now act on it.
+- An explicit configuration contract, including where profiles come from.
 
-The merge gate is that the CONTAINER, not a local process, answers all five read tools correctly
-against the live tenant.
+The merge gate is that the COMPILED PRODUCTION OUTPUT answers all five read tools correctly against
+the live tenant, run as `node dist/server/main.js`. Every live sitting this project has run so far
+used `tsx` against TypeScript source, so the compiled artifact has never been executed.
+
+This section was rewritten by the amendment below. The phase originally centered on a container
+image and the machine has no runtime to build one.
 
 ## Why phase 5 is sliced here
 
@@ -71,6 +75,7 @@ execution hides. That is a real gate against an artifact this project has genuin
 
 ## The image, deferred to its own slice
 
+Held until a container runtime exists. Recorded here so that slice does not restart from nothing.
 
 Multi-stage. The build stage installs everything and compiles; the runtime stage takes only
 production dependencies and `dist`.
