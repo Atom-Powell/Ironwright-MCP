@@ -469,6 +469,54 @@ Until phase 4a wired the first tool, none of this was read by the server itself:
 will not come up without them. See `src/server/config.ts` and `src/config.ts` for what is
 actually checked.
 
+## Deployment configuration contract
+
+Phase 5a made the server deployable. Phase 5b is what actually deploys it, into Container Apps
+or anywhere else. This section exists so that phase does not have to reread `src/config.ts` and
+`src/server/config.ts` to learn what a deployment must supply: a deployment that discovers a
+required variable is missing at startup has already failed, so every variable the running server
+reads belongs in one list rather than scattered across the sections above. Nothing here is new
+behavior; it collects variables already documented individually under "Running the server" and
+adds the one that phase 5a introduced.
+
+**Required.**
+
+- `IW_TENANT_ID`, `IW_CLIENT_ID`, `IW_CLIENT_SECRET`. The server application's own
+  client-credentials identity, the same three values the normal setup run above prints as
+  `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET`.
+- `IW_SITE_URL`. The site the server's `Sites.Selected` grant covers. It became required in
+  phase 4c, and the profile registry checks every profile's `identity.siteUrl` against it at
+  startup, refusing to start on a mismatch rather than letting it surface later as a 403 on a
+  profile's first Graph call. A deployment definition that omits it does not produce a degraded
+  server; the server does not start at all.
+- `IW_PROFILE_DIR`. Names the directory holding this deployment's profile files, each validated
+  once at startup. Profiles are deployment configuration and are never committed, so there is no
+  default to fall back to.
+
+**Optional.**
+
+- `IW_TABLE_CONNECTION_STRING`. Its absence selects the in-memory state store rather than
+  failing, so a local run needs no cloud account. Nothing persists across a restart under that
+  fallback, and every scan is a full enumeration rather than an incremental one.
+- `IW_ALLOW_WRITES`. Its absence leaves every write tool unpublished rather than merely refused:
+  `selectTools` in `src/tools/registry.ts` filters out every tool of kind `write` when writes are
+  disabled, so a caller never sees `execute_rename_plan`, `execute_move_plan` or
+  `replicate_template` in the first place. Set to `true` to opt a deployment in, regardless of
+  the site permission the normal setup run above granted.
+- `IW_SHUTDOWN_DEADLINE_MS`. How long the server waits, once it receives SIGTERM, for in-flight
+  requests to drain before exiting anyway. Defaults to 25000, chosen to sit under a platform's
+  usual 30 second grace period so the process exits on its own terms, logging how many requests
+  it abandoned, rather than being killed silently once that period runs out.
+- `PORT`. Documented above under "Running the server"; defaults to 3000.
+
+**Profiles arrive as a directory the deployment supplies, never committed and never baked into an
+artifact.** `IW_PROFILE_DIR` names a path the running process reads at startup, and phase 5a's
+contract with phase 5b stops there: the path must exist and must hold valid profiles when the
+process starts. How that path gets populated in Azure, a mounted volume, a sidecar, or something
+else, is phase 5b's problem and is deliberately not decided here. Baking a customer's taxonomy,
+library and client list into an image would put deployment configuration where the Decision
+Record already refuses to let profiles live.
+
 ## Running a scan
 
 `npm run scan` runs the server's own reconciliation scan by hand, against a real tenant, ahead

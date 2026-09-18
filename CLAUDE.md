@@ -267,8 +267,38 @@ The spec carries the full phase descriptions. Status as of 2026-09-18:
    withholds every sample for a source when the workbook is `fullCalcOnLoad` over a range holding
    a formula. No call this phase's own code makes has run against a tenant; see
    `docs/OPEN-ITEMS.md` for what the unit tests cover and the live sitting this phase still owes
-   before merge. Phase 4 is complete pending that sitting. Then
-   **hosting**, then
+   before merge. Phase 4 is complete pending that sitting.
+5. **Hosting.** Split into 5a and 5b at the Azure line, because everything past producing a
+   deployable artifact needs an Azure subscription, real spending, and an operator at a keyboard
+   for at least the first sign-in.
+   - **5a: the deployable server. Complete, pending the controller's live verification.**
+     Separates the production compile from the development one: `tsconfig.build.json` excludes
+     `src/setup`, which issues per-site permission grants using a separate application holding
+     `Sites.FullControl.All` and has no business inside a server image, and `npm run build:prod`
+     runs it. Bounds the SIGTERM handler to a deadline, `IW_SHUTDOWN_DEADLINE_MS`, default 25
+     seconds, so one request that never completes can no longer hold the process open until the
+     platform sends SIGKILL with nothing said about why; the handler now logs what it abandoned.
+     Settles that `GET /health` answers only whether this process can serve, and must never call
+     Microsoft Graph, since a health check depending on a third party turns that party's outage
+     into an instance restart loop. The container image was moved out of this phase by amendment,
+     after discovering mid-plan that the development machine has no container runtime; it is held
+     for its own slice rather than dropped, and the merge gate became the compiled production
+     output answering live in its place. That gate, `node dist/server/main.js` built from `npm
+     run build:prod` against all five read tools on the live tenant, is the controller's to run
+     before merge and has not run yet; every live sitting this project has performed so far used
+     `tsx` against source, never the compiled artifact. `docs/SETUP.md` carries the full
+     deployment configuration contract this phase settled.
+   - **5b: everything past the image.** Held rather than started. The container image itself,
+     recorded in the design spec so this slice does not restart from nothing; the federated
+     managed-identity credential replacing the client secret, which begins with a live probe
+     rather than an interface built on an assumption, per the rule phase 2b-1 cost this project;
+     Container Apps at one replica with a rollout that never runs a new revision alongside the
+     old, since phase 4c made the single-process assumption load-bearing for correctness and not
+     only for the delta link; the Entra authentication front door already decided in
+     `docs/OPEN-ITEMS.md`; CI/CD; and telemetry, which carries two jobs, the Graph call volume
+     evidence this project was started to produce and detection for the pending stream-mapping
+     leak phase 5a deliberately left unfixed, since the tractable half of that item is detection
+     rather than repair. Then
    **write tools**, then **Copilot Studio integration and governance**, then the **evaluation
    suite**, whose questions are already written in `docs/EVALUATION-QUESTIONS.md`. They exist
    early on purpose, so phase 3 has a concrete target rather than inventing its own test
