@@ -337,7 +337,7 @@ In `src/store/memory.ts`, the delta links are held in a map. Add:
     async getScannedDrives(profileId: string): Promise<ScannedDrive[]> {
       const drives: ScannedDrive[] = [];
       for (const [key, value] of deltaLinks) {
-        const separator = key.indexOf(" ");
+        const separator = key.indexOf("\u0000");
         if (key.slice(0, separator) !== profileId) continue;
         drives.push({ driveId: key.slice(separator + 1), lastScanAt: value.lastScanAt });
       }
