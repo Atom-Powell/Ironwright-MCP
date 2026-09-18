@@ -27,6 +27,13 @@ export interface SheetSpec {
    * Defaults to the sheet's array position, same caveat as rId above.
    */
   partNumber?: number;
+  /**
+   * The value written as <dimension ref="...">, sibling to <sheetData>
+   * rather than derived from rowsXml. Omitted entirely means the worksheet
+   * part carries no <dimension> element at all, which is also a real shape
+   * a workbook can have, not just "not set".
+   */
+  dimension?: string;
 }
 
 export interface TableSpec {
@@ -34,6 +41,12 @@ export interface TableSpec {
   ref: string;
   /** Index into the sheets array whose worksheet owns this table. */
   sheetIndex: number;
+  /**
+   * The exact value written as <table headerRowCount="...">. Omitted
+   * entirely means the table root carries no headerRowCount attribute at
+   * all, which OOXML defines as "1", a header row present.
+   */
+  headerRowCount?: string;
 }
 
 export interface BuildWorkbookOptions {
@@ -100,7 +113,10 @@ export function buildWorkbook(options: BuildWorkbookOptions): Uint8Array {
   sheets.forEach((sheet, index) => {
     const partName = `xl/worksheets/sheet${String(partNumber(sheet, index))}.xml`;
     if (omit.has(partName)) return;
-    parts[partName] = strToU8(`<?xml version="1.0"?><worksheet><sheetData>${sheet.rowsXml}</sheetData></worksheet>`);
+    const dimension = sheet.dimension !== undefined ? `<dimension ref="${sheet.dimension}"/>` : "";
+    parts[partName] = strToU8(
+      `<?xml version="1.0"?><worksheet>${dimension}<sheetData>${sheet.rowsXml}</sheetData></worksheet>`,
+    );
   });
 
   (options.tables ?? []).forEach((table, tableIndex) => {
@@ -110,9 +126,11 @@ export function buildWorkbook(options: BuildWorkbookOptions): Uint8Array {
     }
     const owningPartNumber = partNumber(owningSheet, table.sheetIndex);
 
+    const headerRowCount = table.headerRowCount !== undefined ? ` headerRowCount="${table.headerRowCount}"` : "";
     parts[`xl/tables/table${String(tableIndex)}.xml`] = strToU8(
       '<?xml version="1.0"?><table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
-        `id="${String(tableIndex + 1)}" name="${table.name}" displayName="${table.name}" ref="${table.ref}"></table>`,
+        `id="${String(tableIndex + 1)}" name="${table.name}" displayName="${table.name}" ref="${table.ref}"` +
+        `${headerRowCount}></table>`,
     );
     parts[`xl/worksheets/_rels/sheet${String(owningPartNumber)}.xml.rels`] = strToU8(
       "<?xml version=\"1.0\"?><Relationships>" +

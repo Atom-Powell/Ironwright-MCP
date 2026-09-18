@@ -83,7 +83,7 @@ describe("sheet bounds", () => {
 
     it("refuses a bounded range over the cap before allocating it", () => {
       // The bounded path a table's declared ref reaches: bounds are trusted
-      // on their face by the caller (src/workbook/xlsx.ts's parseTableRange),
+      // on their face by the caller (src/workbook/xlsx.ts's parseRangeRef),
       // so a ref claiming the same corner-to-corner box must be refused here
       // too, not only when the box comes from cells actually on the sheet.
       const spy = vi.spyOn(Array, "from");

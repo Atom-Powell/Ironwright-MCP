@@ -90,6 +90,23 @@ export function columnLabelToIndex(label: string): number {
 }
 
 /**
+ * The inverse of columnLabelToIndex, and tested as a round trip against it so
+ * the two cannot drift. Spreadsheet columns are bijective base 26 rather than
+ * ordinary base 26, which is why the index is decremented before each digit
+ * instead of after.
+ */
+export function columnIndexToLabel(index: number): string {
+  let remaining = index;
+  let label = "";
+  while (remaining > 0) {
+    const digit = (remaining - 1) % 26;
+    label = String.fromCharCode(65 + digit) + label;
+    remaining = Math.floor((remaining - 1) / 26);
+  }
+  return label;
+}
+
+/**
  * Every `<c ...>...</c>` or self closing `<c .../>` in the part, in document
  * order. Matched directly against the whole sheet rather than scoped to each
  * `<row>` first, because each cell's own `r` attribute is what fixes its row

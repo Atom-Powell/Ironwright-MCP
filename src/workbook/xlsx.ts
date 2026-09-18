@@ -15,8 +15,19 @@ import { WorkbookFileError, WorkbookMappingError, WorkbookUnreadableError } from
  */
 export type WorkbookSource = { kind: "table" | "worksheet"; name: string };
 
+/**
+ * `parseRelationships`, `resolveRelativeTarget`, `findTables`,
+ * `findOwningWorksheetPart`, `parseRangeRef`, `requirePart`,
+ * `SHEET_ENTRY_PATTERN` and `TableInfo` below are exported for
+ * introspect.ts, which enumerates a workbook's sheets and tables using the
+ * same OOXML parsing rules this module already carries for reading a
+ * mapped range. They are exported so introspection reuses this module's one
+ * implementation of each rule rather than a second copy drifting from it,
+ * not because any of it is public API of the server: nothing outside the
+ * workbook layer should import from here.
+ */
 const RELATIONSHIP_PATTERN = /<Relationship\b[^>]*\/>|<Relationship\b[^>]*>[\s\S]*?<\/Relationship>/g;
-const SHEET_ENTRY_PATTERN = /<sheet\b[^>]*\/>|<sheet\b[^>]*>[\s\S]*?<\/sheet>/g;
+export const SHEET_ENTRY_PATTERN = /<sheet\b[^>]*\/>|<sheet\b[^>]*>[\s\S]*?<\/sheet>/g;
 const CALC_PR_PATTERN = /<calcPr\b[^>]*\/>|<calcPr\b[^>]*>/;
 const TABLE_ROOT_PATTERN = /<table\b[^>]*>|<table\b[^>]*\/>/;
 
@@ -38,7 +49,7 @@ function describeSource(source: WorkbookSource): string {
  * absence there is the archive's own required parts being incomplete, which
  * is `onMissing: "fileError"`.
  */
-function requirePart(
+export function requirePart(
   parts: Map<string, string>,
   partName: string,
   neededFor: string,
@@ -70,7 +81,7 @@ function requirePart(
  * relative to "xl/worksheets/"; both are expressed here as the owning part's
  * own path, so one function resolves either.
  */
-function resolveRelativeTarget(owningPartPath: string, target: string): string {
+export function resolveRelativeTarget(owningPartPath: string, target: string): string {
   if (target.startsWith("/")) return target.slice(1);
 
   const segments = owningPartPath.split("/");
@@ -83,7 +94,7 @@ function resolveRelativeTarget(owningPartPath: string, target: string): string {
   return segments.join("/");
 }
 
-function parseRelationships(relsXml: string): Map<string, string> {
+export function parseRelationships(relsXml: string): Map<string, string> {
   const relationships = new Map<string, string>();
   for (const match of relsXml.matchAll(RELATIONSHIP_PATTERN)) {
     const tag = match[0];
@@ -152,13 +163,21 @@ function resolveWorksheet(
   return { sheetXml, bounds: undefined };
 }
 
-interface TableInfo {
+export interface TableInfo {
   name: string;
   ref: string;
   partName: string;
+  /**
+   * The table root's own headerRowCount attribute, exactly as the file
+   * states it, or undefined when the attribute is absent. Left raw rather
+   * than resolved to a boolean here, because absent means 1 (OOXML's
+   * default, a header row present) and only a caller that knows that
+   * convention should collapse it, not this reader.
+   */
+  headerRowCount: string | undefined;
 }
 
-function findTables(parts: Map<string, string>): TableInfo[] {
+export function findTables(parts: Map<string, string>): TableInfo[] {
   const tables: TableInfo[] = [];
   for (const [partName, xml] of parts) {
     if (!/^xl\/tables\/[^/]+\.xml$/.test(partName)) continue;
@@ -166,7 +185,9 @@ function findTables(parts: Map<string, string>): TableInfo[] {
     if (tag === undefined) continue;
     const name = attribute(tag, "name");
     const ref = attribute(tag, "ref");
-    if (name !== undefined && ref !== undefined) tables.push({ name, ref, partName });
+    if (name !== undefined && ref !== undefined) {
+      tables.push({ name, ref, partName, headerRowCount: attribute(tag, "headerRowCount") });
+    }
   }
   return tables;
 }
@@ -178,7 +199,7 @@ function findTables(parts: Map<string, string>): TableInfo[] {
  * that points at this table part, rather than by reading anything on the
  * table part itself.
  */
-function findOwningWorksheetPart(parts: Map<string, string>, tablePartName: string): string | undefined {
+export function findOwningWorksheetPart(parts: Map<string, string>, tablePartName: string): string | undefined {
   for (const [partName, xml] of parts) {
     if (!/^xl\/worksheets\/_rels\/[^/]+\.xml\.rels$/.test(partName)) continue;
     const owningWorksheetPart = partName.replace("_rels/", "").replace(/\.rels$/, "");
@@ -189,30 +210,39 @@ function findOwningWorksheetPart(parts: Map<string, string>, tablePartName: stri
   return undefined;
 }
 
-function parseCellRef(cellRef: string, wholeRef: string, tableName: string): { row: number; column: number } {
+function parseCellRef(cellRef: string, wholeRef: string, subject: string): { row: number; column: number } {
   const match = /^([A-Za-z]+)([0-9]+)$/.exec(cellRef);
   if (!match) {
-    // The table was found by the name the mapping gave; what is wrong is the
-    // shape of its own ref attribute, which the profile never writes.
+    // The subject was found by the name the caller gave; what is wrong is
+    // the shape of its own ref attribute, which neither a profile nor a
+    // workbook part's own declaration is expected to get wrong.
     throw new WorkbookFileError(
-      `The table "${tableName}" has ref "${wholeRef}", which contains "${cellRef}", not a column letter ` +
-        "followed by a row number. The table's range cannot be determined.",
+      `${subject} has ref "${wholeRef}", which contains "${cellRef}", not a column letter followed by a row ` +
+        "number. Its range cannot be determined.",
     );
   }
   const [, letters, digits] = match;
   return { column: columnLabelToIndex(letters as string), row: Number(digits) };
 }
 
-function parseTableRange(ref: string, tableName: string): SheetBounds {
+/**
+ * Parses an "A1:D10" style range into 1 based bounds. Named for what it
+ * parses, not for who calls it: a table's own ref attribute and a
+ * worksheet's dimension ref are the same shape, so one function serves both
+ * rather than a table-specific copy and a sheet-specific copy drifting apart.
+ * `subject` names what the range belongs to for an error message, such as
+ * `The table "ClientTable"` or `The worksheet "Tracking"`.
+ */
+export function parseRangeRef(ref: string, subject: string): SheetBounds {
   const [startRef, endRef] = ref.split(":");
   if (startRef === undefined || endRef === undefined) {
     throw new WorkbookFileError(
-      `The table "${tableName}" has ref "${ref}", which is not an "A1:D10" style range, so the rows and ` +
-        "columns it covers cannot be determined.",
+      `${subject} has ref "${ref}", which is not an "A1:D10" style range, so the rows and columns it covers ` +
+        "cannot be determined.",
     );
   }
-  const start = parseCellRef(startRef, ref, tableName);
-  const end = parseCellRef(endRef, ref, tableName);
+  const start = parseCellRef(startRef, ref, subject);
+  const end = parseCellRef(endRef, ref, subject);
   return { firstRow: start.row, lastRow: end.row, firstColumn: start.column, lastColumn: end.column };
 }
 
@@ -228,7 +258,7 @@ function resolveTable(
     );
   }
 
-  const bounds = parseTableRange(table.ref, table.name);
+  const bounds = parseRangeRef(table.ref, `The table "${table.name}"`);
 
   const owningWorksheetPart = findOwningWorksheetPart(parts, table.partName);
   if (owningWorksheetPart === undefined) {
