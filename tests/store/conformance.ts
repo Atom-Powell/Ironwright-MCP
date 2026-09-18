@@ -182,4 +182,19 @@ export function stateStoreConformance(create: () => StateStore): void {
       { driveId: "drive-1", lastScanAt: "2026-09-17T10:00:00.000Z" },
     ]);
   });
+
+  it("does not match a profile id that is a prefix of another profile id", async () => {
+    // "clienta" is a literal prefix of "clientab", so a prefix match with no
+    // delimiter, or one that drops the trailing separator, would let clientab's
+    // drive leak into clienta's answer. This is what a bare prefix check on
+    // "example" and "other" can never catch, since neither is a prefix of the
+    // other.
+    const store = create();
+    await store.setDeltaLink("clienta", "drive-1", "link-1", "2026-09-17T10:00:00.000Z");
+    await store.setDeltaLink("clientab", "drive-9", "link-9", "2026-09-17T10:00:00.000Z");
+
+    await expect(store.getScannedDrives("clienta")).resolves.toEqual([
+      { driveId: "drive-1", lastScanAt: "2026-09-17T10:00:00.000Z" },
+    ]);
+  });
 }

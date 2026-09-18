@@ -64,11 +64,16 @@ export function createMemoryStateStore(): StateStore {
     },
 
     async getScannedDrives(profileId): Promise<ScannedDrive[]> {
-      // The map is keyed by inventoryPartitionKey, "profileId|driveId", not a
-      // NUL-separated pair. A profile id is restricted to lowercase letters,
-      // digits and hyphens, so it cannot itself contain "|" and the prefix
-      // match below is unambiguous even if a drive id happens to contain one.
-      const prefix = `${profileId}|`;
+      // The prefix is built by the same inventoryPartitionKey every sibling
+      // method uses, with an empty drive id, rather than a second literal "|"
+      // written here. That keeps the delimiter's definition in one place, and
+      // an unsafe profile id now throws the same UnsafeKeyError this store
+      // raises everywhere else instead of quietly answering with no results.
+      // The delimiter is what makes startsWith an exact boundary: it is the
+      // character immediately after the profile id in every key this store
+      // writes, so no other profile id's key can share this prefix, whatever
+      // characters a drive id itself contains.
+      const prefix = inventoryPartitionKey(profileId, "");
       const drives: ScannedDrive[] = [];
       for (const [key, value] of deltaLinks) {
         if (!key.startsWith(prefix)) continue;
