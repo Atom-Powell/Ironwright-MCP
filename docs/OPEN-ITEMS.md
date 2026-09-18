@@ -1520,3 +1520,115 @@ against real storage. The concurrency guard added for the branch review's Critic
 a deterministic test against the real coordinator and the real in-memory store; it has not been
 exercised against Azure Table Storage with two callers racing, and the cross-replica window
 remains open by design and is recorded above.
+
+## Phase 4c: covered only by fakes, 2026-09-18
+
+Phase 4c wired `describe_workbook`, the last of the five read tools, on branch
+`phase-4c-describe-workbook`, with the suite at 1934 tests across 134 files, all gates green. No
+call this phase's own code makes has reached a tenant. It reuses the granted-site configuration
+and drive-download path phase 4a and 4b already exercised live, but the enumeration,
+header-detection and column-description logic this phase adds is new to this codebase, and none
+of it has been proven by use.
+
+**What is covered.** `loadGrantedSiteUrl` in `src/config.ts`, present or absent
+(`tests/config.test.ts`). The profile registry's new site-mismatch refusal, a profile whose
+`identity.siteUrl` disagrees with the configured site failing by name at startup rather than
+loading clean (`tests/profiles/registry.test.ts`, `tests/profiles/registry.errors.test.ts`).
+`readWorkbookInventory` in `src/workbook/introspect.ts`: worksheet and table enumeration read
+from each part's own declared dimension or ref rather than a built grid, and every
+unresolved-sheet and unresolved-table shape (`tests/workbook/introspect.test.ts`).
+`detectHeaderRow` in `src/workbook/describe.ts`: an unambiguous candidate, no candidate at all,
+and the tie that must decline rather than guess (`tests/workbook/describe.header.test.ts`).
+`describeColumns`: every inferred type, the non-empty and unevaluable counts, the distinct-value
+count, the sample cap and its omitted count, and the withheld-samples path
+(`tests/workbook/describe.columns.test.ts`). The tool's own composition root,
+`runDescribeWorkbook` in `src/tools/describe/run.ts`, against a fake Graph transport and
+hand-built xlsx fixtures for both modes, the unknown-source self-correction, and the
+`fullCalcOnLoad` withholding (`tests/tools/describe/run.test.ts`). The shaping and text modules,
+asserted the same way every other tool's are, sentence by sentence against a shaped output chosen
+to contradict a naive reading (`tests/tools/describe/shape.test.ts`,
+`tests/tools/describe/text.test.ts`). A wire test driving the tool through a real MCP client over
+an in-memory transport, asserting the SDK's own output validation passes against a populated
+`structuredContent` including at least one described column
+(`tests/tools/describe/wire.test.ts`). All of it against fakes and hand-built fixtures, all of it
+green, none of it against a real workbook or a real site.
+
+**The live sitting this phase owes**, copied from the design spec rather than restated from
+memory: run both modes against the real tracking workbook and confirm that the source and header
+row the deep mode proposes are the ones `profiles/synthetic.json` already uses, and that the
+columns it describes include the header texts that profile's mapping names. The tool should
+rediscover a mapping this repository independently knows is correct. If it proposes something
+different, either the tool is wrong or the profile is, and both are worth knowing before merge;
+neither is discoverable from a fixture this phase's own author wrote. This has not run. The
+branch does not merge until it has.
+
+**`IW_SITE_URL` is now required server configuration, and phase 5 hosting must set it or the
+server will not start.** The stub this phase replaced took a `siteUrl` input, which promised a
+reach the `Sites.Selected` permission model forbids: this server holds one site's grant and
+cannot read any other, and nothing in the running server could previously tell a caller which
+site that was, since `IW_SITE_URL` was read only by the setup command. `describe_workbook` now
+takes `library` and `workbookPath` and no site at all, resolved against `IW_SITE_URL` at
+startup. It buys more than this one tool: the profile registry now refuses at startup a profile
+whose `identity.siteUrl` disagrees with the configured site, instead of that mismatch surfacing
+later as a 403 on the profile's first Graph call, which is the same class of misleading failure
+the setup command was already corrected for once and that this file already records the cost of.
+`docs/SETUP.md` carries the same requirement, next to where it already lists what the running
+server reads from its environment.
+
+**The tool describes richly and proposes only what it can observe.** It never guesses which
+column is the client, or fills in any part of a profile's `columns` map, because those keys are
+the profile author's own vocabulary, tied to deliverables this tool has never seen; a mapping it
+invented would be a plausible artifact that is harder to audit than no artifact. For a worksheet
+it declines to propose a header row when two candidates score equally, rather than picking one:
+a header row wrong by one shifts every column beneath it, and the resulting mapping still
+validates and reads the wrong data, which is exactly the class of failure this project treats as
+its most expensive. For a table the header row is not a guess at all. `resolveHeaderRow` in
+`src/tools/describe/run.ts` reads the table's own `headerRowCount` declaration: present and
+nonzero means row 1, declared `"0"` means the table asserts it has none and the tool reports
+that rather than treating the first data row as a header.
+
+**There is no `date` inferred type, and this is deliberate.** A date in xlsx is a number carrying
+a number format, and the cell decoder built for the compliance path deliberately does not read
+styles, so a date serial and an ordinary number are indistinguishable at the layer this tool
+reads from. `describeColumns`'s `InferredType` is `string`, `number`, `boolean`, `mixed`, or
+`empty`, with no sixth case. Claiming to infer `date` would assert something this code cannot
+observe; a column of date serials reports as `number`, with its samples showing the serials,
+which is what the file actually holds.
+
+**When the workbook is `fullCalcOnLoad` and the range holds a formula, every sample for that
+source is withheld, not just samples from formula cells.** `sheetToGrid` reports whether a range
+contained a formula at all, not which cells did, and teaching it per-cell tracking would mean
+changing the module phase 2b-2 built to be the trustworthy half of the compliance path, for the
+sake of a sample display in a different tool. `buildSourceOutput` in
+`src/tools/describe/run.ts` withholds every sample for the source instead, which is the
+conservative direction and needs nothing new from the reader. Structure, header text, types and
+counts are still reported in full, because structure is not stale; only the sample values, which
+could be read from a cached result the file itself says may be wrong, are withheld, and the
+response states that they were and why.
+
+**Sheets and tables that cannot be resolved are recorded, not dropped.** A review during this
+phase found `readWorkbookInventory`'s first draft silently omitting a table whose owning sheet
+could not be resolved, and reporting a sheet whose worksheet part was missing from the archive as
+`{ rows: 0, columns: 0 }`, a shape identical to a legitimately empty sheet. Both are wrong for the
+same reason: a workbook survey that quietly returns a shorter, confident-looking list, or reports
+a broken sheet as though it were merely small, cannot be trusted about what it did not find any
+more than about what it did. `WorkbookInventory` now carries an `unresolved` array alongside
+`sheets` and `tables`, and every sheet or table `readWorkbookInventory` observed but could not
+resolve is recorded there with the specific part that was missing or orphaned, rather than being
+folded into either list or left out of the response. This is the same rule the workbook reader
+already applies to a row it cannot turn into a client record: refusing a thing and reporting it is
+one rule, not two, and the reporting half is what makes a rejection honest rather than a silent
+gap.
+
+**A cost figure was reporting the wrong number, and no test in the suite could see it.**
+`graphRequests` originally read `context.graph.requests()` directly, the process-lifetime counter
+on the Graph client `main.ts` builds once and shares across every per-request server, while the
+schema and the response prose both promise what this call itself paid. Every test in the suite
+builds a fresh `ToolContext` and makes exactly one call, so the shared counter and a per-call
+counter read the same value in every test that exercised it, and the defect was invisible to the
+whole suite by construction. `runDescribeWorkbook` now brackets the counter with
+`requestsAtStart` and reports the delta, the same pattern `src/scan/run.ts` already used for the
+identical reason. The shape of the blind spot generalizes past this one field: any per-call figure
+measured against a counter shared across calls will pass a test suite that only ever makes one
+call before checking it, and will still be wrong the moment a second call happens in the same
+process, which is the server's normal operating condition and never the test's.
