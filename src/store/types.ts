@@ -33,6 +33,11 @@ export interface ApplyResult {
   batches: number;
 }
 
+export interface ScannedDrive {
+  driveId: string;
+  lastScanAt: string;
+}
+
 export interface StateStore {
   getDeltaLink(profileId: string, driveId: string): Promise<string | undefined>;
   setDeltaLink(profileId: string, driveId: string, deltaLink: string, lastScanAt: string): Promise<void>;
@@ -47,4 +52,13 @@ export interface StateStore {
   clearInventory(profileId: string, driveId: string): Promise<void>;
   applyInventoryChanges(profileId: string, driveId: string, changes: InventoryChange[]): Promise<ApplyResult>;
   listInventory(profileId: string, driveId: string): Promise<InventoryRecord[]>;
+  /**
+   * Every drive this profile has scanned to completion, with the time of that
+   * scan. Reads the partition `setDeltaLink` already writes, so nothing new is
+   * persisted. It exists so a tool serving an answer from the stored inventory
+   * can find the drive without calling `resolveDrive`, which would be a Graph
+   * request and would cost `query_repository` the zero-request promise its own
+   * description makes.
+   */
+  getScannedDrives(profileId: string): Promise<ScannedDrive[]>;
 }

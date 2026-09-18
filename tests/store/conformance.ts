@@ -155,4 +155,31 @@ export function stateStoreConformance(create: () => StateStore): void {
       batches: 0,
     });
   });
+
+  it("returns nothing for a profile that has never been scanned", async () => {
+    const store = create();
+    await expect(store.getScannedDrives("never-scanned")).resolves.toEqual([]);
+  });
+
+  it("returns each scanned drive with the time it was last scanned", async () => {
+    const store = create();
+    await store.setDeltaLink("example", "drive-1", "link-1", "2026-09-17T10:00:00.000Z");
+    await store.setDeltaLink("example", "drive-2", "link-2", "2026-09-17T11:00:00.000Z");
+
+    const drives = await store.getScannedDrives("example");
+
+    expect(drives).toHaveLength(2);
+    expect(drives).toContainEqual({ driveId: "drive-1", lastScanAt: "2026-09-17T10:00:00.000Z" });
+    expect(drives).toContainEqual({ driveId: "drive-2", lastScanAt: "2026-09-17T11:00:00.000Z" });
+  });
+
+  it("does not leak one profile's drives into another's", async () => {
+    const store = create();
+    await store.setDeltaLink("example", "drive-1", "link-1", "2026-09-17T10:00:00.000Z");
+    await store.setDeltaLink("other", "drive-9", "link-9", "2026-09-17T10:00:00.000Z");
+
+    await expect(store.getScannedDrives("example")).resolves.toEqual([
+      { driveId: "drive-1", lastScanAt: "2026-09-17T10:00:00.000Z" },
+    ]);
+  });
 }

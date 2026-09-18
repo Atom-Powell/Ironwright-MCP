@@ -1,5 +1,5 @@
 import { inventoryPartitionKey, MAX_TRANSACTION_SIZE, planInventoryChanges } from "./keys.js";
-import type { ApplyResult, InventoryRecord, StateStore } from "./types.js";
+import type { ApplyResult, InventoryRecord, ScannedDrive, StateStore } from "./types.js";
 
 /**
  * For tests and for a local run with no storage account. It counts batches the
@@ -61,6 +61,20 @@ export function createMemoryStateStore(): StateStore {
 
     async listInventory(profileId, driveId) {
       return [...inventoryFor(profileId, driveId).values()];
+    },
+
+    async getScannedDrives(profileId): Promise<ScannedDrive[]> {
+      // The map is keyed by inventoryPartitionKey, "profileId|driveId", not a
+      // NUL-separated pair. A profile id is restricted to lowercase letters,
+      // digits and hyphens, so it cannot itself contain "|" and the prefix
+      // match below is unambiguous even if a drive id happens to contain one.
+      const prefix = `${profileId}|`;
+      const drives: ScannedDrive[] = [];
+      for (const [key, value] of deltaLinks) {
+        if (!key.startsWith(prefix)) continue;
+        drives.push({ driveId: key.slice(prefix.length), lastScanAt: value.lastScanAt });
+      }
+      return drives;
     },
   };
 }

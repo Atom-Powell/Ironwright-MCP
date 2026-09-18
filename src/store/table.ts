@@ -7,7 +7,7 @@ import {
   MAX_TRANSACTION_SIZE,
   planInventoryChanges,
 } from "./keys.js";
-import type { ApplyResult, InventoryRecord, StateStore } from "./types.js";
+import type { ApplyResult, InventoryRecord, ScannedDrive, StateStore } from "./types.js";
 
 export interface TableEntityLike {
   partitionKey: string;
@@ -186,6 +186,19 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
         records.push(toRecord(entity));
       }
       return records;
+    },
+
+    async getScannedDrives(profileId): Promise<ScannedDrive[]> {
+      const drives: ScannedDrive[] = [];
+      for await (const entity of clients.deltaLinks.listEntities({
+        queryOptions: { filter: partitionFilter(profileId) },
+      })) {
+        // Skips a row an older build wrote without these fields, rather than
+        // crashing the read, because this table survives a deployment.
+        if (typeof entity.driveId !== "string" || typeof entity.lastScanAt !== "string") continue;
+        drives.push({ driveId: entity.driveId, lastScanAt: entity.lastScanAt });
+      }
+      return drives;
     },
   };
 }
