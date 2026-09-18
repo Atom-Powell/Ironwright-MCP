@@ -15,8 +15,19 @@ import { WorkbookFileError, WorkbookMappingError, WorkbookUnreadableError } from
  */
 export type WorkbookSource = { kind: "table" | "worksheet"; name: string };
 
+/**
+ * `parseRelationships`, `resolveRelativeTarget`, `findTables`,
+ * `findOwningWorksheetPart`, `parseRangeRef`, `requirePart`,
+ * `SHEET_ENTRY_PATTERN` and `TableInfo` below are exported for
+ * introspect.ts, which enumerates a workbook's sheets and tables using the
+ * same OOXML parsing rules this module already carries for reading a
+ * mapped range. They are exported so introspection reuses this module's one
+ * implementation of each rule rather than a second copy drifting from it,
+ * not because any of it is public API of the server: nothing outside the
+ * workbook layer should import from here.
+ */
 const RELATIONSHIP_PATTERN = /<Relationship\b[^>]*\/>|<Relationship\b[^>]*>[\s\S]*?<\/Relationship>/g;
-const SHEET_ENTRY_PATTERN = /<sheet\b[^>]*\/>|<sheet\b[^>]*>[\s\S]*?<\/sheet>/g;
+export const SHEET_ENTRY_PATTERN = /<sheet\b[^>]*\/>|<sheet\b[^>]*>[\s\S]*?<\/sheet>/g;
 const CALC_PR_PATTERN = /<calcPr\b[^>]*\/>|<calcPr\b[^>]*>/;
 const TABLE_ROOT_PATTERN = /<table\b[^>]*>|<table\b[^>]*\/>/;
 
@@ -38,7 +49,7 @@ function describeSource(source: WorkbookSource): string {
  * absence there is the archive's own required parts being incomplete, which
  * is `onMissing: "fileError"`.
  */
-function requirePart(
+export function requirePart(
   parts: Map<string, string>,
   partName: string,
   neededFor: string,
@@ -70,7 +81,7 @@ function requirePart(
  * relative to "xl/worksheets/"; both are expressed here as the owning part's
  * own path, so one function resolves either.
  */
-function resolveRelativeTarget(owningPartPath: string, target: string): string {
+export function resolveRelativeTarget(owningPartPath: string, target: string): string {
   if (target.startsWith("/")) return target.slice(1);
 
   const segments = owningPartPath.split("/");
@@ -83,7 +94,7 @@ function resolveRelativeTarget(owningPartPath: string, target: string): string {
   return segments.join("/");
 }
 
-function parseRelationships(relsXml: string): Map<string, string> {
+export function parseRelationships(relsXml: string): Map<string, string> {
   const relationships = new Map<string, string>();
   for (const match of relsXml.matchAll(RELATIONSHIP_PATTERN)) {
     const tag = match[0];
@@ -114,12 +125,25 @@ function findSheetRelationshipId(workbookXml: string, name: string): string | un
   return undefined;
 }
 
+/**
+ * What resolving a named source down to a sheet part settles: the worksheet
+ * XML to read, the bounds to read within it (undefined for a worksheet
+ * source, which always reads the sheet's whole used range), and, for a table
+ * source only, whether the table's own headerRowCount attribute declares a
+ * header row. describe_workbook's source mode reads hasHeaderRow to decide a
+ * table's header determinately rather than guessing at it the way it must
+ * for a worksheet, which carries no such declaration of its own.
+ */
+type ResolvedSource =
+  | { sheetXml: string; bounds: SheetBounds; hasHeaderRow: boolean }
+  | { sheetXml: string; bounds: undefined; hasHeaderRow: undefined };
+
 function resolveWorksheet(
   parts: Map<string, string>,
   workbookXml: string,
   workbookRelsXml: string,
   source: WorkbookSource,
-): { sheetXml: string; bounds: undefined } {
+): ResolvedSource {
   const rId = findSheetRelationshipId(workbookXml, source.name);
   if (rId === undefined) {
     throw new WorkbookMappingError(
@@ -149,16 +173,24 @@ function resolveWorksheet(
     );
   }
 
-  return { sheetXml, bounds: undefined };
+  return { sheetXml, bounds: undefined, hasHeaderRow: undefined };
 }
 
-interface TableInfo {
+export interface TableInfo {
   name: string;
   ref: string;
   partName: string;
+  /**
+   * The table root's own headerRowCount attribute, exactly as the file
+   * states it, or undefined when the attribute is absent. Left raw rather
+   * than resolved to a boolean here, because absent means 1 (OOXML's
+   * default, a header row present) and only a caller that knows that
+   * convention should collapse it, not this reader.
+   */
+  headerRowCount: string | undefined;
 }
 
-function findTables(parts: Map<string, string>): TableInfo[] {
+export function findTables(parts: Map<string, string>): TableInfo[] {
   const tables: TableInfo[] = [];
   for (const [partName, xml] of parts) {
     if (!/^xl\/tables\/[^/]+\.xml$/.test(partName)) continue;
@@ -166,7 +198,9 @@ function findTables(parts: Map<string, string>): TableInfo[] {
     if (tag === undefined) continue;
     const name = attribute(tag, "name");
     const ref = attribute(tag, "ref");
-    if (name !== undefined && ref !== undefined) tables.push({ name, ref, partName });
+    if (name !== undefined && ref !== undefined) {
+      tables.push({ name, ref, partName, headerRowCount: attribute(tag, "headerRowCount") });
+    }
   }
   return tables;
 }
@@ -178,7 +212,7 @@ function findTables(parts: Map<string, string>): TableInfo[] {
  * that points at this table part, rather than by reading anything on the
  * table part itself.
  */
-function findOwningWorksheetPart(parts: Map<string, string>, tablePartName: string): string | undefined {
+export function findOwningWorksheetPart(parts: Map<string, string>, tablePartName: string): string | undefined {
   for (const [partName, xml] of parts) {
     if (!/^xl\/worksheets\/_rels\/[^/]+\.xml\.rels$/.test(partName)) continue;
     const owningWorksheetPart = partName.replace("_rels/", "").replace(/\.rels$/, "");
@@ -189,37 +223,46 @@ function findOwningWorksheetPart(parts: Map<string, string>, tablePartName: stri
   return undefined;
 }
 
-function parseCellRef(cellRef: string, wholeRef: string, tableName: string): { row: number; column: number } {
+function parseCellRef(cellRef: string, wholeRef: string, subject: string): { row: number; column: number } {
   const match = /^([A-Za-z]+)([0-9]+)$/.exec(cellRef);
   if (!match) {
-    // The table was found by the name the mapping gave; what is wrong is the
-    // shape of its own ref attribute, which the profile never writes.
+    // The subject was found by the name the caller gave; what is wrong is
+    // the shape of its own ref attribute, which neither a profile nor a
+    // workbook part's own declaration is expected to get wrong.
     throw new WorkbookFileError(
-      `The table "${tableName}" has ref "${wholeRef}", which contains "${cellRef}", not a column letter ` +
-        "followed by a row number. The table's range cannot be determined.",
+      `${subject} has ref "${wholeRef}", which contains "${cellRef}", not a column letter followed by a row ` +
+        "number. Its range cannot be determined.",
     );
   }
   const [, letters, digits] = match;
   return { column: columnLabelToIndex(letters as string), row: Number(digits) };
 }
 
-function parseTableRange(ref: string, tableName: string): SheetBounds {
+/**
+ * Parses an "A1:D10" style range into 1 based bounds. Named for what it
+ * parses, not for who calls it: a table's own ref attribute and a
+ * worksheet's dimension ref are the same shape, so one function serves both
+ * rather than a table-specific copy and a sheet-specific copy drifting apart.
+ * `subject` names what the range belongs to for an error message, such as
+ * `The table "ClientTable"` or `The worksheet "Tracking"`.
+ */
+export function parseRangeRef(ref: string, subject: string): SheetBounds {
   const [startRef, endRef] = ref.split(":");
   if (startRef === undefined || endRef === undefined) {
     throw new WorkbookFileError(
-      `The table "${tableName}" has ref "${ref}", which is not an "A1:D10" style range, so the rows and ` +
-        "columns it covers cannot be determined.",
+      `${subject} has ref "${ref}", which is not an "A1:D10" style range, so the rows and columns it covers ` +
+        "cannot be determined.",
     );
   }
-  const start = parseCellRef(startRef, ref, tableName);
-  const end = parseCellRef(endRef, ref, tableName);
+  const start = parseCellRef(startRef, ref, subject);
+  const end = parseCellRef(endRef, ref, subject);
   return { firstRow: start.row, lastRow: end.row, firstColumn: start.column, lastColumn: end.column };
 }
 
 function resolveTable(
   parts: Map<string, string>,
   source: WorkbookSource,
-): { sheetXml: string; bounds: SheetBounds } {
+): ResolvedSource {
   const table = findTables(parts).find((candidate) => candidate.name.toLowerCase() === source.name.toLowerCase());
   if (table === undefined) {
     throw new WorkbookMappingError(
@@ -228,7 +271,7 @@ function resolveTable(
     );
   }
 
-  const bounds = parseTableRange(table.ref, table.name);
+  const bounds = parseRangeRef(table.ref, `The table "${table.name}"`);
 
   const owningWorksheetPart = findOwningWorksheetPart(parts, table.partName);
   if (owningWorksheetPart === undefined) {
@@ -249,22 +292,50 @@ function resolveTable(
     );
   }
 
-  return { sheetXml, bounds };
+  // Absent headerRowCount means 1, the OOXML default: a table with no
+  // opinion stated still has a header row. Matches introspect.ts's own
+  // reading of this same attribute, so the two never disagree about the
+  // same table.
+  return { sheetXml, bounds, hasHeaderRow: table.headerRowCount !== "0" };
+}
+
+export interface WorkbookGridResolution {
+  grid: CellValue[][];
+  rowOffset: number;
+  /**
+   * The sheet-absolute column the grid's column 0 sits at: a table's own
+   * first column, or 1 for a worksheet, whose unbounded read always starts
+   * at column A regardless of where its data begins (see sheet.ts).
+   */
+  firstColumn: number;
+  fullCalcOnLoad: boolean;
+  hadFormula: boolean;
+  /**
+   * Only meaningful for a table source: whether its own headerRowCount
+   * attribute declares a header row. undefined for a worksheet source, whose
+   * header row is never table-declared and must instead be inferred from the
+   * grid itself.
+   */
+  tableHasHeaderRow: boolean | undefined;
 }
 
 /**
- * Reads a table's own range, or a worksheet's whole used range, out of xlsx
- * bytes already in memory. A table read passes its ref to sheetToGrid as
- * bounds; a worksheet read passes none, which is why its grid's column 0 is
- * always spreadsheet column A regardless of where data starts (see sheet.ts).
- * That asymmetry is safe here for the same reason it is safe in sheet.ts:
- * nothing in this module or its caller translates a grid column index back to
- * a spreadsheet column.
+ * Resolves a table's own range, or a worksheet's whole used range, out of
+ * xlsx bytes already in memory, and reads it into a grid, without deciding
+ * whether the result is trustworthy enough to hand to a caller. That
+ * decision belongs to each caller: parseWorkbookGrid, below, refuses a stale
+ * fullCalcOnLoad formula outright because it feeds compliance data;
+ * describe_workbook's source mode takes this same resolution and instead
+ * withholds sample values while still describing structure, because
+ * describing a workbook is safe even when its cached values are not
+ * authoritative enough to report as compliance.
+ *
+ * A table read passes its ref to sheetToGrid as bounds; a worksheet read
+ * passes none. That asymmetry is safe here for the same reason it is safe in
+ * sheet.ts: nothing in this module or its callers translates a grid column
+ * index back to a spreadsheet column without also consulting firstColumn.
  */
-export function parseWorkbookGrid(
-  bytes: Uint8Array,
-  source: WorkbookSource,
-): { grid: CellValue[][]; rowOffset: number } {
+export function resolveWorkbookGrid(bytes: Uint8Array, source: WorkbookSource): WorkbookGridResolution {
   const parts = readZipParts(
     bytes,
     (name) =>
@@ -289,18 +360,41 @@ export function parseWorkbookGrid(
 
   const fullCalcOnLoad = isFullCalcOnLoad(workbookXml);
 
-  const { sheetXml, bounds } =
+  const resolved =
     source.kind === "table"
       ? resolveTable(parts, source)
       : resolveWorksheet(parts, workbookXml, workbookRelsXml, source);
 
-  const { grid, firstRow, hadFormula } = sheetToGrid(sheetXml, sharedStrings, bounds);
+  const { grid, firstRow, hadFormula } = sheetToGrid(resolved.sheetXml, sharedStrings, resolved.bounds);
+
+  return {
+    grid,
+    rowOffset: firstRow,
+    firstColumn: resolved.bounds?.firstColumn ?? 1,
+    fullCalcOnLoad,
+    hadFormula,
+    tableHasHeaderRow: resolved.hasHeaderRow,
+  };
+}
+
+/**
+ * Reads a table's own range, or a worksheet's whole used range, out of xlsx
+ * bytes already in memory, refusing a range whose cached values the workbook
+ * itself says are stale. This is the compliance path's own entry point; its
+ * behavior is unchanged by resolveWorkbookGrid's introduction above, which
+ * this function now calls to do the actual resolution and read.
+ */
+export function parseWorkbookGrid(
+  bytes: Uint8Array,
+  source: WorkbookSource,
+): { grid: CellValue[][]; rowOffset: number } {
+  const resolved = resolveWorkbookGrid(bytes, source);
 
   // A workbook-wide condition, not a per-row one: reporting it as fifty
   // rejected rows would bury the fact that none of this range's cached values
   // are trustworthy, which is the same reasoning read.ts applies to a stale
   // mapping.
-  if (fullCalcOnLoad && hadFormula) {
+  if (resolved.fullCalcOnLoad && resolved.hadFormula) {
     throw new WorkbookMappingError(
       `${describeSource(source)} contains at least one formula, and the workbook is marked fullCalcOnLoad, which ` +
         "instructs Excel to recalculate every formula when it opens. The values saved in the file are therefore " +
@@ -310,5 +404,5 @@ export function parseWorkbookGrid(
     );
   }
 
-  return { grid, rowOffset: firstRow };
+  return { grid: resolved.grid, rowOffset: resolved.rowOffset };
 }

@@ -21,6 +21,15 @@ export interface ToolContext {
   store: StateStore;
   scans: ScanCoordinator;
   now: () => Date;
+  /**
+   * The one site this server's Sites.Selected grant covers, loaded once at
+   * startup by loadGrantedSiteUrl. describe_workbook is the only tool that
+   * reads this: every other tool learns its site from a profile's own
+   * identity.siteUrl, which the registry already checked against this same
+   * value at load time. describe_workbook has no profile to read one from,
+   * since it is the tool a human runs before a profile exists.
+   */
+  grantedSiteUrl: string;
 }
 
 /**

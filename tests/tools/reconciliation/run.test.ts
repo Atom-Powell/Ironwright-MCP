@@ -51,6 +51,43 @@ describe("runReconcile", () => {
     expect(JSON.stringify(result.content)).toContain('Profile \\"example\\"');
   });
 
+  it("counts what the workbook read itself spent, measured across the call rather than assumed", async () => {
+    // The undercount this pins: readWorkbookSnapshot pays resolveDrive and
+    // downloadDriveItem, and none of it reached the report, so the prose
+    // named only the scan's cost and called it what the call cost.
+    const context = contextWith();
+    // The default fake charges the counter and then rejects, which is what
+    // makes a cost assertion against it able to fail. Four charges stand in
+    // for readWorkbookSnapshot's own four: two for resolveDrive and two for
+    // downloadDriveItem, since the real client's getBytes counts both the
+    // Graph request that answers with a redirect and the follow-up request to
+    // the redirect target.
+    const charge = async (): Promise<void> => {
+      try {
+        await context.graph.get("/probe");
+      } catch {
+        // The rejection is the fake's, not this reader's, and the counter
+        // has already moved by the time it arrives.
+      }
+    };
+    const reader = async (): Promise<WorkbookSnapshot> => {
+      await charge();
+      await charge();
+      await charge();
+      await charge();
+      return WORKBOOK;
+    };
+
+    const result = await runReconcile({ profileId: "example" }, context, reader);
+
+    const structured = result.structuredContent as {
+      provenance: { workbookReadGraphRequestsByThisCall: number; graphRequestsByThisCall: number };
+    };
+    expect(structured.provenance.workbookReadGraphRequestsByThisCall).toBe(4);
+    // Kept apart from the scan's own figure rather than summed into it.
+    expect(structured.provenance.graphRequestsByThisCall).toBe(6);
+  });
+
   it("reads the workbook before scanning, so a bad mapping costs no enumeration", async () => {
     // A plain order log does not distinguish "workbook awaited, then scan
     // started" from "workbook and scan both started together, with the

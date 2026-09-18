@@ -64,17 +64,79 @@ export function createFakeToolContext(overrides: Partial<ToolContext> = {}): Too
   );
 
   return {
-    profiles: createProfileRegistry([
-      {
-        source: "example.json",
-        contents: JSON.parse(readFileSync("examples/profiles/example.json", "utf8")) as unknown,
-      },
-    ]),
+    profiles: createProfileRegistry(
+      [
+        {
+          source: "example.json",
+          contents: JSON.parse(readFileSync("examples/profiles/example.json", "utf8")) as unknown,
+        },
+      ],
+      "https://contoso.sharepoint.com/sites/Example",
+    ),
     graph,
     store: createMemoryStateStore(),
     scans,
     now: () => new Date("2026-09-14T12:00:00Z"),
+    grantedSiteUrl: "https://contoso.sharepoint.com/sites/Example",
     ...overrides,
+  };
+}
+
+export interface FakeWorkbookGraphOptions {
+  /** Defaults to matching createFakeToolContext's own example profile's site. */
+  siteId?: string;
+  library: string;
+  driveId?: string;
+  /**
+   * Workbook bytes keyed by the exact library-relative workbookPath a call
+   * names. Matched against the request URL by substring, which is enough
+   * because driveItemPath only percent-encodes characters these fixture
+   * paths never contain.
+   */
+  workbooksByPath: Record<string, Uint8Array>;
+}
+
+/**
+ * A GraphClient that answers resolveDrive's site lookup and drive listing and
+ * downloadDriveItem's content read, entirely from fixtures, rather than
+ * injecting a bytes reader that bypasses Graph. describe_workbook reports the
+ * Graph cost it paid, and this server's sharpest phase 2 review finding was a
+ * cost assertion measured against a counter that could not move; every method
+ * here increments the same counter requests() reports, the same way the real
+ * client does, so that finding cannot recur for this tool.
+ */
+export function createFakeWorkbookGraphClient(options: FakeWorkbookGraphOptions): GraphClient {
+  const driveId = options.driveId ?? "drive-1";
+  const siteId = options.siteId ?? "site-1";
+  let requestCount = 0;
+
+  return {
+    async get<T>(pathOrUrl: string): Promise<T> {
+      requestCount += 1;
+      if (pathOrUrl.includes("/drives")) {
+        return { value: [{ id: driveId, name: options.library }] } as unknown as T;
+      }
+      return { id: siteId } as unknown as T;
+    },
+    post: () => {
+      requestCount += 1;
+      return Promise.reject(new Error("the fake workbook Graph client does not implement post"));
+    },
+    async getBytes(pathOrUrl: string): Promise<Uint8Array> {
+      // Two, not one: the real client's getBytes issues a request to Graph,
+      // which answers the content read with a 302, and a second request to
+      // the redirect target to actually fetch the bytes (see sendForBytes in
+      // src/graph/client.ts). A fake that only charged one made every
+      // download-inclusive cost assertion in this suite one request short of
+      // what a real tenant pays.
+      requestCount += 2;
+      const match = Object.entries(options.workbooksByPath).find(([path]) => pathOrUrl.includes(path));
+      if (match === undefined) {
+        throw new Error(`the fake workbook Graph client has no fixture bytes for ${pathOrUrl}`);
+      }
+      return match[1];
+    },
+    requests: () => requestCount,
   };
 }
 

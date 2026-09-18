@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { columnLabelToIndex, sheetToGrid } from "../../src/workbook/sheet.js";
+import { columnIndexToLabel, columnLabelToIndex, sheetToGrid } from "../../src/workbook/sheet.js";
 import { UNEVALUABLE } from "../../src/workbook/cells.js";
 
 const SHEET = `<worksheet><sheetData>
@@ -140,5 +140,21 @@ describe("columnLabelToIndex", () => {
     expect(columnLabelToIndex("A")).toBe(1);
     expect(columnLabelToIndex("Z")).toBe(26);
     expect(columnLabelToIndex("AA")).toBe(27);
+  });
+});
+
+describe("columnIndexToLabel", () => {
+  it("turns a one-based column index into its spreadsheet label", () => {
+    expect(columnIndexToLabel(1)).toBe("A");
+    expect(columnIndexToLabel(26)).toBe("Z");
+    expect(columnIndexToLabel(27)).toBe("AA");
+    expect(columnIndexToLabel(52)).toBe("AZ");
+    expect(columnIndexToLabel(703)).toBe("AAA");
+  });
+
+  it("round trips against columnLabelToIndex", () => {
+    for (const label of ["A", "Q", "Z", "AA", "AZ", "BA", "ZZ", "AAA"]) {
+      expect(columnIndexToLabel(columnLabelToIndex(label))).toBe(label);
+    }
   });
 });

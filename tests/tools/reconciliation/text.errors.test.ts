@@ -2,13 +2,14 @@ import { describe, expect, it } from "vitest";
 import { loadExpectedReport } from "../../domain/reconcile/fixtures/load.js";
 import { shapeReport } from "../../../src/tools/reconciliation/shape.js";
 import { reconcileText } from "../../../src/tools/reconciliation/text.js";
-import type { ReconcileToolOutput, ScanProvenance } from "../../../src/tools/reconciliation/output.js";
+import type { CallProvenance, ReconcileToolOutput } from "../../../src/tools/reconciliation/output.js";
 
-const PROVENANCE: ScanProvenance = {
+const PROVENANCE: CallProvenance = {
   scanMode: "incremental",
   resynced: false,
   graphRequestsByThisCall: 4,
   scanSharedWithConcurrentCall: false,
+  workbookReadGraphRequestsByThisCall: 2,
 };
 
 function emptyOutput(): ReconcileToolOutput {
@@ -69,7 +70,11 @@ describe("reconcileText says nothing it cannot observe", () => {
     expect(resynced).toContain("after a delta resync forced a full re-enumeration");
   });
 
-  it("does not report a Graph cost for a call that paid none", () => {
+  it("still reports the workbook's cost on a joined call, which shares the scan and nothing else", () => {
+    // The sentence this replaces said a joined call "issued no Graph request
+    // of its own because it shared a scan already running", which was false
+    // every time it fired: the coordinator shares the repository snapshot,
+    // and a joiner resolves the drive and downloads the workbook by itself.
     const text = reconcileText(
       shapeReport(
         loadExpectedReport(),
@@ -78,8 +83,12 @@ describe("reconcileText says nothing it cannot observe", () => {
       ),
     ).join("\n");
 
-    expect(text).not.toMatch(/cost \d+ Graph request/);
-    expect(text).toContain("issued no Graph request of its own");
+    expect(text).toContain(
+      "This call cost 2 Graph requests reading the workbook, and issued no Graph request of its own for the " +
+        "repository scan because it shared a scan already running.",
+    );
+    // Never reported as costing nothing at all.
+    expect(text).not.toContain("This call issued no Graph request");
   });
 
   it("uses the singular for one rejected workbook row and one unknown client", () => {

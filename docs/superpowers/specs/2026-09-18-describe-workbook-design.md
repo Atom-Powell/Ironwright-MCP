@@ -66,10 +66,13 @@ into the profile, so there is no translation step in which a name can be transcr
 
 Per column, within the resolved range:
 
-- its one-based position within the range
+- its one-based column position, counted from column A of the sheet rather than from the start of
+  the range (corrected 2026-09-18: this first read "within the range", and the two differ for a table
+  that does not start at column A. A position that disagreed with the column label printed beside it
+  would leave an operator to decide which of the two to trust, so both count from the sheet)
 - its sheet-absolute column label, so an operator looking at the file in Excel can find it
 - the header text, verbatim
-- an inferred type: `string`, `number`, `boolean`, `date`, `mixed`, or `empty`
+- an inferred type: `string`, `number`, `boolean`, `mixed`, or `empty`
 - counts of non-empty cells and of unevaluable cells
 - a distinct value count
 - up to `MAX_COLUMN_SAMPLES` sample values
@@ -97,6 +100,24 @@ equally plausible it proposes none, lists the candidates, and states what made e
 A confidently wrong header row shifts every column by one and produces a mapping that validates and
 reads garbage, which is exactly the class of failure this project treats as its most expensive.
 
+**Amended 2026-09-18, by the whole-branch review. Scoring is one property, not two.** What shipped
+scores a candidate on how many of its cells are non-empty distinct strings, and on nothing else. The
+second property named above, whether the row beneath a candidate differs in type from it, was never
+implemented, and this records that it is not owed rather than outstanding.
+
+The reason is that the second property can only ever act as a tiebreak, and the decline rule already
+settles what a tie means. A row's own count of distinct labels decides every case where the two
+candidates differ; the type of the row beneath matters only when that count does not separate them,
+which is precisely the case the implementation brief was given in terms of: a tie is the evidence
+failing to decide, and it must not be broken by a tiebreaker. Adding the signal would turn some ties
+into proposals, and a header row wrong by one produces a mapping that validates and reads the wrong
+column, with nothing downstream able to notice.
+
+So the spec and the safe direction disagree here, and the safe direction wins. Omitting the signal
+makes the tool decline more often and guess no more often than before, and an operator resolves a
+decline by looking at two rows. There is no reading of this omission under which the tool proposes
+something it could not observe, which is the property the whole tool is built to hold.
+
 ## What the tool refuses to infer, and says so
 
 It does not guess the `columns` map, and its own output states that it did not. Those keys are the
@@ -115,10 +136,23 @@ bytes reader established that a cell whose value cannot be read confidently surf
 rather than a substituted value, and a tool whose entire purpose is to be trusted about a file's
 contents cannot be the place that rule is relaxed.
 
-**When the workbook carries `fullCalcOnLoad`, samples from formula cells are withheld.** That flag is
-the file stating its own cached results are stale. Structure is still described, because structure is
-not stale, but a sampled value read from a stale cached result would be shown as though it were
-current. The response says which columns had samples withheld and why.
+**When the workbook carries `fullCalcOnLoad` and the range holds a formula, every sample for that
+source is withheld.** That flag is the file stating its own cached results are stale. Structure is
+still described, because structure is not stale, but a sampled value read from a stale cached result
+would be shown as though it were current. The response says samples were withheld and why.
+
+**Amended 2026-09-18, while the plan was being written.** This originally said samples from formula
+cells are withheld, per cell. `sheetToGrid` reports whether a range contained a formula, not which
+cells did, so per-cell withholding would require teaching the grid reader to track formula cells. That
+module is on the compliance path and is the one phase 2b-2 was built to make trustworthy; destabilizing
+it to improve a sample display is the wrong trade. Withholding every sample for the source is the
+conservative direction and needs nothing new from the reader.
+
+**Also amended 2026-09-18: there is no `date` inferred type.** A date in xlsx is a number carrying a
+number format, and the cell decoder deliberately does not read styles, so a date serial and an
+ordinary number are indistinguishable at this layer. Claiming to infer `date` would assert something
+this code cannot observe. A column of date serials reports as `number`, and its samples show the
+serials, which is what the file actually holds.
 
 ## Caps
 

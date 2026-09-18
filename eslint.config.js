@@ -80,6 +80,28 @@ const RECONCILE_ENTRY_POINT_PATTERN = {
     "The reconciliation engine has one entry point: import reconcile and the report types from domain/reconcile/index.js, never a stage module directly.",
 };
 
+// The workbook grid has two doors and only one of them refuses a stale
+// workbook. `parseWorkbookGrid` throws when the file is marked fullCalcOnLoad
+// over a range holding a formula, because it feeds compliance data and the
+// workbook itself says its cached values are not authoritative.
+// `resolveWorkbookGrid` hands back the same grid with that check left out, so
+// describe_workbook can describe a range's structure and withhold only its
+// sample values, which is safe for a description and not for a report.
+//
+// Until this rule existed, one doc comment was the whole of the boundary. A
+// second caller reaching for the shorter name would get compliance data out of
+// a workbook that disowns it, and nothing in the build would object.
+//
+// Narrowed by importName rather than by module, because every other export of
+// xlsx.ts is meant to be imported: the type declarations, `parseWorkbookGrid`
+// itself, and the OOXML helpers introspect.ts reuses.
+const RAW_WORKBOOK_GRID_PATTERN = {
+  group: ["**/workbook/xlsx.js", "./xlsx.js", "../xlsx.js"],
+  importNames: ["resolveWorkbookGrid"],
+  message:
+    "resolveWorkbookGrid skips parseWorkbookGrid's fullCalcOnLoad refusal, so it can return values the workbook itself says are stale. Only describe_workbook may use it, because it withholds samples instead of reporting them; import parseWorkbookGrid.",
+};
+
 export default tseslint.config(
   { ignores: ["dist/**", "coverage/**", "node_modules/**"] },
   ...tseslint.configs.recommended,
@@ -118,6 +140,29 @@ export default tseslint.config(
     ignores: ["src/domain/**", "tests/domain/reconcile/**"],
     rules: {
       "no-restricted-imports": ["error", { patterns: [RECONCILE_ENTRY_POINT_PATTERN] }],
+    },
+  },
+  // The unchecked grid's one permitted consumer, expressed as the files this
+  // block declines to cover. Everything else in src/, tests/ and scripts/ is
+  // matched by both this block and the one above; ESLint hands a file one set
+  // of options per rule and the later block wins outright, so this one has to
+  // carry the reconcile pattern as well or it would silently switch that rule
+  // off everywhere it applies. The workbook layer itself is exempt because
+  // xlsx.ts declares the function, and both exempt directories' tests are, for
+  // the same reason the engine's own unit tests may reach a stage: proving the
+  // unchecked door behaves as designed means opening it.
+  {
+    files: ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts"],
+    ignores: [
+      "src/domain/**",
+      "tests/domain/reconcile/**",
+      "src/workbook/**",
+      "tests/workbook/**",
+      "src/tools/describe/**",
+      "tests/tools/describe/**",
+    ],
+    rules: {
+      "no-restricted-imports": ["error", { patterns: [RECONCILE_ENTRY_POINT_PATTERN, RAW_WORKBOOK_GRID_PATTERN] }],
     },
   },
   {

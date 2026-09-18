@@ -131,7 +131,7 @@ path rather than a separate one.
 | Tool | Kind | Notes |
 |---|---|---|
 | `inventory_tree` | read | Full tree via delta and batch, not recursive per-folder walks |
-| `describe_workbook` | read | Proposes a workbook mapping for human review |
+| `describe_workbook` | read | No source: lists sheets and tables. One source: its header row and columns, no mapping proposed |
 | `reconcile_workbook_vs_repository` | read | The centerpiece. Expected versus actual, structured gap report |
 | `query_repository` | read | Operational questions served from the state index |
 | `validate_structure` | read | Per-client compliance against the profile taxonomy |
@@ -191,7 +191,7 @@ registry, so a tool added later inherits every check.
 
 ## Build Sequence
 
-The spec carries the full phase descriptions. Status as of 2026-09-17:
+The spec carries the full phase descriptions. Status as of 2026-09-18:
 
 1. **Foundation.** Complete and merged. Stateless transport, all ten tools registered as honest
    stubs behind the contract test, the pure profile schema, the two-layer write gate, and a
@@ -243,17 +243,31 @@ The spec carries the full phase descriptions. Status as of 2026-09-17:
    Table Storage and the workbook bytes reader have all been exercised live, and
    `reconcile_workbook_vs_repository` returned a report against a real library on 2026-09-17 once
    phase 2b-2 supplied the workbook snapshot.
-   **4b: the three index-served read tools.** Complete, covered by fakes only; see
-   `docs/OPEN-ITEMS.md` for what the unit tests cover and what the live sitting still owes.
+   **4b: the three index-served read tools. Complete and verified live on 2026-09-18.**
    `inventory_tree`, `query_repository` and `validate_structure` are wired onto the 4a execution
    layer. The tool contract widened so `inputSchema` can be a full Zod schema rather than a raw
    shape, which is what lets a future refinement be expressed; `StateStore` gained one read
    method, `getScannedDrives`; and a pure taxonomy conformance matcher was added at
-   `src/domain/structure/conform.ts`. No call this phase's own code makes has run against a tenant.
-   **4c: `describe_workbook`** is the one read tool still unwired. It is deferred because it needs
-   worksheet, table, header-row and column-type inference that exists nowhere in this codebase
-   yet, and because its current stub's `siteUrl` input promises reach the `Sites.Selected`
-   permission model forbids; 4c owns the correction. Then
+   `src/domain/structure/conform.ts`. All three tools ran against the live site through the MCP
+   transport: `inventory_tree` reproduced phase 2a's 4-request cold scan through the tool layer,
+   `query_repository` returned all three questions at zero Graph requests and refused before any
+   scan had run, and `validate_structure` matched the seeded tree. The sitting found a cap defect
+   no fixture could reach; `docs/OPEN-ITEMS.md` carries the dated record and what the sitting does
+   not establish.
+   **4c: `describe_workbook`. Complete, covered by fakes only.** All five read tools are now
+   wired, which closes phase 4. `IW_SITE_URL` becomes required server configuration, replacing
+   the stub's `siteUrl` input, which promised a reach the `Sites.Selected` permission model could
+   never honor; the profile registry now refuses at startup a profile whose `identity.siteUrl`
+   disagrees with the granted site, instead of that mismatch surfacing later as a 403. Two pure
+   modules carry the new logic: `src/workbook/introspect.ts` enumerates a workbook's worksheets
+   and tables without building a grid, surfacing one it cannot resolve rather than dropping or
+   zeroing it, and `src/workbook/describe.ts` detects a header row, declining when two candidates
+   are equally plausible, and describes a range's columns with inferred types and bounded
+   samples. It proposes no `columns` mapping and infers no `date` type, both deliberate, and
+   withholds every sample for a source when the workbook is `fullCalcOnLoad` over a range holding
+   a formula. No call this phase's own code makes has run against a tenant; see
+   `docs/OPEN-ITEMS.md` for what the unit tests cover and the live sitting this phase still owes
+   before merge. Phase 4 is complete pending that sitting. Then
    **hosting**, then
    **write tools**, then **Copilot Studio integration and governance**, then the **evaluation
    suite**, whose questions are already written in `docs/EVALUATION-QUESTIONS.md`. They exist

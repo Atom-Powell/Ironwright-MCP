@@ -41,7 +41,13 @@ describe("reconcile_workbook_vs_repository over the wire", () => {
 
     const output = shapeReport(
       loadExpectedReport(),
-      { scanMode: "full", resynced: false, graphRequestsByThisCall: 2, scanSharedWithConcurrentCall: false },
+      {
+        scanMode: "full",
+        resynced: false,
+        graphRequestsByThisCall: 2,
+        scanSharedWithConcurrentCall: false,
+        workbookReadGraphRequestsByThisCall: 3,
+      },
       {},
     );
 
@@ -83,7 +89,10 @@ describe("reconcile_workbook_vs_repository over the wire", () => {
         }));
 
     const context = createFakeToolContext({
-      profiles: createProfileRegistry([{ source: "fixture-profile.json", contents: profile }]),
+      profiles: createProfileRegistry(
+        [{ source: "fixture-profile.json", contents: profile }],
+        "https://contoso.sharepoint.com/sites/SyntheticCompliance",
+      ),
       scans,
       // Matches GOLDEN_AS_OF so the resolved window lines up with the fixture
       // workbook and repository, which were built for that reference month.

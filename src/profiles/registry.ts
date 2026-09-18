@@ -50,6 +50,23 @@ export interface ProfileEntry {
   contents: unknown;
 }
 
+/**
+ * Compares two site URLs the way an operator means them, not the way a
+ * literal string comparison would. A trailing slash and a difference in case
+ * are both ordinary: an operator pastes a site URL from a browser address bar,
+ * and neither of those differences names a different site, so both are
+ * normalized away before comparing.
+ *
+ * Nothing beyond that is normalized. A different path segment, a different
+ * host, or a different scheme is left significant, because each of those can
+ * be a genuinely different site, and folding any of them away would let a
+ * misconfigured profile pass this check instead of being caught by it.
+ */
+function sameSite(a: string, b: string): boolean {
+  const normalize = (value: string): string => value.trim().replace(/\/+$/, "").toLowerCase();
+  return normalize(a) === normalize(b);
+}
+
 export interface ProfileRegistry {
   /** Throws `UnknownProfileError` rather than returning undefined: every caller has to report the same thing. */
   get(profileId: string): Profile;
@@ -65,8 +82,16 @@ export interface ProfileRegistry {
  * file name is not the identity: the report carries `profileId` from the
  * profile itself, so a registry keyed on the file name could answer a call for
  * one profile with a report labeled another.
+ *
+ * `grantedSiteUrl` is required rather than optional for the same reason it is
+ * required in `loadGrantedSiteUrl`: a registry that skipped the check when the
+ * value was absent would let a misconfigured deployment start clean and fail
+ * later as an unexplained 403. Every profile is checked against it, and a
+ * mismatch is reported as one more issue alongside a validation failure,
+ * because startup already fails loudly on those and a second failure path
+ * would be a second thing an operator has to learn.
  */
-export function createProfileRegistry(entries: readonly ProfileEntry[]): ProfileRegistry {
+export function createProfileRegistry(entries: readonly ProfileEntry[], grantedSiteUrl: string): ProfileRegistry {
   const issues: string[] = [];
   const byId = new Map<string, { profile: Profile; source: string }>();
 
@@ -85,6 +110,15 @@ export function createProfileRegistry(entries: readonly ProfileEntry[]): Profile
       issues.push(
         `${entry.source} and ${held.source} both declare profileId "${profile.profileId}". ` +
           "A profile id names one deployment target, so which of the two a call would reach is undecidable.",
+      );
+      continue;
+    }
+
+    if (!sameSite(profile.identity.siteUrl, grantedSiteUrl)) {
+      issues.push(
+        `${entry.source}: profile "${profile.profileId}" names site ${profile.identity.siteUrl}, but this ` +
+          `server's Sites.Selected grant covers ${grantedSiteUrl}. A profile pointed at a site the grant does ` +
+          "not cover would fail as a 403 on its first Graph call rather than at startup.",
       );
       continue;
     }
@@ -123,7 +157,7 @@ export function createProfileRegistry(entries: readonly ProfileEntry[]): Profile
  * to tell which of several profiles produced it, and the same reasoning already
  * put this wrapper around the scan command's own profile read.
  */
-export async function loadProfileDirectory(dir: string): Promise<ProfileRegistry> {
+export async function loadProfileDirectory(dir: string, grantedSiteUrl: string): Promise<ProfileRegistry> {
   let names: string[];
   try {
     names = await readdir(dir);
@@ -151,5 +185,5 @@ export async function loadProfileDirectory(dir: string): Promise<ProfileRegistry
     }
   }
 
-  return createProfileRegistry(entries);
+  return createProfileRegistry(entries, grantedSiteUrl);
 }

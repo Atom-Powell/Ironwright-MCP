@@ -17,7 +17,15 @@ export interface FailureSubject {
    * correct on its own, wrong about what the program actually did.
    */
   tool: string;
-  profileId: string;
+  /**
+   * Optional because describe_workbook has none: it is the one tool a human
+   * runs before a profile exists, so it names a library and a workbookPath
+   * directly rather than through profile configuration. Every branch below
+   * that would otherwise interpolate this field carries its own undefined
+   * case, so a message never names a profile that does not exist, which
+   * would read as `profile ""`, the defect this project is named for.
+   */
+  profileId?: string;
   siteUrl?: string;
   library?: string;
 }
@@ -38,10 +46,22 @@ export function describeToolFailure(error: unknown, subject: FailureSubject): st
   }
 
   if (error instanceof LibraryNotFoundError) {
+    const library = subject.library ?? error.library;
+    // Four branches rather than two: profileId and siteUrl are independent
+    // unknowns for this mapper now that describe_workbook can supply a
+    // siteUrl (the granted site) with no profileId at all. Collapsing this
+    // to a single ternary on profileId alone would silently interpolate
+    // `undefined` into `subject.siteUrl` for a caller that somehow has
+    // neither, which is exactly the substitution this function exists to
+    // refuse.
     const where =
-      subject.siteUrl === undefined
-        ? `Profile "${subject.profileId}" is what names the library.`
-        : `The profile "${subject.profileId}" names site ${subject.siteUrl} and library "${subject.library ?? error.library}".`;
+      subject.profileId === undefined
+        ? subject.siteUrl === undefined
+          ? "This call's own arguments are what name the library; no profile is involved."
+          : `This call named site ${subject.siteUrl} and library "${library}" directly, not through a profile.`
+        : subject.siteUrl === undefined
+          ? `Profile "${subject.profileId}" is what names the library.`
+          : `The profile "${subject.profileId}" names site ${subject.siteUrl} and library "${library}".`;
     return `${error.message} ${where}`;
   }
 
@@ -50,33 +70,44 @@ export function describeToolFailure(error: unknown, subject: FailureSubject): st
     // against the sheet it read, and has its own tests; rewording it here
     // would produce a second, worse description of the same thing. The
     // attribution is a separate sentence for that reason.
-    return `${error.message} This came from the workbook mapping in profile "${subject.profileId}".`;
+    const attribution =
+      subject.profileId === undefined
+        ? "This came from the source named in this call's own arguments, not from a profile."
+        : `This came from the workbook mapping in profile "${subject.profileId}".`;
+    return `${error.message} ${attribution}`;
   }
 
   if (error instanceof WorkbookFileError) {
     // The opposite attribution from the mapping case above, and just as
-    // load bearing: this profile's own workbookPath and workbookMapping
-    // could both be exactly right and this failure would still happen,
-    // because it is the downloaded archive itself that cannot be trusted.
-    // Sending an operator to edit a profile that is not wrong wastes the
-    // one thing this message can usefully spend, which is where to look.
-    return `${error.message} This is about the workbook file itself, not about how profile "${subject.profileId}" is configured.`;
+    // load bearing: a profile's own workbookPath and workbookMapping, or a
+    // direct call's own arguments, could both be exactly right and this
+    // failure would still happen, because it is the downloaded archive
+    // itself that cannot be trusted. Sending an operator to edit
+    // configuration that is not wrong wastes the one thing this message can
+    // usefully spend, which is where to look.
+    const attribution =
+      subject.profileId === undefined
+        ? "This is about the workbook file itself, not about anything this call's own arguments named."
+        : `This is about the workbook file itself, not about how profile "${subject.profileId}" is configured.`;
+    return `${error.message} ${attribution}`;
   }
 
   if (error instanceof WorkbookUnreadableError) {
     // Neither of the two attributions above fits here, and asserting either
     // would assert something this server never observed: it only knows the
     // downloaded bytes did not open as a workbook, not whether that is
-    // because profile "X"'s workbookPath names the wrong file or because the
-    // download arrived damaged. So this names both possibilities rather than
-    // picking one, and gives the operator the one thing that tells them
-    // apart: the profile's workbookPath is a real path, and opening the file
-    // it names is what a mapping problem and a damaged download cannot both
-    // survive.
+    // because a workbookPath names the wrong file or because the download
+    // arrived damaged. So this names both possibilities rather than picking
+    // one, and gives the operator the one thing that tells them apart: the
+    // workbookPath is a real path, and opening the file it names is what a
+    // mapping problem and a damaged download cannot both survive.
+    const wrongFile =
+      subject.profileId === undefined
+        ? "this call's own workbookPath argument naming a file that was never a workbook"
+        : `profile "${subject.profileId}"'s workbookPath naming a file that was never a workbook`;
     return (
-      `${error.message} This could be profile "${subject.profileId}"'s workbookPath naming a file that was ` +
-      "never a workbook, or it could be a workbook download that was truncated or corrupted in transit. Open " +
-      "the file at that path to see which."
+      `${error.message} This could be ${wrongFile}, or it could be a workbook download that was truncated or ` +
+      "corrupted in transit. Open the file at that path to see which."
     );
   }
 
@@ -88,10 +119,10 @@ export function describeToolFailure(error: unknown, subject: FailureSubject): st
   }
 
   if (error instanceof GraphRequestError) {
+    const forWhom = subject.profileId === undefined ? subject.tool : `${subject.tool} for profile "${subject.profileId}"`;
     return (
       `Microsoft Graph refused ${error.method} ${error.path} with ${error.status}` +
-      `${error.code === undefined ? "" : ` (${error.code})`}, while serving ${subject.tool} for profile ` +
-      `"${subject.profileId}". ` +
+      `${error.code === undefined ? "" : ` (${error.code})`}, while serving ${forWhom}. ` +
       "The full Graph response was written to the server log. This server does not infer a cause from the status."
     );
   }

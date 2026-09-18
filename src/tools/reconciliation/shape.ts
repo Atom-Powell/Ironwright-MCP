@@ -7,7 +7,7 @@ import type {
   RejectedWorkbookRow,
 } from "../../domain/reconcile/index.js";
 import type { ScanResult } from "../../scan/run.js";
-import { MAX_ARTIFACT_FINDINGS, type ReconcileToolOutput, type ScanProvenance } from "./output.js";
+import { MAX_ARTIFACT_FINDINGS, type CallProvenance, type ReconcileToolOutput, type ScanProvenance } from "./output.js";
 
 export interface ShapeOptions {
   /** Absent means every client. */
@@ -68,7 +68,7 @@ function compareStrings(a: string, b: string): number {
  */
 export function shapeReport(
   report: ReconciliationReport,
-  provenance: ScanProvenance,
+  provenance: CallProvenance,
   options: ShapeOptions,
 ): ReconcileToolOutput {
   const filter = options.clients === undefined ? undefined : new Set(options.clients);

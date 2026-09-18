@@ -446,6 +446,15 @@ healthy and then fail the first request it receives.
   application's own client-credentials identity, the same three values the normal setup run above
   prints as `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and `AZURE_CLIENT_SECRET`, and the same three
   `npm run scan` already reads under their `IW_` names, described below.
+- `IW_SITE_URL` is required. It is the same `--site` value you passed to the normal setup run
+  above, not one of the four values that run prints, since a site URL is not a secret and setup
+  already had it as an input rather than an output. The server checks every profile's
+  `identity.siteUrl` against this value at startup and refuses to start if any profile names a
+  different site, rather than letting that mismatch surface later as a 403 on the profile's first
+  Graph call, a failure this server has already been corrected once for being misleading about.
+  `describe_workbook` also reads it directly, since that tool runs before any profile exists and
+  has no other way to know which site it may reach. Phase 5 hosting must set this in the
+  deployment definition or the server will not start.
 - `IW_TABLE_CONNECTION_STRING` is required for anything but a local run. Without it the server
   falls back to an in-memory state store, the same fallback `npm run scan` uses: nothing persists
   across a restart, and every tool call that triggers a scan performs a full enumeration rather

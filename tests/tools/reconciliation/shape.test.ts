@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { loadExpectedReport } from "../../domain/reconcile/fixtures/load.js";
 import { scanProvenance, shapeReport } from "../../../src/tools/reconciliation/shape.js";
-import type { ScanProvenance } from "../../../src/tools/reconciliation/output.js";
+import type { CallProvenance } from "../../../src/tools/reconciliation/output.js";
 import type { ScanResult } from "../../../src/scan/run.js";
 
-const PROVENANCE: ScanProvenance = {
+const PROVENANCE: CallProvenance = {
   scanMode: "incremental",
   resynced: false,
   graphRequestsByThisCall: 4,
   scanSharedWithConcurrentCall: false,
+  workbookReadGraphRequestsByThisCall: 2,
 };
 
 function scanResult(overrides: Partial<ScanResult> = {}): ScanResult {

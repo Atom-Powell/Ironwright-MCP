@@ -1,7 +1,7 @@
 import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { buildServer } from "../mcp/build-server.js";
-import { loadGraphCredentials, loadStoreConnectionString } from "../config.js";
+import { loadGraphCredentials, loadGrantedSiteUrl, loadStoreConnectionString } from "../config.js";
 import { loadProfileDirectory } from "../profiles/registry.js";
 import { createGraphClient } from "../graph/client.js";
 import { clientCredentialsTokenProvider } from "../graph/token.js";
@@ -14,11 +14,12 @@ import type { ToolContext } from "../tools/context.js";
 async function main(): Promise<void> {
   const config = loadConfig(process.env);
   const credentials = loadGraphCredentials(process.env);
+  const grantedSiteUrl = loadGrantedSiteUrl(process.env);
   const connectionString = loadStoreConnectionString(process.env);
 
   // Everything that can fail on configuration fails here, before the port is
   // bound, so a container that cannot answer a call never reports itself healthy.
-  const profiles = await loadProfileDirectory(config.profileDir);
+  const profiles = await loadProfileDirectory(config.profileDir, grantedSiteUrl);
 
   let store: StateStore;
   let storeKind: "azure-table" | "in-memory";
@@ -42,6 +43,7 @@ async function main(): Promise<void> {
     store,
     scans: createScanCoordinator({ client: graph, store, now }),
     now,
+    grantedSiteUrl,
   };
 
   const app = createApp({
@@ -67,7 +69,7 @@ async function main(): Promise<void> {
     if (!server.listening) return;
 
     console.log(
-      `listening on port ${config.port}, writes ${config.allowWrites ? "enabled" : "disabled"}, ` +
+      `listening on port ${config.port}, site ${grantedSiteUrl}, writes ${config.allowWrites ? "enabled" : "disabled"}, ` +
         `${profileCount} ${profileCount === 1 ? "profile" : "profiles"} from ${config.profileDir}, ` +
         `${storeKind} store`,
     );
