@@ -43,6 +43,7 @@ async function main(): Promise<void> {
     store,
     scans: createScanCoordinator({ client: graph, store, now }),
     now,
+    grantedSiteUrl,
   };
 
   const app = createApp({

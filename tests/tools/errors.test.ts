@@ -135,4 +135,62 @@ describe("describeToolFailure", () => {
   it("reports a thrown non-error without crashing on it", () => {
     expect(describeToolFailure("not an error object", SUBJECT)).toContain("not an error object");
   });
+
+  describe("with no profileId, the shape describe_workbook is the first tool to hit", () => {
+    const NO_PROFILE_SUBJECT = { tool: "describe_workbook", siteUrl: "https://contoso.sharepoint.com/sites/Example", library: "Documents" };
+
+    it("names this call's own site and library rather than a profile when the library will not resolve", () => {
+      const message = describeToolFailure(new LibraryNotFoundError("Documents", ["Trackers"], 1), NO_PROFILE_SUBJECT);
+
+      expect(message).toContain("This call named site https://contoso.sharepoint.com/sites/Example and library \"Documents\" directly, not through a profile.");
+      expect(message).not.toContain("profile \"undefined\"");
+      expect(message).not.toContain("Profile \"");
+    });
+
+    it("names neither a site nor a profile when the failure came before either was known", () => {
+      const message = describeToolFailure(new LibraryNotFoundError("Documents", ["Trackers"], 1), { tool: "describe_workbook" });
+
+      expect(message).toContain("This call's own arguments are what name the library; no profile is involved.");
+      expect(message).not.toContain("undefined");
+    });
+
+    it("attributes a workbook mapping failure to this call's own arguments rather than a profile", () => {
+      const original = 'No table named "Nope" was found in the workbook.';
+
+      const message = describeToolFailure(new WorkbookMappingError(original), NO_PROFILE_SUBJECT);
+
+      expect(message).toContain(original);
+      expect(message).toContain("This came from the source named in this call's own arguments, not from a profile.");
+      expect(message).not.toContain("profile \"undefined\"");
+    });
+
+    it("attributes a workbook file failure to the file itself, naming no profile", () => {
+      const original = "The workbook archive has no xl/_rels/workbook.xml.rels.";
+
+      const message = describeToolFailure(new WorkbookFileError(original), NO_PROFILE_SUBJECT);
+
+      expect(message).toContain(original);
+      expect(message).toContain("This is about the workbook file itself, not about anything this call's own arguments named.");
+      expect(message).not.toContain("profile \"undefined\"");
+    });
+
+    it("names this call's own workbookPath argument, not a profile's, for an unreadable workbook", () => {
+      const original = "The downloaded file is not a zip archive, so it is not an xlsx workbook.";
+
+      const message = describeToolFailure(new WorkbookUnreadableError(original), NO_PROFILE_SUBJECT);
+
+      expect(message).toContain(original);
+      expect(message).toContain("this call's own workbookPath argument naming a file that was never a workbook");
+      expect(message).not.toContain("profile \"undefined\"");
+    });
+
+    it("names the tool alone, with no dangling profile attribution, for a Graph failure", () => {
+      const error = new GraphRequestError({ method: "GET", path: "/drives/drive-1/root/content", status: 403, body: "{}" });
+
+      const message = describeToolFailure(error, NO_PROFILE_SUBJECT);
+
+      expect(message).toContain("while serving describe_workbook.");
+      expect(message).not.toContain("for profile");
+    });
+  });
 });
