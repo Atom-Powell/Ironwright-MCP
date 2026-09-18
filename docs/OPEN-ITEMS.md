@@ -1447,5 +1447,76 @@ library: call `inventory_tree` with and without a `subPath` and confirm the tota
 seeder's own counts; call `query_repository` three times and confirm zero Graph requests on each
 and a failure before any scan has run; call `validate_structure` with and without `clients` and
 confirm the verdicts match what the seeded tree actually contains, including a named client that
-does not exist. None of these three checks has been run. This section will carry a dated update,
-in the same form as every other live sitting in this file, once they have.
+does not exist. **All three checks ran on 2026-09-18; the dated record follows below.**
+
+## The phase 4b live tenant sitting, 2026-09-18
+
+All three checks ran against the live site, through the MCP transport and a per-request
+`McpServer` rather than by calling handlers directly, so the sitting exercised the same path a
+Copilot Studio connection would. The store was emptied first, which is what let the
+never-scanned check be genuine rather than arranged.
+
+**`query_repository` refuses before any scan has run.** Against a profile with no stored
+inventory it returned `isError` with "Profile "synthetic" has no stored inventory to query yet.
+Run inventory_tree or reconcile_workbook_vs_repository first, either of which populates the
+index this tool reads from." It did not return zero findings. That distinction is the reason
+the failure exists: zero findings and no evidence are different answers.
+
+**`inventory_tree` reproduced phase 2a's measurement through the tool.** A cold call returned
+144 files and 122 folders in **4 Graph requests**; every later call cost **3**. Those are the
+numbers the CLI produced on 2026-09-16, now measured through the tool layer.
+
+**The sub-path filter holds on live data, including the trap.** `2026` returned 142 files and
+121 folders, `2026/Client01` returned 11 files and 10 folders, and `2026/Client0` returned
+**nothing at all**. The last one is the check that mattered: a prefix comparison would have
+matched every client from Client01 to Client13 and returned almost the whole library. This
+repository has shipped that defect twice under other names, and the segment-boundary test is
+now confirmed against a real tree rather than against fixtures that agree with it by
+construction.
+
+**`query_repository` costs nothing, measured rather than claimed.** All three questions
+returned `graphRequests: 0` against a populated index. This is the phase's headline claim and
+the thing evaluation question 8 exists to measure.
+
+**`validate_structure` matched the tree.** With no `clients` argument it evaluated the 12 client
+folders present and found all 12 compliant, in 3 Graph requests. With
+`["Client01","Client02","NoSuchClient"]` it returned 2 compliant and 1 missing, naming
+`NoSuchClient`. `missing` appeared only for the client the caller named, which is the rule the
+tool is built on.
+
+**The counts cross-check.** 144 files in the library, 142 under `2026/`, and exactly 2 naming
+violations. The two violations are the two files outside any client folder, which is why every
+client folder is compliant while the violations are real. Three tools agreeing on the same tree
+from three different directions is worth more than any one of them agreeing with a fixture.
+
+### The sitting found a defect the suite could not
+
+`recent_reports` applied `RECENT_REPORTS_LIMIT` inside its own answerer, before the shaping layer
+computed totals. Against this library it reported:
+
+    Found 50 findings for this question.
+    Listing every finding counted above, 50 in all.
+    listing: {"returned":50,"omitted":0,"cap":200,"truncated":false}
+
+Roughly 92 parsing files had been dropped by a cap the response never mentioned, and the listing
+declared nothing omitted. That is this phase's own binding rule broken, the one requiring totals
+over the complete set before truncation and an omission always stated, and it is the project's
+named defect: a message correct on its own and wrong about what the program did.
+
+No fixture could have caught it. Every test fixture in the suite has fewer parsing files than the
+cap, so the cap never engaged in a test. It took a library with 142 of them.
+
+Fixed before merge. The same call now reports 142 findings, lists 50, states that 92 were left
+out, names the cap that actually applied as 50 rather than the 200 that did not, and says plainly
+that this tool takes no argument that would return the rest. The two other questions were checked
+and were already honest, because neither slices.
+
+### What this sitting does not establish
+
+One site, one library, one profile, 144 files. It says nothing about a library large enough to
+exceed `MAX_INVENTORY_ITEMS`, about a client with more non-conforming files than
+`MAX_CLIENT_DETAIL`, about a taxonomy other than this one, or about behavior under concurrency
+against real storage. The concurrency guard added for the branch review's Critical is covered by
+a deterministic test against the real coordinator and the real in-memory store; it has not been
+exercised against Azure Table Storage with two callers racing, and the cross-replica window
+remains open by design and is recorded above.
