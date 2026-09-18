@@ -24,10 +24,17 @@ from phase 3. What 4b adds is contracts, composition, output shaping and operato
 Out of scope, explicitly:
 
 - Workbook mapping inference of any kind.
-- Persisting reconciliation reports, or any new `StateStore` method.
+- Persisting reconciliation reports, or any new stored entity.
 - Pagination or continuation cursors.
 - New profile configuration fields.
 - Any write capability.
+
+**Amended 2026-09-17, while the implementation plan was being written.** This section originally
+excluded any new `StateStore` method. Writing the plan proved that exclusion incompatible with
+`query_repository`'s zero-request promise, which the same spec makes and which evaluation question 8
+measures. `listInventory` takes a `driveId`, and the only way to obtain one was `resolveDrive`, which
+calls Graph. One read method is therefore added, described under `query_repository` below. Nothing
+new is stored: it reads a partition the store already writes.
 
 ## The tool contract change
 
@@ -94,6 +101,16 @@ handler validates its own input with its own schema, per the contract in `src/to
 
 **Failures map through `src/tools/errors.ts`.** No tool introduces its own error-to-message mapping.
 
+**One correction inside that mapper, found 2026-09-17 while the plan was being written.**
+`describeToolFailure` currently ends its `GraphRequestError` message with "while reconciling profile
+X". It is shared by every tool, so the moment `inventory_tree` uses it, an operator reading a failure
+from an inventory call is told the server was reconciling, which it was not. That is precisely the
+defect class this project produced nine times in phase 1 and wrote a practice to stop: a message
+correct on its own and wrong about what the program actually did. `FailureSubject` therefore gains a
+required `tool: string`, set to the tool's own registered name, and the message names it. Every
+existing call site and its tests update in the same task, and the reconcile message keeps meaning
+what it means today because `reconcile_workbook_vs_repository` is what it will now name.
+
 ## `inventory_tree`
 
 **Input.** `profileId` (required), `subPath` (optional, library-relative, no leading slash).
@@ -140,8 +157,24 @@ Decision Record makes `reconcile` the single public entry for exactly that reaso
 stay where the evidence for them is. The tool's description is rewritten to match, and this is a
 deliberate narrowing of a published contract rather than an oversight.
 
-**Behavior.** Reads the stored inventory through `StateStore.listInventory` and answers from it.
-Makes no Graph call under any input.
+**Finding the drive without a Graph call.** `StateStore` gains one read method:
+
+```
+getScannedDrives(profileId: string): Promise<Array<{ driveId: string, lastScanAt: string }>>
+```
+
+Both implementations already hold the answer. The Table implementation's `deltaLinks` table is
+partitioned by `profileId` with the drive id as the row key and also stored on the entity, so this is
+a single-partition query and nothing new is persisted. The in-memory implementation reads its own
+map. A profile names one library, so the normal result has exactly one entry; when it has more, which
+means a profile was repointed at a different library after a scan, the most recently scanned entry
+wins and the response names the drive it used, because silently mixing two libraries' inventories
+would be worse than either choice.
+
+**Behavior.** Calls `getScannedDrives`, reads the stored inventory for the resolved drive through
+`StateStore.listInventory`, converts those records with the existing `assembleSnapshot` from
+`src/scan/snapshot.ts`, and answers from the resulting `RepositorySnapshot`. Makes no Graph call
+under any input.
 
 Each answer reuses the existing pure domain function rather than reimplementing its rule:
 
@@ -158,8 +191,8 @@ That rule exists so two tools cannot disagree about a compliance verdict; sharin
 Neither module gains a new public entry point into the engine, and neither is re-exported from
 `src/domain/reconcile/index.ts`.
 
-**No snapshot is a failure, not an empty answer.** If the drive has never been scanned,
-`StateStore.getLastScanAt` returns undefined and the tool fails with a message naming
+**No snapshot is a failure, not an empty answer.** If the profile has never been scanned,
+`getScannedDrives` returns an empty array and the tool fails with a message naming
 `inventory_tree` and `reconcile_workbook_vs_repository` as the two ways to populate the index. It
 does not return zero findings, because zero findings and no evidence are different answers and
 reporting the second as the first is the exact substitution this project treats as its most
@@ -193,12 +226,25 @@ named in `clients`, or every client folder present in the library when the argum
 each client it checks the profile's folder taxonomy and its filename standard, and returns a verdict
 with the specific folders and files responsible for it.
 
+**It checks conformance, not completeness. Decided 2026-09-17 while the implementation plan was
+being written, replacing an earlier definition that could not be implemented.** The earlier text said
+a compliant client has "every taxonomy folder the profile requires." Which folders a client requires
+is not knowable here: a taxonomy segment can carry a `{deliverable}` placeholder, and which
+deliverables a client owes is a workbook field this tool deliberately does not read. Rendering every
+deliverable in the profile for every client would report clients non-compliant for folders they never
+owed, which is a confidently wrong verdict of exactly the kind this project treats as its most
+expensive failure.
+
+What is well defined without a workbook is whether everything present is shaped correctly. That is
+also the question evaluation question 7 asks, since a safe template source is one whose shape is
+right. Completeness stays with `reconcile`, which holds the workbook.
+
 **Verdicts.**
 
-- `compliant`: every taxonomy folder the profile requires is present, and every file under the
-  client parses against the filename standard.
-- `non_compliant`: the client folder exists and at least one required folder is absent or at least
-  one file does not parse.
+- `compliant`: every folder under the client matches some renderable taxonomy path, and every file
+  under the client parses against the filename standard.
+- `non_compliant`: the client folder exists and at least one folder under it matches no renderable
+  taxonomy path, or at least one file under it does not parse.
 - `missing`: the caller named this client explicitly and no folder for it exists.
 
 `missing` is reachable only through an explicit `clients` argument. With the argument omitted the
@@ -218,9 +264,9 @@ scannedAt: string
 clients: Array<{
   client: string
   verdict: "compliant" | "non_compliant" | "missing"
-  missingFolders: string[]
+  nonConformingFolders: string[]
   nonConformingFiles: Array<{ path: string, reason: string }>
-  detail: { missingFoldersOmitted: number, nonConformingFilesOmitted: number }
+  detail: { nonConformingFoldersOmitted: number, nonConformingFilesOmitted: number }
 }>
 totals: { compliant: number, nonCompliant: number, missing: number }
 listing: { returned: number, omitted: number, cap: number, truncated: boolean }
