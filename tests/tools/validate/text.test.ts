@@ -13,22 +13,32 @@ function client(overrides: Partial<ClientValidation> & { client: string }): Clie
   };
 }
 
-// Every figure below is distinct from every other, matching queryText's and
-// inventoryText's own fixture discipline: if a sentence's formatter ever
-// swapped which value fills which slot, two equal fixture values would let
-// that swap through unnoticed because the rendered sentence would read the
-// same either way.
+// Every figure in `totals` is distinct from every other: clients=6,
+// compliant=1, nonCompliant=2, missing=3, matching queryText's and
+// inventoryText's own fixture discipline. If the counts-by-verdict sentence
+// ever transposed which total fills which slot, a fixture where three of the
+// four figures were the same number (an earlier version of this file used
+// 3/1/1/1) would let that swap through unnoticed, because the rendered
+// sentence would read the same either way. The four are also kept internally
+// honest rather than merely distinct: compliant + nonCompliant + missing
+// equals clients, and `clients` below lists exactly one compliant, two
+// non-compliant and three missing entries, matching those counts, because
+// `listing.truncated` is false here and a non-truncated listing must show
+// every evaluated client.
 const base: ValidateStructureOutput = {
   profileId: "example",
   library: "Compliance Reports",
   scannedAt: "2026-09-17T00:00:00.000Z",
-  totals: { clients: 3, compliant: 1, nonCompliant: 1, missing: 1 },
+  totals: { clients: 6, compliant: 1, nonCompliant: 2, missing: 3 },
   clients: [
     client({ client: "CLIENTA", verdict: "compliant" }),
     client({ client: "CLIENTB", verdict: "non_compliant", nonConformingFolders: ["2026/CLIENTB/Sept"] }),
     client({ client: "CLIENTC", verdict: "missing" }),
+    client({ client: "CLIENTD", verdict: "non_compliant", nonConformingFolders: ["2026/CLIENTD/Sept"] }),
+    client({ client: "CLIENTE", verdict: "missing" }),
+    client({ client: "CLIENTF", verdict: "missing" }),
   ],
-  listing: { returned: 3, omitted: 0, cap: 50, truncated: false },
+  listing: { returned: 6, omitted: 0, cap: 50, truncated: false },
   graphRequests: 4,
 };
 
@@ -38,7 +48,7 @@ describe("validateStructureText", () => {
 
     expect(lines[0]).toBe(
       'Profile "example", library "Compliance Reports", as of scan 2026-09-17T00:00:00.000Z: ' +
-        "3 clients evaluated, 1 compliant, 1 non-compliant, 1 missing.",
+        "6 clients evaluated, 1 compliant, 2 non-compliant, 3 missing.",
     );
   });
 
@@ -56,7 +66,10 @@ describe("validateStructureText", () => {
   it("names every listed client that is not compliant, with its own verdict", () => {
     const lines = validateStructureText(base);
 
-    expect(lines[1]).toBe("Not compliant: CLIENTB (non_compliant), CLIENTC (missing).");
+    expect(lines[1]).toBe(
+      "Not compliant: CLIENTB (non_compliant), CLIENTC (missing), CLIENTD (non_compliant), CLIENTE (missing), " +
+        "CLIENTF (missing).",
+    );
   });
 
   it("states plainly that no listed client is non-compliant or missing when every one is compliant", () => {

@@ -10,8 +10,8 @@ export const validateStructure: ToolDefinition = {
   title: "Validate client folder structure",
   description: [
     "Check one or more clients against the profile's folder taxonomy and filename standard, returning compliant, non-compliant, or missing along with the specific folders and files responsible for the verdict.",
-    "It reports whether what exists is shaped correctly, not whether everything that should exist is present; use reconcile_workbook_vs_repository for that, because only the workbook says what is owed.",
     "Use this to confirm a client is a safe template source before replicating its structure elsewhere.",
+    "It reports whether what exists is shaped correctly, not whether everything that should exist is present; use reconcile_workbook_vs_repository for that, because only the workbook says what is owed.",
     SAFETY_SENTENCES.read,
   ].join(" "),
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
