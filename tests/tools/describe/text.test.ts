@@ -38,7 +38,12 @@ describe("describeWorkbookText, inventory mode", () => {
   it("states cleanly resolved wiring as its own sentence when nothing is unresolved", () => {
     const lines = describeWorkbookText(INVENTORY_WHOLE);
 
-    expect(lines[1]).toBe("Every worksheet and table this workbook declares resolved cleanly; none is reported as unresolved.");
+    // "this tool tracked", not "this workbook declares": findTables in
+    // xlsx.ts can skip a table part (one with a ref but no name) before
+    // either the resolved counts or unresolved ever see it, so this sentence
+    // must not claim totality against the workbook's own declared set. See
+    // the regression in tests/tools/describe/run.test.ts.
+    expect(lines[1]).toBe("Every worksheet and table this tool tracked resolved cleanly; none is reported as unresolved.");
   });
 
   it("states plainly that no source was named and what to do next", () => {

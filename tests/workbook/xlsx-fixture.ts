@@ -76,6 +76,14 @@ export interface TableSpec {
    * all, which OOXML defines as "1", a header row present.
    */
   headerRowCount?: string;
+  /**
+   * Writes this table's root with a ref but no name attribute. A real
+   * workbook does not have this, but a truncated or hand-edited one can;
+   * findTables in xlsx.ts requires both name and ref to report a table part
+   * at all, so this is the one shape that reaches neither the resolved
+   * table list nor the unresolved list. See docs/OPEN-ITEMS.md.
+   */
+  omitName?: boolean;
 }
 
 export interface BuildWorkbookOptions {
@@ -160,10 +168,11 @@ export function buildWorkbook(options: BuildWorkbookOptions): Uint8Array {
 
     const tablePartName = `xl/tables/table${String(tableIndex)}.xml`;
     const headerRowCount = table.headerRowCount !== undefined ? ` headerRowCount="${table.headerRowCount}"` : "";
+    const nameAttribute = table.omitName === true ? "" : ` name="${table.name}" displayName="${table.name}"`;
     if (!omit.has(tablePartName)) {
       parts[tablePartName] = strToU8(
         '<?xml version="1.0"?><table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
-          `id="${String(tableIndex + 1)}" name="${table.name}" displayName="${table.name}" ref="${table.ref}"` +
+          `id="${String(tableIndex + 1)}"${nameAttribute} ref="${table.ref}"` +
           `${headerRowCount}></table>`,
       );
     }

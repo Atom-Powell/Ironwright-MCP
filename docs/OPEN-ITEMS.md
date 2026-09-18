@@ -1719,3 +1719,43 @@ described as never having run against a tenant, which stopped being true on 2026
 "Status as of" date above the build sequence was a day behind the work it described; and this
 file's phase 4c section overstated both what phase 4a and 4b had exercised live and what the
 introspection tests covered.
+
+### A table part with a ref but no name is invisible to `describe_workbook`, 2026-09-18
+
+Found the same day as the whole-branch fix wave above, by a reviewer who reproduced it against
+the tip. `findTables` in `src/workbook/xlsx.ts` requires both a `name` and a `ref` attribute
+before it reports a table part at all, so a table part carrying a `ref` but no `name` never
+becomes a `TableInfo`. `resolveTable`, `readWorkbookInventory` in `src/workbook/introspect.ts`,
+and `describe_workbook`'s inventory mode all call `findTables`, so such a table appears in none of
+their outputs: not in `tables`, not in `unresolved`. A workbook built with exactly this shape
+produced "1 worksheet and 0 tables resolved" alongside "Every worksheet and table this workbook
+declares resolved cleanly; none is reported as unresolved," which is false about the file.
+
+This is not fixed here. `findTables` is on the compliance path: `resolveTable` calls it, so a
+change to its return type reaches the range a profile's `workbookMapping` actually reads, which is
+a change with its own blast radius and its own review, not a rider on a prose fix. What is fixed
+here is the prose. The sentence above, the `sheets` and `tables` schema descriptions, and
+`describe_workbook`'s own static description all claimed to cover every worksheet and table "the
+workbook declares." None of them can back that claim while `findTables` can silently skip a table
+part, so all four now say what they actually cover: what this tool resolved, not what the workbook
+declares. `tests/workbook/introspect.test.ts` and `tests/tools/describe/run.test.ts` each pin the
+gap directly, with a fixture flag (`TableSpec.omitName`) that builds exactly this table shape.
+
+One piece of the reasoning above is worth correcting, since it argued the gap has nowhere to be
+reported. It does not follow that a nameless table has no identifier to report it under. The sheet
+path already handles the equivalent case: `listSheetEntries` reports a `<sheet>` entry with no
+name attribute under its position in the workbook's sheet list, which is the only identifier the
+file gives it. A table part is not even that badly off, since a table part has a part name
+(`xl/tables/table3.xml`, say), which is a stronger identifier than a bare position, having survived
+`readZipParts`'s own filter already. The real reason nothing here reports it is only that
+`findTables` never returns it, not that there is nothing to name it by.
+
+The likely shape of a real fix, so whoever takes it does not start from scratch: leave `findTables`
+alone and add a cheap, purely additive check next to its caller instead. `resolveWorkbookGrid` and
+`readWorkbookInventory` in `introspect.ts` both already hold the parts map that `readZipParts`
+returned, which includes every `xl/tables/*.xml` entry regardless of what its root tag declares.
+Counting those entries and comparing that count against what `findTables` actually returned would
+detect the gap without changing `findTables`'s return type or its callers' contract at all; the
+difference is exactly the table parts this residual can never resolve to a name, and each can be
+reported the same way an unnamed sheet already is, by its part path rather than by a name the file
+never gave it.

@@ -260,4 +260,22 @@ describe("readWorkbookInventory", () => {
       },
     ]);
   });
+
+  it("silently skips a table part that carries a ref but no name, the known residual gap in docs/OPEN-ITEMS.md", () => {
+    // findTables in xlsx.ts requires both name and ref before it reports a
+    // table part at all, so a part with only a ref never becomes a
+    // TableInfo, and this function has nothing to push onto either `tables`
+    // or `unresolved`. Pinned rather than fixed here: findTables is also the
+    // compliance path's own resolveTable lookup, and changing its return
+    // type is a separate change with its own blast radius.
+    const inventory = readWorkbookInventory(
+      buildWorkbook({
+        sheets: [{ name: "Tracking", rowsXml: "", dimension: "A1:E7" }],
+        tables: [{ name: "Ghost", ref: "A1:E7", sheetIndex: 0, omitName: true }],
+      }),
+    );
+
+    expect(inventory.tables).toEqual([]);
+    expect(inventory.unresolved).toEqual([]);
+  });
 });

@@ -58,9 +58,16 @@ function inventoryLines(output: DescribeToolOutput): string[] {
   // A reader must be able to tell "nothing was unresolved" apart from "this
   // response never checked", and only an explicit sentence in either
   // direction does that.
+  //
+  // "this tool tracked", not "this workbook declares": findTables in xlsx.ts
+  // skips a table part with a ref but no name before either sheetsTotal,
+  // tablesTotal or unresolved ever sees it, so a workbook can declare more
+  // than this tool tracked. Claiming totality against the workbook's own
+  // declared set would be false in exactly that shape; claiming it only
+  // against what this tool tracked is not. See docs/OPEN-ITEMS.md.
   lines.push(
     unresolved.length === 0
-      ? "Every worksheet and table this workbook declares resolved cleanly; none is reported as unresolved."
+      ? "Every worksheet and table this tool tracked resolved cleanly; none is reported as unresolved."
       : `${plural(unresolved.length, "sheet or table", "sheets or tables")} could not be resolved and would ` +
           `otherwise have been silently dropped from the counts above; each is reported rather than dropped: ` +
           `${unresolved.map((entry) => `${entry.kind} "${entry.name}" (${entry.reason})`).join("; ")}.`,

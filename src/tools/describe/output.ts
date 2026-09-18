@@ -124,8 +124,8 @@ export const DESCRIBE_OUTPUT_SCHEMA = {
     )
     .optional()
     .describe(
-      "Every worksheet the workbook declares, in the workbook's own sheet order. Present only in inventory " +
-        "mode. May be a prefix of the full set; see sheetsListing.",
+      "Every worksheet this tool resolved, in the workbook's own sheet order. Present only in inventory " +
+        "mode. May be a prefix of the full resolved set; see sheetsListing.",
     ),
   sheetsListing: z
     .object(LISTING_SHAPE)
@@ -144,8 +144,8 @@ export const DESCRIBE_OUTPUT_SCHEMA = {
     )
     .optional()
     .describe(
-      "Every table the workbook declares. Present only in inventory mode. May be a prefix of the full set; " +
-        "see tablesListing.",
+      "Every table this tool resolved. Present only in inventory mode. May be a prefix of the full resolved " +
+        "set; see tablesListing.",
     ),
   tablesListing: z
     .object(LISTING_SHAPE)

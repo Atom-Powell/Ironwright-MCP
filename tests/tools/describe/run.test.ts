@@ -264,6 +264,40 @@ describe("runDescribeWorkbook", () => {
     expect(context.graph.requests()).toBe(6);
   });
 
+  it("does not claim total resolution when a table part carries a ref but no name, which findTables silently skips", async () => {
+    // findTables in xlsx.ts requires both a name and a ref to report a table
+    // part at all; a part with only a ref reaches neither the resolved
+    // table list nor unresolved. That gap is recorded in
+    // docs/OPEN-ITEMS.md and is not fixed here, deliberately: findTables is
+    // on the compliance path too, and changing its return type is its own
+    // change. What this test pins is that the prose stops claiming
+    // otherwise: it must not say the workbook's whole declared set resolved
+    // when a table this tool never even tracked is missing from both lists.
+    const bytes = buildWorkbook({
+      sheets: [{ name: "Tracking", dimension: "A1:C5", rowsXml: "" }],
+      tables: [{ name: "Ghost", ref: "A1:C5", sheetIndex: 0, omitName: true }],
+    });
+
+    const context = createFakeToolContext({
+      graph: createFakeWorkbookGraphClient({ library: "Documents", workbooksByPath: { "Trackers/Ghost.xlsx": bytes } }),
+    });
+
+    const result = await runDescribeWorkbook({ library: "Documents", workbookPath: "Trackers/Ghost.xlsx" }, context);
+
+    expect(result.isError).toBeFalsy();
+    const output = result.structuredContent as unknown as DescribeToolOutput;
+    // The nameless table is genuinely invisible to this tool: neither
+    // resolved nor reported as unresolved. That is the known gap.
+    expect(output.tables).toEqual([]);
+    expect(output.unresolved).toEqual([]);
+
+    const text = firstText(result);
+    expect(text).toContain(
+      "Every worksheet and table this tool tracked resolved cleanly; none is reported as unresolved.",
+    );
+    expect(text).not.toContain("this workbook declares resolved cleanly");
+  });
+
   it("returns isError with a library failure naming this call's own arguments rather than a profile", async () => {
     const context = createFakeToolContext({
       graph: createFakeWorkbookGraphClient({ library: "Documents", workbooksByPath: {} }),

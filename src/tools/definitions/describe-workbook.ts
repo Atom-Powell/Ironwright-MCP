@@ -23,8 +23,9 @@ export const describeWorkbook: ToolDefinition = {
   title: "Describe a tracking workbook",
   description: [
     "Inspect a tracking workbook and report what it contains, so a profile's workbookMapping can be written " +
-      "from evidence. With no source argument it lists every worksheet and table with its bounds; with one it " +
-      "describes that range's header row and columns, including inferred types and a few sample values.",
+      "from evidence. With no source argument it lists every worksheet and table this tool could resolve, each " +
+      "with its bounds; with one it describes that range's header row and columns, including inferred types " +
+      "and a few sample values.",
     "It proposes a source and a header row only when those are unambiguous, and it never guesses which column " +
       "is the client, because those field names are yours and this tool has not seen your deliverables.",
     "Use this before a profile exists, or after a workbook's layout has changed. This tool does not change the " +
