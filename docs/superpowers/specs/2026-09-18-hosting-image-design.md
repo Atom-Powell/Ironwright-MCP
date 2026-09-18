@@ -48,7 +48,29 @@ same mistake wearing a tidier coat. 5b begins with the probe and designs around 
 5a therefore keeps the existing client-credentials path untouched, and the verification run uses
 the same secret-bearing environment every live sitting so far has used.
 
-## The image
+**Amended 2026-09-18, before implementation, after checking the machine rather than assuming it.**
+This phase was designed around producing and running a container image. The development machine has
+no container runtime: no Docker, no Podman, no WSL distribution. That was discovered while writing
+the implementation plan, which is late but still before a line of code.
+
+Writing a Dockerfile nobody can build and merging it is the same shape as phase 2b-1, which was
+designed, built, reviewed across six tasks and merged against an API nobody had called. This phase
+does not repeat that.
+
+So the image moves out. **5a is now the three changes that are verifiable here and are needed by any
+hosting approach**: separating the production compile from the development one, bounding the
+shutdown, and settling what health means. The Dockerfile and everything about images becomes its own
+slice, held until a runtime exists to build one.
+
+**The merge gate changes and does not weaken.** It was that the container answers all five read
+tools against the live tenant. It is now that the COMPILED PRODUCTION OUTPUT does, run as
+`node dist/server/main.js` from `npm run build:prod`. Every live sitting this project has ever run
+used `tsx` against TypeScript source. Nothing has ever exercised the compiled artifact, and the
+production compile is precisely where excluding the setup command could break something that source
+execution hides. That is a real gate against an artifact this project has genuinely never run.
+
+## The image, deferred to its own slice
+
 
 Multi-stage. The build stage installs everything and compiles; the runtime stage takes only
 production dependencies and `dist`.
