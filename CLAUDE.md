@@ -281,7 +281,12 @@ The spec carries the full phase descriptions. Status as of 2026-09-18:
 5. **Hosting.** Split into 5a and 5b at the Azure line, because everything past producing a
    deployable artifact needs an Azure subscription, real spending, and an operator at a keyboard
    for at least the first sign-in.
-   - **5a: the deployable server. Complete, pending the controller's live verification.**
+   - **5a: the deployable server. Complete and verified on 2026-09-18.** The compiled production
+     output answered all five read tools against the live tenant, every figure matching the phase 4b
+     and 4c sittings; this was the first time this project executed its compiled artifact at all,
+     every earlier sitting having run `tsx` against source. The shutdown deadline is NOT covered by
+     that run, because Windows does not deliver a POSIX SIGTERM; it is covered by tests and by a
+     probe against the compiled shutdown module. See `docs/OPEN-ITEMS.md`.
      Separates the production compile from the development one: `tsconfig.build.json` excludes
      `src/setup`, which issues per-site permission grants using a separate application holding
      `Sites.FullControl.All` and has no business inside a server image, and `npm run build:prod`

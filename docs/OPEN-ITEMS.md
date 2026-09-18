@@ -2076,3 +2076,79 @@ contention and needed an explicit, explained 60 second allowance before it held 
 those unit tests, this phase has no live evidence of its own. The compiled production output
 answering all five read tools against the live tenant, through `node dist/server/main.js` rather
 than `tsx`, is the verification the controller runs before merge, and it has not run yet.
+
+## The phase 5a merge gate, 2026-09-18
+
+The compiled production output answered all five read tools against the live tenant. This is the
+first time this project has executed its compiled artifact at all. Every live sitting before this
+one ran `tsx` against TypeScript source, so nothing had ever exercised what a deployment would
+actually run.
+
+Built with `npm run build:prod` and started as `node dist/server/main.js`. The startup line names
+the site, which is the phase 4c configuration change working through the compiled path:
+
+    listening on port 3000, site https://helloironwright.sharepoint.com/sites/IronwrightTest,
+    writes disabled, 1 profile from profiles, azure-table store
+
+`GET /health` answered `{"status":"ok"}`.
+
+**Every figure matched the phase 4b and 4c sittings exactly**, which is the result that matters:
+the compiled artifact behaves identically to the source runs, so the production compile's exclusion
+of the setup command broke nothing that source execution was hiding.
+
+- `query_repository` against an unscanned profile refused, naming both ways to populate the index.
+  It did not answer zero.
+- `inventory_tree` cold: 144 files, 122 folders, 4 Graph requests.
+- `query_repository`, all three questions: **0 Graph requests each**. `recent_reports` reported 142
+  findings, which is the phase 4c fix working: before it, that answer capped at 50 and called it the
+  complete total.
+- `validate_structure`: 12 client folders, all compliant, 3 Graph requests.
+- `describe_workbook` source mode: proposed header row 1 and the headers `Client`,
+  `Monthly Training`, `Quarterly Phishing`, `Onboarded`, which is the mapping
+  `profiles/synthetic.json` independently uses.
+- `reconcile_workbook_vs_repository`: returned its report in 2.1 seconds.
+
+### What this gate does NOT establish, and it is the part worth reading
+
+**The shutdown deadline was not exercised here.** Windows does not deliver a POSIX SIGTERM: killing
+the process terminates it without running the handler, so the one behavior this phase exists to add
+cannot be demonstrated against the running compiled server on this machine.
+
+It is covered by unit tests and by a reviewer's probe that loaded the COMPILED `dist/server/shutdown.js`
+into a real `node:http` server with a genuinely open request and the real `process.exit`, printing:
+
+    received SIGTERM, finishing in-flight requests before exit
+    shutdown deadline of 50ms reached with the drain not complete, exiting
+
+That probe carried a negative control: moving the log back after the exit call made the deadline
+line vanish, which is the defect it replaced. So the behavior is verified against compiled code, and
+it is not verified against a platform delivering a real signal. Phase 5b, which has a platform, owes
+that check.
+
+**Nothing about a container was verified**, because none was built. The image left this phase for
+want of a runtime on the development machine.
+
+**The store was Azurite, not Azure Table Storage.** The same emulator every previous sitting used.
+
+### What the branch found on the way
+
+Two Criticals, both at joins no task owned, both proven by probe rather than argument.
+
+The entry point started a server when imported. `main()` ran at module scope, and this branch added
+the first test that imported that module to reach an exported function. With the deployment
+environment set, that import bound a port; with a table connection string set, it made a real Azure
+call. The merge gate's own shell is where that environment is exported, so running this gate before
+the fix would have had `npm test` binding ports and reaching Azure. Closed by extracting the function
+into its own module; the entry point now exports nothing, and a comment says that is load bearing.
+
+The shutdown deadline logged nothing at all, while three documents said it logged a count. The
+count came from `getConnections`, which defers through `process.nextTick`, and `process.exit` does
+not drain that queue. Closed by logging one sentence synchronously before exiting, with no number.
+The enrichment was then deleted outright, because after the reordering it was unreachable in
+production and existed only for tests, which made those tests assertions about behavior the
+deployed server cannot exhibit.
+
+A third finding is worth recording because of where it was: two places claimed the tests catch an
+ordering regression "by position", and under that exact regression only one of the two tests failed.
+The branch that fixed a documented-but-never-printed log corrected a documented-but-never-run
+assertion before merging.
