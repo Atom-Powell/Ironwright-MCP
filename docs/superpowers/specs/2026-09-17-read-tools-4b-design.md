@@ -65,6 +65,32 @@ plain `ZodObject`, which is what a `.refine` or `.superRefine` produces, and ass
 is non-empty on that path. The rule has no subject in this phase and exists so that phase 6 cannot
 add one without stating it.
 
+**Amended 2026-09-18, after the rule was measured rather than assumed.** The paragraph above is what
+this spec asked for and it is NOT what the branch built. A test written during execution measured
+what the MCP SDK actually does with a refined schema: registration succeeds, and `listTools` then
+advertises the tool as an object with no properties at all, so every field disappears from what a
+caller sees. Only the constraint was expected to be invisible; the whole field list is. A tool a
+model cannot see the inputs of is worse than a tool with an unstated constraint, so the rule
+inverted. A top-level refinement is BANNED by the contract test, and a characterization test pins
+the SDK's behavior so a future version that fixes it fails that test and tells us.
+
+`inputConstraints` survives the inversion with a different job. It no longer describes a refinement
+in the schema; it describes a cross-field constraint the handler enforces during its own parse, which
+the advertised schema cannot express. The requirement underneath both versions of the rule is
+unchanged and is the part that matters: a constraint a caller cannot see must be stated in the
+description, or the rejection is unpredictable. That requirement is enforced by a contract test
+asserting that a tool setting `inputConstraints` contains that text in its description.
+
+Phase 6 needs a cross-field constraint for `generate_move_plan` and has two routes, both recorded in
+`docs/OPEN-ITEMS.md`: enforce it inside the handler's own parse, or advertise the plain object and
+parse with the refined one.
+
+**Also amended 2026-09-18.** Two smaller corrections this document owed. The export amendment above
+names `findEmptyFolders` and `createFileParser`; `MONTH_NAMES` was exported from the same index for
+the same lint reason and belongs in that list. And `validate_structure`'s output below nests its
+per-client omission counts under a `detail` object, where the implementation puts them flat on the
+client. The flat form is better and is what shipped.
+
 ## Shared behavior, decided once
 
 These apply to all three tools and are not restated per tool.
