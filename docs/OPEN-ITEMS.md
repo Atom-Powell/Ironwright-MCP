@@ -1996,9 +1996,12 @@ observed, and `exit` is injected precisely so that whoever wires it differently 
 implies. If that day comes, adding a count back is smaller than the comment explaining why it was
 kept.
 
-The tests assert the deadline sentence by position, so an ordering regression fails rather than
-passing on a line a real `process.exit` would never have printed, and one of them asserts from
-inside `exit` itself, which is the only moment that can distinguish the two orderings at all.
+Only the test that asserts from inside `exit` itself pins the ordering, because that is the only
+moment that can distinguish a correct ordering from the regression at all; once `exit` returns,
+nothing observable tells them apart, and an assertion made after everything settles would pass on
+either. The real-`http.Server` test asserts the same line by position but does not guard the
+ordering: it exists to prove that `close` genuinely withholds its callback while a request is
+outstanding, so the deadline is what ends the process rather than the drain.
 
 **What this episode says about the earlier fix.** The correction that replaced
 `server.connections` was reviewed, tested against a real `http.Server`, and merged, and it still

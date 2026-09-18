@@ -189,8 +189,12 @@ describe("installShutdown", () => {
       await delay(80);
 
       expect(exits).toEqual([0]);
-      // By position, so an ordering regression fails here rather than passing
-      // on a line that a real process.exit would never have printed.
+      // This does not guard ordering: an injected exit that returns lets a line
+      // moved back after finish land in this slot anyway, which is exactly what
+      // the inside-exit test above catches and this one cannot. What this proves
+      // instead is the real subject of this test, that close on a genuine
+      // http.Server withholds its callback while a request is outstanding, so
+      // the deadline is what ends the process here rather than the drain.
       expect(logs[1]).toContain("shutdown deadline of 20ms reached with the drain not complete");
     } finally {
       request.destroy();
