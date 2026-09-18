@@ -117,7 +117,7 @@ describe("shapeDescribeSource", () => {
       "Documents",
       "Trackers/Book.xlsx",
       { kind: "table", name: "ClientTable" },
-      { columns: COLUMNS, headerRow: HEADER_ROW, samplesWithheld: false },
+      { columns: COLUMNS, headerRow: HEADER_ROW, samplesWithheld: false, sampleCap: 5 },
       4,
       {},
     );
@@ -127,6 +127,7 @@ describe("shapeDescribeSource", () => {
     expect(output.headerRow).toEqual(HEADER_ROW);
     expect(output.columns).toEqual(COLUMNS);
     expect(output.columnsListing).toEqual({ returned: 3, omitted: 0, cap: 100, truncated: false });
+    expect(output.sampleCap).toBe(5);
     expect(output.samplesWithheld).toBe(false);
     expect(output.graphRequests).toBe(4);
     expect(output.sheets).toBeUndefined();
@@ -137,7 +138,7 @@ describe("shapeDescribeSource", () => {
       "Documents",
       "Trackers/Book.xlsx",
       { kind: "table", name: "ClientTable" },
-      { columns: COLUMNS, headerRow: HEADER_ROW, samplesWithheld: false },
+      { columns: COLUMNS, headerRow: HEADER_ROW, samplesWithheld: false, sampleCap: 5 },
       4,
       { maxColumns: 2 },
     );
@@ -151,11 +152,24 @@ describe("shapeDescribeSource", () => {
       "Documents",
       "Trackers/Book.xlsx",
       { kind: "worksheet", name: "Tracking" },
-      { columns: COLUMNS, headerRow: HEADER_ROW, samplesWithheld: true },
+      { columns: COLUMNS, headerRow: HEADER_ROW, samplesWithheld: true, sampleCap: 5 },
       2,
       {},
     );
 
     expect(output.samplesWithheld).toBe(true);
+  });
+
+  it("passes sampleCap through unchanged, whatever describeColumns actually applied", () => {
+    const output = shapeDescribeSource(
+      "Documents",
+      "Trackers/Book.xlsx",
+      { kind: "table", name: "ClientTable" },
+      { columns: COLUMNS, headerRow: HEADER_ROW, samplesWithheld: false, sampleCap: 3 },
+      1,
+      {},
+    );
+
+    expect(output.sampleCap).toBe(3);
   });
 });

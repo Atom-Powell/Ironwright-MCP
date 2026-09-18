@@ -163,7 +163,7 @@ function distinctKey(value: string | number | boolean): string {
  * detectHeaderRow's own `proposed` field already uses, so its result can be
  * passed straight through without conversion. `firstColumn` is the
  * sheet-absolute column the grid's column 0 sits at; every column this
- * function reports is labelled and positioned against the sheet, not
+ * function reports is labeled and positioned against the sheet, not
  * against the grid's own 0 based index, because a human comparing this
  * output to the open workbook needs the sheet's own column letters.
  *

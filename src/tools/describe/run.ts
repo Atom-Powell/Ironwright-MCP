@@ -5,7 +5,7 @@ import { describeToolFailure, type FailureSubject } from "../errors.js";
 import { resolveDrive } from "../../graph/drive.js";
 import { downloadDriveItem } from "../../graph/content.js";
 import { readWorkbookInventory, type WorkbookInventory } from "../../workbook/introspect.js";
-import { detectHeaderRow, describeColumns, type HeaderDetection } from "../../workbook/describe.js";
+import { detectHeaderRow, describeColumns, MAX_COLUMN_SAMPLES, type HeaderDetection } from "../../workbook/describe.js";
 import { resolveWorkbookGrid, type WorkbookGridResolution, type WorkbookSource } from "../../workbook/xlsx.js";
 import { WorkbookMappingError } from "../../workbook/errors.js";
 import { shapeDescribeInventory, shapeDescribeSource } from "./shape.js";
@@ -32,6 +32,11 @@ export const DESCRIBE_WORKBOOK_INPUT_SCHEMA = {
 
 const InputObject = z.object(DESCRIBE_WORKBOOK_INPUT_SCHEMA);
 
+/** The plain "no such name" sentence, with nothing about a profile: describe_workbook has none. */
+function notFoundMessage(source: WorkbookSource): string {
+  return `No ${source.kind} named "${source.name}" was found in the workbook.`;
+}
+
 /**
  * The names this workbook actually has, for the message a caller reads when
  * the source they asked for is not among them. Built from the same
@@ -55,20 +60,44 @@ function availableNamesSentence(inventory: WorkbookInventory): string {
 
 /**
  * Resolves the named source's grid, and on the one failure a caller can
- * self-correct from, an unknown table or worksheet name, appends what the
- * workbook does contain rather than leaving the caller to guess again. This
- * is the same shape `LibraryNotFoundError` already uses for a library name:
- * the most common operator mistake becomes a self-correcting one instead of
- * a second failed call.
+ * self-correct from, an unknown table or worksheet name, replaces the
+ * message with a self-contained one naming this call's own arguments rather
+ * than prefixing what `resolveWorkbookGrid` threw. `resolveTable` and
+ * `resolveWorksheet`'s own "no such name" messages are written for
+ * `parseWorkbookGrid`'s profile-driven callers ("Either the profile's
+ * workbookMapping names..."); this tool has no profile, and appending
+ * `describeToolFailure`'s no-profile attribution after that unedited
+ * sentence produced a message that argued with itself, telling the reader in
+ * one breath that a profile named this and in the next that no profile was
+ * involved. Replacing it here is what `parseWorkbookGrid`'s own byte-for-byte
+ * contract permits: that entry point, and its message, are untouched.
+ *
+ * Narrowing on `WorkbookMappingError` alone is safe because
+ * `resolveWorkbookGrid` has exactly two throw sites of that class, in
+ * `resolveTable` and `resolveWorksheet`, and both mean only "no such name".
+ * A malformed ref throws `WorkbookFileError` (`parseRangeRef`), a different
+ * class this catch lets through unchanged, and the `fullCalcOnLoad`
+ * staleness refusal lives solely in `parseWorkbookGrid`, which this tool
+ * never calls.
  */
-function resolveSourceOrExplain(bytes: Uint8Array, source: WorkbookSource): WorkbookGridResolution {
+export function resolveSourceOrExplain(bytes: Uint8Array, source: WorkbookSource): WorkbookGridResolution {
   try {
     return resolveWorkbookGrid(bytes, source);
   } catch (error) {
-    if (error instanceof WorkbookMappingError) {
-      throw new WorkbookMappingError(`${error.message} ${availableNamesSentence(readWorkbookInventory(bytes))}`);
+    if (!(error instanceof WorkbookMappingError)) throw error;
+
+    let detail = "";
+    try {
+      detail = ` ${availableNamesSentence(readWorkbookInventory(bytes))}`;
+    } catch {
+      // The workbook has some other, unrelated problem readWorkbookInventory
+      // could not read past, such as a malformed ref on a different table.
+      // Degrading to the plain "no such name" message is better than losing
+      // it under a second failure that never mentions the name the caller
+      // actually typed.
     }
-    throw error;
+
+    throw new WorkbookMappingError(`${notFoundMessage(source)}${detail}`);
   }
 }
 
@@ -80,10 +109,7 @@ function resolveSourceOrExplain(bytes: Uint8Array, source: WorkbookSource): Work
  * carries no such declaration of its own; running the heuristic against a
  * table would let a guess override a fact the file already states.
  */
-function resolveHeaderRow(
-  source: WorkbookSource,
-  resolved: WorkbookGridResolution,
-): HeaderDetection {
+function resolveHeaderRow(source: WorkbookSource, resolved: WorkbookGridResolution): HeaderDetection {
   if (source.kind === "worksheet") return detectHeaderRow(resolved.grid);
 
   if (resolved.tableHasHeaderRow === false) {
@@ -113,9 +139,21 @@ function buildSourceOutput(
   // rule the reader was never built to support.
   const samplesWithheld = resolved.fullCalcOnLoad && resolved.hadFormula;
   const headerRow = resolveHeaderRow(source, resolved);
+  // No maxSamples override is passed, so describeColumns applies its own
+  // default, MAX_COLUMN_SAMPLES. That same constant is handed to
+  // shapeDescribeSource below as sampleCap rather than each side defaulting
+  // independently, so the reported cap can never drift from the cap that was
+  // actually applied.
   const columns = describeColumns(resolved.grid, headerRow.proposed, resolved.firstColumn, { samplesWithheld });
 
-  return shapeDescribeSource(library, workbookPath, source, { columns, headerRow, samplesWithheld }, graphRequests, {});
+  return shapeDescribeSource(
+    library,
+    workbookPath,
+    source,
+    { columns, headerRow, samplesWithheld, sampleCap: MAX_COLUMN_SAMPLES },
+    graphRequests,
+    {},
+  );
 }
 
 /**
@@ -124,6 +162,14 @@ function buildSourceOutput(
  * Inventory mode reads no cell grid at all, which is what keeps it cheap on
  * a workbook with many large sheets; source mode reads exactly the one range
  * asked for.
+ *
+ * `graphRequests` is a delta against `requestsAtStart`, not the client's raw
+ * `requests()`. That counter lives on `context.graph`, which `main.ts` builds
+ * once per process and shares across every per-request server, so it
+ * accumulates for the process's whole life; reporting it raw would answer
+ * "what has this process spent since it started" where the schema and prose
+ * both promise "what this call itself paid". `src/scan/run.ts` already
+ * brackets the same counter the same way.
  */
 export async function runDescribeWorkbook(input: unknown, context: ToolContext): Promise<CallToolResult> {
   const args = InputObject.parse(input);
@@ -131,15 +177,17 @@ export async function runDescribeWorkbook(input: unknown, context: ToolContext):
   // so it names a library and a workbookPath directly. describeToolFailure
   // carries an optional-profile branch for exactly this call.
   const subject: FailureSubject = { tool: "describe_workbook", siteUrl: context.grantedSiteUrl, library: args.library };
+  const requestsAtStart = context.graph.requests();
 
   try {
     const { driveId } = await resolveDrive(context.graph, context.grantedSiteUrl, args.library);
     const bytes = await downloadDriveItem(context.graph, { driveId, workbookPath: args.workbookPath });
+    const graphRequests = context.graph.requests() - requestsAtStart;
 
     const output: DescribeToolOutput =
       args.source === undefined
-        ? shapeDescribeInventory(args.library, args.workbookPath, readWorkbookInventory(bytes), context.graph.requests(), {})
-        : buildSourceOutput(bytes, args.source, args.library, args.workbookPath, context.graph.requests());
+        ? shapeDescribeInventory(args.library, args.workbookPath, readWorkbookInventory(bytes), graphRequests, {})
+        : buildSourceOutput(bytes, args.source, args.library, args.workbookPath, graphRequests);
 
     return {
       structuredContent: output as unknown as Record<string, unknown>,

@@ -70,6 +70,7 @@ describe("describe_workbook over the wire", () => {
         ],
         headerRow: { proposed: 1, candidates: [] },
         samplesWithheld: false,
+        sampleCap: 5,
       },
       2,
       {},

@@ -24,10 +24,10 @@ const INVENTORY_WHOLE: DescribeToolOutput = {
 };
 
 describe("describeWorkbookText, inventory mode", () => {
-  it("names the workbook, library, and declared totals in one sentence", () => {
+  it("names the workbook, library, and resolved totals in one sentence", () => {
     const lines = describeWorkbookText(INVENTORY_WHOLE);
 
-    expect(lines[0]).toBe('Workbook "Trackers/Book.xlsx" in library "Documents": 2 worksheets and 1 table declared.');
+    expect(lines[0]).toBe('Workbook "Trackers/Book.xlsx" in library "Documents": 2 worksheets and 1 table resolved.');
   });
 
   it("states cleanly resolved wiring as its own sentence when nothing is unresolved", () => {
@@ -65,9 +65,9 @@ describe("describeWorkbookText, inventory mode", () => {
 
     const lines = describeWorkbookText(truncated);
 
-    expect(lines[0]).toBe('Workbook "Trackers/Book.xlsx" in library "Documents": 5 worksheets and 13 tables declared.');
-    expect(lines[1]).toBe("Listing 3 worksheets of 5 declared; 2 more were left out to keep this response bounded at 3.");
-    expect(lines[2]).toBe("Listing 6 tables of 13 declared; 7 more were left out to keep this response bounded at 6.");
+    expect(lines[0]).toBe('Workbook "Trackers/Book.xlsx" in library "Documents": 5 worksheets and 13 tables resolved.');
+    expect(lines[1]).toBe("Listing 3 worksheets of 5 resolved; 2 more were left out to keep this response bounded at 3.");
+    expect(lines[2]).toBe("Listing 6 tables of 13 resolved; 7 more were left out to keep this response bounded at 6.");
   });
 
   it("surfaces unresolved entries by name and reason, never silently, and counts them separately from the totals", () => {
@@ -100,6 +100,7 @@ const SOURCE_WHOLE: DescribeToolOutput = {
     { position: 2, columnLabel: "B", header: "Owed", headerUnevaluable: false, inferredType: "number", nonEmptyCount: 2, unevaluableCount: 0, distinctCount: 2, samples: ["3", "1"], samplesOmitted: 0 },
   ],
   columnsListing: { returned: 2, omitted: 0, cap: 100, truncated: false },
+  sampleCap: 5,
   samplesWithheld: false,
   graphRequests: 4,
 };
@@ -132,10 +133,20 @@ describe("describeWorkbookText, source mode", () => {
     );
   });
 
-  it("states that samples are included when they were not withheld", () => {
+  it("states that samples are included, and the cap that was applied, when they were not withheld", () => {
     const lines = describeWorkbookText(SOURCE_WHOLE);
 
-    expect(lines[4]).toBe("Sample values are included with each column above.");
+    expect(lines[4]).toBe(
+      "Sample values are included with each column above, capped at 5 distinct values each; see each column's " +
+        "own samplesOmitted for how many more it actually holds.",
+    );
+  });
+
+  it("states a different cap value when a different one was applied, so the sentence is not a hardcoded 5", () => {
+    const differentCap: DescribeToolOutput = { ...SOURCE_WHOLE, sampleCap: 3 };
+    const lines = describeWorkbookText(differentCap);
+
+    expect(lines[4]).toContain("capped at 3 distinct values each");
   });
 
   it("states the Graph cost as its own sentence", () => {

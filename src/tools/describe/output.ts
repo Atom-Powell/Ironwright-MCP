@@ -206,6 +206,14 @@ export const DESCRIBE_OUTPUT_SCHEMA = {
     .object(LISTING_SHAPE)
     .optional()
     .describe("What survived the cap on the column listing, and how much did not. Present only in source mode."),
+  sampleCap: z
+    .number()
+    .int()
+    .optional()
+    .describe(
+      "The most distinct sample values one column's samples array holds; see each column's own samplesOmitted " +
+        "for how many more it actually has. Present only in source mode.",
+    ),
   samplesWithheld: z
     .boolean()
     .describe(
@@ -236,6 +244,7 @@ export interface DescribeToolOutput {
   headerRow?: DescribeHeaderRow;
   columns?: DescribeColumnDescription[];
   columnsListing?: Listing;
+  sampleCap?: number;
   samplesWithheld: boolean;
   graphRequests: number;
 }

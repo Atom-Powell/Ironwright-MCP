@@ -21,9 +21,15 @@ function inventoryLines(output: DescribeToolOutput): string[] {
   const sheetsTotal = total(output.sheetsListing);
   const tablesTotal = total(output.tablesListing);
 
+  // "resolved", not "declared": sheetsTotal and tablesTotal come from
+  // sheetsListing/tablesListing, which count inventory.sheets and
+  // inventory.tables, the sets readWorkbookInventory could actually resolve.
+  // A workbook that declares more than that, with the remainder broken
+  // enough to land in unresolved instead, must not have that shortfall
+  // reported as though it were the full declared count.
   lines.push(
     `Workbook "${output.workbookPath}" in library "${output.library}": ` +
-      `${plural(sheetsTotal, "worksheet", "worksheets")} and ${plural(tablesTotal, "table", "tables")} declared.`,
+      `${plural(sheetsTotal, "worksheet", "worksheets")} and ${plural(tablesTotal, "table", "tables")} resolved.`,
   );
 
   // Read from the listing's own `returned` rather than recomputed from
@@ -33,20 +39,20 @@ function inventoryLines(output: DescribeToolOutput): string[] {
   // place that count can go wrong.
   if (output.sheetsListing?.truncated) {
     lines.push(
-      `Listing ${plural(output.sheetsListing.returned, "worksheet", "worksheets")} of ${sheetsTotal} declared; ` +
+      `Listing ${plural(output.sheetsListing.returned, "worksheet", "worksheets")} of ${sheetsTotal} resolved; ` +
         `${output.sheetsListing.omitted} more were left out to keep this response bounded at ${output.sheetsListing.cap}.`,
     );
   }
 
   if (output.tablesListing?.truncated) {
     lines.push(
-      `Listing ${plural(output.tablesListing.returned, "table", "tables")} of ${tablesTotal} declared; ` +
+      `Listing ${plural(output.tablesListing.returned, "table", "tables")} of ${tablesTotal} resolved; ` +
         `${output.tablesListing.omitted} more were left out to keep this response bounded at ${output.tablesListing.cap}.`,
     );
   }
 
   // Stated even in the zero case, and as its own sentence rather than folded
-  // into the count above, because "sheets and tables declared" already read
+  // into the count above, because "sheets and tables resolved" already read
   // as a complete answer before this tool tracked unresolved wiring at all.
   // A reader must be able to tell "nothing was unresolved" apart from "this
   // response never checked", and only an explicit sentence in either
@@ -106,12 +112,17 @@ function sourceLines(output: DescribeToolOutput): string[] {
       "the evidence; deciding which field each column is and writing that into the profile remains yours to do.",
   );
 
+  // The spec requires the cap itself be stated, not just samplesOmitted: a
+  // reader seeing samplesOmitted alone has no way to tell "this column has
+  // exactly that many more values" from "this tool would never have shown
+  // more than N regardless of how many there are".
   lines.push(
     output.samplesWithheld
       ? "Sample values are withheld because the workbook is marked fullCalcOnLoad and this range holds at " +
           "least one formula, so its saved cached values are not authoritative. Column structure above is " +
           "unaffected; only the sample values are withheld."
-      : "Sample values are included with each column above.",
+      : `Sample values are included with each column above, capped at ${output.sampleCap ?? 0} distinct values ` +
+          "each; see each column's own samplesOmitted for how many more it actually holds.",
   );
 
   lines.push(`This call cost ${plural(output.graphRequests, "Graph request", "Graph requests")}.`);

@@ -79,6 +79,13 @@ export interface DescribeSourceResolution {
   columns: ColumnDescription[];
   headerRow: HeaderDetection;
   samplesWithheld: boolean;
+  /**
+   * The cap describeColumns actually applied when it built `columns`, carried
+   * through rather than re-read from a constant here: a second default in
+   * this module could silently disagree with whatever run.ts really passed
+   * to describeColumns.
+   */
+  sampleCap: number;
 }
 
 /**
@@ -110,6 +117,7 @@ export function shapeDescribeSource(
       cap: maxColumns,
       truncated: listedColumns.length < resolution.columns.length,
     },
+    sampleCap: resolution.sampleCap,
     samplesWithheld: resolution.samplesWithheld,
     graphRequests,
   };
