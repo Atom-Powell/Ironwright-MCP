@@ -133,6 +133,18 @@ function isZodEffects(schema: z.ZodTypeAny): boolean {
   return schema instanceof z.ZodEffects;
 }
 
+/**
+ * True when a tool either declares no handler-enforced cross-field constraint
+ * or repeats that constraint verbatim in its description.
+ *
+ * Verbatim rather than paraphrased, because a paraphrase is a second
+ * description of the same rule and the two drift. The check is one direction
+ * only: a description may say more than `inputConstraints` does.
+ */
+function statesItsInputConstraints(tool: ToolDefinition): boolean {
+  return tool.inputConstraints === undefined || tool.description.includes(tool.inputConstraints);
+}
+
 describe("input schema contract", () => {
   it("every tool's input schema is a plain object", () => {
     for (const tool of ALL_TOOLS) {
@@ -183,5 +195,42 @@ describe("input schema contract", () => {
       outputSchema: { ok: z.boolean() },
     };
     expect(isZodEffects(bad.inputSchema)).toBe(true);
+  });
+
+  it("every tool that sets inputConstraints states them in its own description", () => {
+    // The ban above sends an author to `inputConstraints` for a cross-field
+    // rule the advertised schema cannot carry, and until this rule existed
+    // nothing checked that the words ever reached the description. A tool
+    // could set the field, say nothing in its prose, and leave every gate
+    // green while a caller still had no way to predict the rejection. Phase 6
+    // is the first tool that needs one, for generate_move_plan's scopeValue.
+    for (const tool of ALL_TOOLS) {
+      expect(
+        statesItsInputConstraints(tool),
+        `${tool.name} sets inputConstraints but its description does not contain that text. A constraint the ` +
+          "advertised schema cannot express is invisible to a caller unless the prose says it.",
+      ).toBe(true);
+    }
+  });
+
+  it("that rule fails a tool whose constraint is missing from its description and passes one where it is present", () => {
+    // No tool in the registry sets inputConstraints yet, so the loop above
+    // passes on an empty search and proves nothing about whether the check can
+    // tell the two cases apart. These two fixtures exercise both branches, the
+    // way the ZodEffects ban's own fixture does.
+    const constraint = "Give scopeValue whenever scope is client or deliverable.";
+    const base: ToolDefinition = {
+      name: "fixture_constrained_tool",
+      kind: "read",
+      title: "Fixture",
+      description: "A fixture whose handler enforces a rule its advertised schema cannot express.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      inputSchema: z.object({ scope: z.string(), scopeValue: z.string().optional() }),
+      outputSchema: { ok: z.boolean() },
+      inputConstraints: constraint,
+    };
+
+    expect(statesItsInputConstraints(base)).toBe(false);
+    expect(statesItsInputConstraints({ ...base, description: `${base.description} ${constraint}` })).toBe(true);
   });
 });

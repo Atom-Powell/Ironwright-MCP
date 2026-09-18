@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { runValidateStructure } from "../../../src/tools/validate/run.js";
-import { createFakeToolContext } from "../../tools/fake-context.js";
+import { createFakeToolContext, scanCoordinatorStub } from "../../tools/fake-context.js";
 import { createProfileRegistry } from "../../../src/profiles/registry.js";
 import type { ToolContext } from "../../../src/tools/context.js";
 import type { ScanResult } from "../../../src/scan/run.js";
@@ -29,7 +29,7 @@ function contextWith(scan?: Partial<ScanResult>, joined = false, overrides: Part
   };
 
   return createFakeToolContext({
-    scans: { run: async () => ({ result, joined }) },
+    scans: scanCoordinatorStub(async () => ({ result, joined })),
     ...overrides,
   });
 }
@@ -71,7 +71,7 @@ describe("runValidateStructure", () => {
   it("refuses a profile whose taxonomy has no {client} segment, naming the taxonomy, without scanning", async () => {
     const context: ToolContext = {
       ...profileWithNoClientSegment(),
-      scans: { run: () => Promise.reject(new Error("must not be called")) },
+      scans: scanCoordinatorStub(() => Promise.reject(new Error("must not be called"))),
     };
 
     const result = await runValidateStructure({ profileId: "example" }, context);

@@ -66,6 +66,25 @@ describe("runQueryRepository", () => {
     expect(context.store.lastListedDrive).toBe("new");
   });
 
+  it("picks the same drive whichever order the store lists two drives scanned in the same millisecond", async () => {
+    // Two rows can carry an identical lastScanAt, and the response names the
+    // drive it read, so a comparison that left the winner to the store's own
+    // enumeration order would let two calls with identical inputs name
+    // different drives and answer from different libraries.
+    const sameMoment = "2026-09-17T00:00:00.000Z";
+    const alpha = { driveId: "alpha", lastScanAt: sameMoment };
+    const zulu = { driveId: "zulu", lastScanAt: sameMoment };
+
+    const oneOrder = makeFakeContext({ scannedDrives: [alpha, zulu] });
+    const theOther = makeFakeContext({ scannedDrives: [zulu, alpha] });
+
+    await runQueryRepository({ profileId: "example", question: "empty_folders" }, oneOrder);
+    await runQueryRepository({ profileId: "example", question: "empty_folders" }, theOther);
+
+    expect(oneOrder.store.lastListedDrive).toBe(theOther.store.lastListedDrive);
+    expect(oneOrder.store.lastListedDrive).toBe("zulu");
+  });
+
   it("returns isError with the registry's own message for an unknown profile", async () => {
     const context = makeFakeContext({ scannedDrives: [{ driveId: "d1", lastScanAt: "2026-09-17T00:00:00.000Z" }] });
 

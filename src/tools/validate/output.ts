@@ -67,7 +67,10 @@ export const VALIDATE_STRUCTURE_OUTPUT_SCHEMA = {
     )
     .describe(
       "Sorted by client name. May be a prefix of the full set totals describes; see listing. missing is reachable " +
-        "only for a client named explicitly in the request with no folder present at all.",
+        "only for a client named explicitly in the request with no folder present at all. A compliant verdict here " +
+        "means conformance of what exists, that every folder and file found under the client is shaped correctly; " +
+        "it is not completeness of what the client owes, which needs the workbook and belongs to " +
+        "reconcile_workbook_vs_repository, whose per-client counts hold that other half.",
     ),
   listing: z
     .object({
@@ -81,6 +84,11 @@ export const VALIDATE_STRUCTURE_OUTPUT_SCHEMA = {
     .number()
     .int()
     .describe("What this call itself paid. Zero when this call joined a scan another call had already started."),
+  scanSharedWithConcurrentCall: z
+    .boolean()
+    .describe(
+      "True when this call awaited a scan another call had already started, which is the only reason graphRequests can be zero here. Without it a zero is ambiguous: query_repository reports zero because it never calls Graph at all, and this tool always does unless it shared someone else's call.",
+    ),
 } satisfies z.ZodRawShape;
 
 /**
@@ -98,4 +106,5 @@ export interface ValidateStructureOutput {
   clients: ClientValidation[];
   listing: { returned: number; omitted: number; cap: number; truncated: boolean };
   graphRequests: number;
+  scanSharedWithConcurrentCall: boolean;
 }

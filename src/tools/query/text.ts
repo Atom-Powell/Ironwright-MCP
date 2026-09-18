@@ -40,7 +40,9 @@ export function queryText(output: QueryToolOutput, now: Date): string[] {
   if (output.listing.truncated) {
     lines.push(
       `Listing ${plural(output.listing.returned, "finding", "findings")} of that total; ` +
-        `${output.listing.omitted} more were left out to keep this response bounded at ${output.listing.cap}.`,
+        `${output.listing.omitted} more were left out to keep this response bounded at ${output.listing.cap}. ` +
+        "This tool takes no argument that narrows a question, so there is no call to query_repository that " +
+        "returns the findings left out; the total above is the complete count either way.",
     );
   } else {
     lines.push(`Listing every finding counted above, ${output.listing.returned} in all.`);

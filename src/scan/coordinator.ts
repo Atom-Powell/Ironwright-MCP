@@ -14,8 +14,39 @@ export interface CoordinatedScan {
   joined: boolean;
 }
 
+export interface SettledScan {
+  /** True when a scan was in flight for this profile and this call awaited it. */
+  awaited: boolean;
+  /**
+   * True when the scan this call awaited ended in failure. A failed scan may
+   * have called `clearInventory` to resync and then stopped before rebuilding,
+   * and nothing a reader can see afterwards distinguishes what survives from a
+   * library that genuinely holds only those items. A caller that reads the
+   * inventory rather than scanning it therefore has to treat this as a refusal
+   * to answer, not as a warning it can attach to an answer.
+   */
+  failed: boolean;
+}
+
 export interface ScanCoordinator {
   run(profile: Profile): Promise<CoordinatedScan>;
+  /**
+   * Awaits a scan already in flight for this profile, so a caller that reads
+   * the store directly rather than scanning does not read an inventory a
+   * concurrent resync has cleared and not yet rebuilt. Returns immediately
+   * when nothing is in flight, and never rejects: a scan another call started
+   * failing is that call's failure to report, and this one needs to know only
+   * whether the inventory it is about to read can still be trusted.
+   */
+  settle(profile: Profile): Promise<SettledScan>;
+  /**
+   * How many scans this coordinator has started for this profile since the
+   * process began, joins excluded. It exists so a reader can bracket its own
+   * store reads: a count that changed across them means a scan began while the
+   * read was in progress, which is the one window `settle` cannot close by
+   * waiting, because there was nothing to wait for when it was called.
+   */
+  scansStarted(profile: Profile): number;
 }
 
 export interface ScanCoordinatorOptions {
@@ -45,12 +76,23 @@ export interface ScanCoordinatorOptions {
  * starts. The drive id is not: it comes back from `resolveDrive` inside
  * `runScan`, by which point the race has already begun.
  *
+ * `settle` and `scansStarted` extend the same protection to a caller that
+ * reads the inventory without scanning it, which `query_repository` does. That
+ * tool cannot use `run`, since running a scan would cost it the zero-request
+ * property it exists to demonstrate, so it waits on whatever is in flight and
+ * then brackets its own store reads with the counter.
+ *
  * This coordinates within a replica and not across them. `docs/OPEN-ITEMS.md`
  * carries that gap and the one-replica constraint that follows from it.
  */
 export function createScanCoordinator(options: ScanCoordinatorOptions): ScanCoordinator {
   const scan = options.scan ?? runScan;
   const inFlight = new Map<string, Promise<ScanResult>>();
+  // Never decremented and never reset. Its only use is comparing two readings
+  // of the same profile's count, so it has to be monotonic; a gauge of scans
+  // currently running would read the same before and after a scan that both
+  // started and finished inside the window being bracketed.
+  const startedCounts = new Map<string, number>();
 
   return {
     async run(profile: Profile): Promise<CoordinatedScan> {
@@ -59,6 +101,7 @@ export function createScanCoordinator(options: ScanCoordinatorOptions): ScanCoor
 
       const started = scan({ client: options.client, store: options.store, profile, now: options.now });
       inFlight.set(profile.profileId, started);
+      startedCounts.set(profile.profileId, (startedCounts.get(profile.profileId) ?? 0) + 1);
       try {
         // Awaited inside the same synchronous block that stored it, so a
         // rejection always has a handler attached and can never surface as an
@@ -69,6 +112,26 @@ export function createScanCoordinator(options: ScanCoordinatorOptions): ScanCoor
         // the map for every later call to join and fail against.
         inFlight.delete(profile.profileId);
       }
+    },
+
+    async settle(profile: Profile): Promise<SettledScan> {
+      const held = inFlight.get(profile.profileId);
+      if (held === undefined) return { awaited: false, failed: false };
+
+      try {
+        await held;
+        return { awaited: true, failed: false };
+      } catch {
+        // Swallowed rather than rethrown, and the promise already carries the
+        // owning `run` call's own handler, so this attaches a second one to a
+        // rejection that is already accounted for rather than leaving one
+        // unhandled.
+        return { awaited: true, failed: true };
+      }
+    },
+
+    scansStarted(profile: Profile): number {
+      return startedCounts.get(profile.profileId) ?? 0;
     },
   };
 }

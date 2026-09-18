@@ -42,10 +42,14 @@ describe("queryText", () => {
     expect(queryText(single, NOW)[1]).toBe("Found 1 finding for this question.");
   });
 
-  it("states the truncation sentence with the returned count, the omitted count, and the cap each in their own place", () => {
+  it("states the truncation sentence with the returned count, the omitted count, and the cap each in their own place, and says plainly that there is no narrowing argument", () => {
     const lines = queryText(truncated, NOW);
 
-    expect(lines[2]).toBe("Listing 481 findings of that total; 432 more were left out to keep this response bounded at 520.");
+    expect(lines[2]).toBe(
+      "Listing 481 findings of that total; 432 more were left out to keep this response bounded at 520. " +
+        "This tool takes no argument that narrows a question, so there is no call to query_repository that " +
+        "returns the findings left out; the total above is the complete count either way.",
+    );
   });
 
   it("states the non-truncated listing sentence on its own wording, not merely without the truncated one's word", () => {

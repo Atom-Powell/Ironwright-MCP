@@ -69,6 +69,7 @@ export async function runValidateStructure(input: unknown, context: ToolContext)
       scan.result.snapshot,
       args.clients,
       graphRequests,
+      scan.joined,
       {},
     );
 

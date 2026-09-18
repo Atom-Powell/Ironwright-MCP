@@ -1314,7 +1314,8 @@ a check nobody can vouch for.
 
 Phase 4b wired `inventory_tree`, `query_repository` and `validate_structure` onto the execution
 layer phase 4a built, on branch `phase-4b-read-tools`, with the suite at 1800 tests across 126
-files and all gates green. No call this phase's own code makes has reached a tenant. Every layer
+files when the eight tasks finished and 1818 across 127 after the whole-branch fix wave of
+2026-09-18, all gates green at both points. No call this phase's own code makes has reached a tenant. Every layer
 it composes was verified live in an earlier phase: the Graph and scan layer from 2a, the workbook
 bytes reader from 2b-2, the cross-check from 2c, and the reconciliation engine from phase 3. That
 verification does not transfer to this phase's own code, which is covered by fakes and fixtures
@@ -1325,8 +1326,10 @@ only, in the same position phase 4a's own read tool was in before "The second li
 fake Graph transport and the in-memory `StateStore`, the shaping module's truncation and omission
 arithmetic asserted at and either side of its cap, and the text module asserted sentence by
 sentence against a shaped output chosen to contradict a naive reading. Across the registry: the
-existing contract test over all ten tool definitions, which now also asserts that a tool carrying
-a refined input schema states its constraint in its own description. `query_repository`'s
+existing contract test over all ten tool definitions, which now bans a top-level refinement on a
+tool's input schema outright rather than requiring such a tool to document its constraint, and
+separately requires a tool that sets `inputConstraints` to repeat that text in its own
+description. `query_repository`'s
 zero-request claim has its own test, asserting the fake transport issued no request for any of the
 three questions and that a profile with no stored inventory fails rather than returning an empty
 result. All of it against fakes, all of it green, none of it against Graph or Azure Table Storage.
@@ -1392,6 +1395,40 @@ stays with `reconcile`, which holds the workbook.
 permission model forbids. The schema was written in phase 1, before the identity decision
 hardened, and nothing in phase 4b touches it. 4c owns the correction, most likely replacing
 `siteUrl` with a `profileId` or dropping it and taking the granted site from configuration.
+
+**`query_repository` could read a torn inventory, and the residual window it leaves. Fixed
+2026-09-18 by the whole-branch fix wave.** `loadSnapshot` read `getScannedDrives` and
+`listInventory` directly, the only tool in this codebase reading the inventory without going
+through `ScanCoordinator`, which exists for exactly that window. `runScan` answers a delta resync
+by clearing the inventory and re-enumerating and persists the new `lastScanAt` only at the end,
+and `ToolContext` is per process, so a concurrent `inventory_tree`, `validate_structure` or
+`reconcile` resyncing while this tool read would have had it answer from a cleared or half-rebuilt
+inventory and stamp the answer with the previous scan's timestamp. That is the substitution
+`NeverScannedError` refuses, arriving from the side it does not guard.
+
+The coordinator gained two methods. `settle` awaits a scan already in flight for the profile and
+reports whether it failed, and `scansStarted` is a monotonic per-profile count of scans started.
+`loadSnapshot` settles first, refuses outright when the scan it waited for failed, since a scan
+that fails after its resync has cleared the inventory leaves a store that looks exactly like a
+smaller library, and then brackets its own two store reads with the counter. A count that changed
+across them means a scan began during the read, which `settle` cannot prevent because there was
+nothing in flight to wait for, and that too is a refusal rather than an answer. Neither method
+calls Graph, so the tool's zero-request property is intact.
+
+What that leaves open is worth stating plainly, because "fixed" here means fixed within one
+replica. The counter closes the in-replica window completely: a scan that starts and finishes
+entirely between the two store reads still increments it. It cannot see a scan run by another
+replica against the same Table Storage, nor one run by the `scan` CLI, which calls `runScan`
+directly and is outside any coordinator. Both are the same one-replica constraint this file
+already carries for the coordinator itself, and neither is detectable from inside this process.
+A second replica makes `query_repository` silently racy again, so the minimum-one-replica
+constraint is now load bearing for correctness and not only for the delta link.
+
+The interleaving is exercised rather than asserted. `tests/tools/query/concurrency.test.ts` drives
+the real coordinator and the real in-memory store against the real handler, with a scan fake that
+clears and rebuilds in the order `runScan` does, and records what the store actually held at the
+moment the handler reached it, so a pass means the race was live. Three of its four cases fail
+against the code as it stood before the fix; the fourth is the control that must keep passing.
 
 **The live sitting this phase still owes.** This phase is covered by fakes until it has run
 against a tenant, and the branch does not merge until it has. Against the existing seeded

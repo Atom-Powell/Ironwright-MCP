@@ -198,7 +198,8 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
       // now rejects a malformed profile id before it looks anywhere, so this
       // one must refuse the same input before it queries, not answer with an
       // empty result a caller cannot distinguish from "never scanned". The
-      // driveId argument is unused here; only profileId's safety matters.
+      // key this builds is thrown away: the call is made for the throw alone,
+      // which is why the drive id it also takes is passed empty.
       inventoryPartitionKey(profileId, "");
       const drives: ScannedDrive[] = [];
       for await (const entity of clients.deltaLinks.listEntities({

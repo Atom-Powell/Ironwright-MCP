@@ -45,6 +45,7 @@ export async function runInventoryTree(input: unknown, context: ToolContext): Pr
       scan.result.snapshot,
       args.subPath,
       graphRequests,
+      scan.joined,
       {},
     );
 

@@ -16,6 +16,7 @@ const truncated: InventoryToolOutput = {
   items: [],
   listing: { returned: 487, omitted: 520, cap: 490, truncated: true },
   graphRequests: 7,
+  scanSharedWithConcurrentCall: false,
 };
 
 describe("inventoryText", () => {
@@ -54,6 +55,15 @@ describe("inventoryText", () => {
   it("uses the singular for a single Graph request", () => {
     const single: InventoryToolOutput = { ...truncated, graphRequests: 1 };
     expect(inventoryText(single)[3]).toBe("This call cost 1 Graph request.");
+  });
+
+  it("says a joiner shared a scan rather than reporting a cost of zero it never paid", () => {
+    const joined: InventoryToolOutput = { ...truncated, graphRequests: 0, scanSharedWithConcurrentCall: true };
+
+    const line = inventoryText(joined)[3];
+
+    expect(line).toBe("This call issued no Graph request of its own because it shared a scan already running.");
+    expect(line).not.toContain("0 Graph requests");
   });
 
   it("states the non-truncated listing sentence on its own wording, not merely without the truncated one's word", () => {

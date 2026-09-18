@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { periodFromDate, runReconcile } from "../../../src/tools/reconciliation/run.js";
-import { createFakeToolContext } from "../../tools/fake-context.js";
+import { createFakeToolContext, scanCoordinatorStub } from "../../tools/fake-context.js";
 import type { ToolContext } from "../../../src/tools/context.js";
 import type { WorkbookSnapshot } from "../../../src/domain/reconcile/index.js";
 import type { ScanResult } from "../../../src/scan/run.js";
@@ -27,7 +27,7 @@ function contextWith(overrides: Partial<ToolContext> = {}, scan?: Partial<ScanRe
   };
 
   return createFakeToolContext({
-    scans: { run: async () => ({ result, joined: false }) },
+    scans: scanCoordinatorStub(async () => ({ result, joined: false })),
     ...overrides,
   });
 }
@@ -66,8 +66,7 @@ describe("runReconcile", () => {
     let workbookSettledWhenScanStarted: boolean | undefined;
 
     const context = contextWith({
-      scans: {
-        run: async () => {
+      scans: scanCoordinatorStub(async () => {
           workbookSettledWhenScanStarted = workbookSettled;
           return {
             result: {
@@ -84,8 +83,7 @@ describe("runReconcile", () => {
             },
             joined: false,
           };
-        },
-      },
+        }),
     });
 
     await runReconcile({ profileId: "example" }, context, async () => {
@@ -106,8 +104,7 @@ describe("runReconcile", () => {
 
   it("reports zero Graph requests for a call that joined a scan it did not start", async () => {
     const context = createFakeToolContext({
-      scans: {
-        run: async () => ({
+      scans: scanCoordinatorStub(async () => ({
           result: {
             snapshot: { files: [], folderPaths: [], scannedAt: "2026-09-14T09:00:00Z", searchCrossCheckIncluded: false },
             driveId: "drive-1",
@@ -121,8 +118,7 @@ describe("runReconcile", () => {
             unfilteredFolderCount: 0,
           },
           joined: true,
-        }),
-      },
+        })),
     });
 
     const result = await runReconcile({ profileId: "example" }, context, async () => WORKBOOK);

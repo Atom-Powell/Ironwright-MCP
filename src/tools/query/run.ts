@@ -10,6 +10,7 @@ import {
   type RepositorySnapshot,
 } from "../../domain/reconcile/index.js";
 import { assembleSnapshot } from "../../scan/snapshot.js";
+import type { ScannedDrive } from "../../store/types.js";
 import type { ToolContext } from "../context.js";
 import { describeToolFailure, type FailureSubject } from "../errors.js";
 import { QUESTIONS, type Finding, type Question } from "./output.js";
@@ -42,11 +43,85 @@ export class NeverScannedError extends Error {
 }
 
 /**
+ * Raised instead of answering when a scan this call waited on failed. A scan
+ * that fails partway through a resync has already called `clearInventory` and
+ * may have stopped before rebuilding, and what is left in the store then looks
+ * exactly like a smaller library rather than like a broken one. Answering from
+ * it would under-report every question this tool asks while stamping the reply
+ * with the previous scan's `lastScanAt`, which is the same substitution of a
+ * confident answer for absent evidence that `NeverScannedError` refuses.
+ */
+export class ConcurrentScanFailedError extends Error {
+  constructor(profileId: string) {
+    super(
+      `A scan of profile "${profileId}" was already running when this call started, and it failed. That scan may ` +
+        "have cleared the stored inventory to re-enumerate and stopped before rebuilding it, so what remains " +
+        "cannot be told apart from a library that holds only those items. Run inventory_tree or " +
+        "reconcile_workbook_vs_repository to rebuild the index, then query it again.",
+    );
+    this.name = "ConcurrentScanFailedError";
+  }
+}
+
+/**
+ * Raised instead of answering when a scan began while this call was reading the
+ * store. `ScanCoordinator.settle` closes the window that was open when this
+ * call started; it cannot close the one that opens afterwards, because there
+ * was nothing in flight to wait for. The counter reading either side of the
+ * two store reads is what makes that window observable rather than silent.
+ */
+export class ConcurrentScanStartedError extends Error {
+  constructor(profileId: string) {
+    super(
+      `A scan of profile "${profileId}" started while this call was reading the stored inventory, so the records ` +
+        "it read may be a partially rebuilt index rather than the whole library. This call refuses to answer from " +
+        "them rather than under-report. Call query_repository again once the scan has finished.",
+    );
+    this.name = "ConcurrentScanStartedError";
+  }
+}
+
+/**
+ * Newest scan first, with the drive id breaking a tie, so the order is total.
+ * Returning a fixed non-zero value for two equal `lastScanAt` values leaves
+ * the winner to whatever order the store happened to enumerate rows in, and
+ * two drives scanned inside the same millisecond are reachable: `runScan`
+ * stamps `scannedAt` from one `now()` call per scan, and two scans of a
+ * repointed profile can land on the same ISO timestamp. The response names the
+ * drive it used, so an unspecified winner would let two calls with identical
+ * inputs name different drives. This is the same reason `supersedes` in
+ * `src/domain/reconcile/index.ts` carries tiebreak keys past the one key that
+ * expresses a preference.
+ */
+function compareDrivesNewestFirst(a: ScannedDrive, b: ScannedDrive): number {
+  if (a.lastScanAt !== b.lastScanAt) return a.lastScanAt < b.lastScanAt ? 1 : -1;
+  if (a.driveId !== b.driveId) return a.driveId < b.driveId ? 1 : -1;
+  return 0;
+}
+
+/**
  * No Graph client is touched on any path through this function. The drive id
  * comes from the store rather than from `resolveDrive`, which is the whole
  * reason `getScannedDrives` exists.
+ *
+ * It does go through `ScanCoordinator` before reading, which is the one thing
+ * this tool's zero-request promise does not excuse it from. `runScan` answers
+ * a delta resync by clearing the inventory and re-enumerating, persisting the
+ * new `lastScanAt` only at the end, so a read taken inside that window returns
+ * a cleared or half-rebuilt inventory carrying the previous scan's timestamp:
+ * an under-report stamped with a freshness the evidence no longer has. Waiting
+ * on an in-flight scan costs this call no Graph request of its own, so the
+ * property the tool advertises survives intact.
  */
 async function loadSnapshot(context: ToolContext, profile: Profile): Promise<{ snapshot: RepositorySnapshot; driveId: string }> {
+  const settled = await context.scans.settle(profile);
+  if (settled.failed) throw new ConcurrentScanFailedError(profile.profileId);
+
+  // Read in the same synchronous block the `await` above resumed into, so no
+  // other handler can have started a scan between the wait ending and this
+  // baseline being taken.
+  const startedBeforeRead = context.scans.scansStarted(profile);
+
   const drives = await context.store.getScannedDrives(profile.profileId);
   if (drives.length === 0) throw new NeverScannedError(profile.profileId);
 
@@ -54,8 +129,13 @@ async function loadSnapshot(context: ToolContext, profile: Profile): Promise<{ s
   // repointed after a scan. The newest wins and the response names the drive
   // it used, because mixing two libraries' inventories would be worse than
   // either choice.
-  const chosen = [...drives].sort((a, b) => (a.lastScanAt < b.lastScanAt ? 1 : -1))[0]!;
+  const chosen = [...drives].sort(compareDrivesNewestFirst)[0]!;
   const records = await context.store.listInventory(profile.profileId, chosen.driveId);
+
+  if (context.scans.scansStarted(profile) !== startedBeforeRead) {
+    throw new ConcurrentScanStartedError(profile.profileId);
+  }
+
   return { snapshot: assembleSnapshot(records, chosen.lastScanAt), driveId: chosen.driveId };
 }
 
@@ -127,7 +207,9 @@ function answer(question: Question, profile: Profile, snapshot: RepositorySnapsh
  * store and nothing else: it never calls `context.scans.run` and never calls
  * `resolveDrive`, both of which are Graph-facing, because this tool's whole
  * reason for existing is to answer from what a prior scan already stored
- * without spending a new request against SharePoint.
+ * without spending a new request against SharePoint. `ScanCoordinator.settle`
+ * and `scansStarted`, which `loadSnapshot` does use, start no scan and issue
+ * no request; they only wait and count.
  */
 export async function runQueryRepository(input: unknown, context: ToolContext): Promise<CallToolResult> {
   const args = InputObject.parse(input);

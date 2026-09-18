@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { runInventoryTree } from "../../../src/tools/inventory/run.js";
-import { createFakeToolContext } from "../../tools/fake-context.js";
+import { createFakeToolContext, scanCoordinatorStub } from "../../tools/fake-context.js";
 import type { ToolContext } from "../../../src/tools/context.js";
 import type { ScanResult } from "../../../src/scan/run.js";
 
@@ -27,7 +27,7 @@ function contextWith(scan?: Partial<ScanResult>, joined = false): ToolContext {
   };
 
   return createFakeToolContext({
-    scans: { run: async () => ({ result, joined }) },
+    scans: scanCoordinatorStub(async () => ({ result, joined })),
   });
 }
 

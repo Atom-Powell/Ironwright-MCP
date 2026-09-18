@@ -46,6 +46,11 @@ export const INVENTORY_OUTPUT_SCHEMA = {
     })
     .describe("What survived the cap, and how much did not. `omitted` and `truncated` describe the listing, not the totals."),
   graphRequests: z.number().int().describe("What this call itself paid. Zero when this call joined a scan another call had already started."),
+  scanSharedWithConcurrentCall: z
+    .boolean()
+    .describe(
+      "True when this call awaited a scan another call had already started, which is the only reason graphRequests can be zero here. Without it a zero is ambiguous: query_repository reports zero because it never calls Graph at all, and this tool always does unless it shared someone else's call.",
+    ),
 } satisfies z.ZodRawShape;
 
 /**
@@ -69,4 +74,5 @@ export interface InventoryToolOutput {
   }>;
   listing: { returned: number; omitted: number; cap: number; truncated: boolean };
   graphRequests: number;
+  scanSharedWithConcurrentCall: boolean;
 }

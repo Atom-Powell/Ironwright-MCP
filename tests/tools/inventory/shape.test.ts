@@ -14,7 +14,7 @@ const snapshot: RepositorySnapshot = {
 
 describe("shapeInventory", () => {
   it("counts the whole library and lists all of it when under the cap", () => {
-    const output = shapeInventory("example", "Documents", snapshot, undefined, 4, {});
+    const output = shapeInventory("example", "Documents", snapshot, undefined, 4, false, {});
 
     expect(output.library).toBe("Documents");
     expect(output.totals).toEqual({ files: 2, folders: 3, bytes: 42 });
@@ -31,7 +31,7 @@ describe("shapeInventory", () => {
       folderPaths: [...snapshot.folderPaths, "2026/CLIENTAB"],
     };
 
-    const output = shapeInventory("example", "Documents", withSibling, "2026/CLIENTA", 4, {});
+    const output = shapeInventory("example", "Documents", withSibling, "2026/CLIENTA", 4, false, {});
 
     expect(output.totals).toEqual({ files: 1, folders: 1, bytes: 12 });
     expect(output.items.map((item) => item.path)).not.toContain("2026/CLIENTAB/report.docx");
@@ -53,14 +53,14 @@ describe("shapeInventory", () => {
       ],
     };
 
-    const output = shapeInventory("example", "Documents", withCrossLibrary, undefined, 4, {});
+    const output = shapeInventory("example", "Documents", withCrossLibrary, undefined, 4, false, {});
 
     expect(output.totals).toEqual({ files: 2, folders: 3, bytes: 42 });
     expect(output.items.map((item) => item.path)).not.toContain("2026/CLIENTC/report.docx");
   });
 
   it("keeps the totals exact when the listing truncates", () => {
-    const output = shapeInventory("example", "Documents", snapshot, undefined, 4, { maxItems: 2 });
+    const output = shapeInventory("example", "Documents", snapshot, undefined, 4, false, { maxItems: 2 });
 
     expect(output.totals).toEqual({ files: 2, folders: 3, bytes: 42 });
     expect(output.listing).toEqual({ returned: 2, omitted: 3, cap: 2, truncated: true });
@@ -68,7 +68,7 @@ describe("shapeInventory", () => {
   });
 
   it("omits size and modified for a folder rather than reporting a false value", () => {
-    const output = shapeInventory("example", "Documents", snapshot, undefined, 4, {});
+    const output = shapeInventory("example", "Documents", snapshot, undefined, 4, false, {});
     const folder = output.items.find((item) => item.kind === "folder");
 
     expect(folder).toBeDefined();
@@ -77,26 +77,26 @@ describe("shapeInventory", () => {
   });
 
   it("carries a file's own size and modified date through unchanged", () => {
-    const output = shapeInventory("example", "Documents", snapshot, undefined, 4, {});
+    const output = shapeInventory("example", "Documents", snapshot, undefined, 4, false, {});
     const file = output.items.find((item) => item.path === "2026/CLIENTA/report.docx");
 
     expect(file).toMatchObject({ size: 12, modified: "2026-09-01T00:00:00.000Z" });
   });
 
   it("omits subPath from the output when none was given", () => {
-    const output = shapeInventory("example", "Documents", snapshot, undefined, 4, {});
+    const output = shapeInventory("example", "Documents", snapshot, undefined, 4, false, {});
 
     expect(output).not.toHaveProperty("subPath");
   });
 
   it("carries subPath through when one was given", () => {
-    const output = shapeInventory("example", "Documents", snapshot, "2026/CLIENTA", 4, {});
+    const output = shapeInventory("example", "Documents", snapshot, "2026/CLIENTA", 4, false, {});
 
     expect(output.subPath).toBe("2026/CLIENTA");
   });
 
   it("reports the graphRequests it was given", () => {
-    const output = shapeInventory("example", "Documents", snapshot, undefined, 7, {});
+    const output = shapeInventory("example", "Documents", snapshot, undefined, 7, false, {});
 
     expect(output.graphRequests).toBe(7);
   });

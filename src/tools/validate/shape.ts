@@ -141,6 +141,7 @@ export function shapeValidateStructure(
   snapshot: RepositorySnapshot,
   requestedClients: readonly string[] | undefined,
   graphRequests: number,
+  scanSharedWithConcurrentCall: boolean,
   options: ValidateShapeOptions,
 ): ValidateStructureOutput {
   const index = clientSegmentIndex(profile);
@@ -179,5 +180,6 @@ export function shapeValidateStructure(
       truncated: listed.length < evaluated.length,
     },
     graphRequests,
+    scanSharedWithConcurrentCall,
   };
 }

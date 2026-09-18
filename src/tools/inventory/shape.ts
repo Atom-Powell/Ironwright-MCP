@@ -31,6 +31,7 @@ export function shapeInventory(
   snapshot: RepositorySnapshot,
   subPath: string | undefined,
   graphRequests: number,
+  scanSharedWithConcurrentCall: boolean,
   options: InventoryShapeOptions,
 ): InventoryToolOutput {
   const cap = options.maxItems ?? MAX_INVENTORY_ITEMS;
@@ -83,5 +84,6 @@ export function shapeInventory(
       truncated: listed.length < items.length,
     },
     graphRequests,
+    scanSharedWithConcurrentCall,
   };
 }

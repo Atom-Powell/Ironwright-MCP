@@ -40,6 +40,7 @@ const base: ValidateStructureOutput = {
   ],
   listing: { returned: 6, omitted: 0, cap: 50, truncated: false },
   graphRequests: 4,
+  scanSharedWithConcurrentCall: false,
 };
 
 describe("validateStructureText", () => {
@@ -67,9 +68,31 @@ describe("validateStructureText", () => {
     const lines = validateStructureText(base);
 
     expect(lines[1]).toBe(
-      "Not compliant: CLIENTB (non_compliant), CLIENTC (missing), CLIENTD (non_compliant), CLIENTE (missing), " +
-        "CLIENTF (missing).",
+      "Not compliant, among the clients listed here: CLIENTB (non_compliant), CLIENTC (missing), " +
+        "CLIENTD (non_compliant), CLIENTE (missing), CLIENTF (missing).",
     );
+  });
+
+  it("qualifies the not-compliant sentence as covering the listing, because it is computed over the listing", () => {
+    // Four of eleven evaluated clients are listed, and only one of the four is
+    // not compliant, while the totals say five are. A sentence that named that
+    // one without saying which set it came from would read as the complete
+    // answer to which clients are in trouble.
+    const truncated: ValidateStructureOutput = {
+      ...base,
+      totals: { clients: 11, compliant: 6, nonCompliant: 2, missing: 3 },
+      clients: [
+        client({ client: "CLIENTA", verdict: "compliant" }),
+        client({ client: "CLIENTB", verdict: "compliant" }),
+        client({ client: "CLIENTC", verdict: "compliant" }),
+        client({ client: "CLIENTD", verdict: "non_compliant", nonConformingFolders: ["2026/CLIENTD/Sept"] }),
+      ],
+      listing: { returned: 4, omitted: 7, cap: 9, truncated: true },
+    };
+
+    const lines = validateStructureText(truncated);
+
+    expect(lines[1]).toBe("Not compliant, among the clients listed here: CLIENTD (non_compliant).");
   });
 
   it("states plainly that no listed client is non-compliant or missing when every one is compliant", () => {
@@ -86,10 +109,15 @@ describe("validateStructureText", () => {
   it("says nothing about the client listing being truncated when it was not", () => {
     const lines = validateStructureText(base);
 
-    expect(lines).toHaveLength(2);
+    // Three lines: the totals, the not-compliant sentence, and the cost. The
+    // length is asserted alongside the absence of the truncation wording so a
+    // truncation sentence appended anywhere fails this, not only one appended
+    // in the place it would normally go.
+    expect(lines).toHaveLength(3);
+    expect(lines.join("\n")).not.toContain("left out");
   });
 
-  it("states the client-listing truncation sentence with the returned count, the omitted count, the total evaluated and the cap each in their own place", () => {
+  it("states the client-listing truncation sentence with the returned count, the omitted count, the total evaluated and the cap each in their own place, and names the narrowing argument", () => {
     const truncated: ValidateStructureOutput = {
       ...base,
       totals: { clients: 23, compliant: 23, nonCompliant: 0, missing: 0 },
@@ -99,7 +127,33 @@ describe("validateStructureText", () => {
 
     const lines = validateStructureText(truncated);
 
-    expect(lines[2]).toBe("Listing 7 clients of 23 evaluated; 4 more were left out to keep this response bounded at 11.");
+    expect(lines[2]).toBe(
+      "Listing 7 clients of 23 evaluated; 4 more were left out to keep this response bounded at 11. " +
+        "Name the clients you need in the clients argument to see the rest.",
+    );
+  });
+
+  it("states what the call cost as its own closing sentence, because this tool runs a real scan", () => {
+    const lines = validateStructureText(base);
+
+    expect(lines[lines.length - 1]).toBe("This call cost 4 Graph requests.");
+  });
+
+  it("uses the singular for a single Graph request", () => {
+    const single: ValidateStructureOutput = { ...base, graphRequests: 1 };
+
+    const lines = validateStructureText(single);
+
+    expect(lines[lines.length - 1]).toBe("This call cost 1 Graph request.");
+  });
+
+  it("says a joiner shared a scan rather than reporting a cost of zero it never paid", () => {
+    const joined: ValidateStructureOutput = { ...base, graphRequests: 0, scanSharedWithConcurrentCall: true };
+
+    const line = validateStructureText(joined).at(-1);
+
+    expect(line).toBe("This call issued no Graph request of its own because it shared a scan already running.");
+    expect(line).not.toContain("0 Graph requests");
   });
 
   it("states a truncated non-conforming folder list with the listed count, the omitted count and the true total each in their own place", () => {

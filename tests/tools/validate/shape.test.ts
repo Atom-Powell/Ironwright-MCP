@@ -73,7 +73,7 @@ describe("shapeValidateStructure", () => {
       ["2026", "2026/CLIENTA", "2026/CLIENTA/09"],
     );
 
-    const output = shapeValidateStructure("example", "Compliance Reports", profile, snapshot, undefined, 3, {});
+    const output = shapeValidateStructure("example", "Compliance Reports", profile, snapshot, undefined, 3, false, {});
 
     expect(output.clients).toEqual([
       {
@@ -94,7 +94,7 @@ describe("shapeValidateStructure", () => {
       ["2026", "2026/CLIENTA", "2026/CLIENTA/Sept"],
     );
 
-    const output = shapeValidateStructure("example", "Compliance Reports", profile, snapshot, undefined, 3, {});
+    const output = shapeValidateStructure("example", "Compliance Reports", profile, snapshot, undefined, 3, false, {});
     const clienta = output.clients.find((client) => client.client === "CLIENTA");
 
     expect(clienta?.verdict).toBe("non_compliant");
@@ -108,7 +108,7 @@ describe("shapeValidateStructure", () => {
       ["2026", "2026/CLIENTA", "2026/CLIENTA/09"],
     );
 
-    const output = shapeValidateStructure("example", "Compliance Reports", profile, snapshot, undefined, 3, {});
+    const output = shapeValidateStructure("example", "Compliance Reports", profile, snapshot, undefined, 3, false, {});
     const clienta = output.clients.find((client) => client.client === "CLIENTA");
 
     expect(clienta?.verdict).toBe("non_compliant");
@@ -125,7 +125,7 @@ describe("shapeValidateStructure", () => {
   it("reports missing for a client named explicitly with no folder at all", () => {
     const snapshot = snapshotOf([], ["2026"]);
 
-    const output = shapeValidateStructure("example", "Compliance Reports", profile, snapshot, ["CLIENTZ"], 3, {});
+    const output = shapeValidateStructure("example", "Compliance Reports", profile, snapshot, ["CLIENTZ"], 3, false, {});
 
     expect(output.clients).toEqual([
       {
@@ -143,7 +143,7 @@ describe("shapeValidateStructure", () => {
   it("omits a client that is neither named nor present in the library", () => {
     const snapshot = snapshotOf([], ["2026", "2026/CLIENTA"]);
 
-    const output = shapeValidateStructure("example", "Compliance Reports", profile, snapshot, undefined, 3, {});
+    const output = shapeValidateStructure("example", "Compliance Reports", profile, snapshot, undefined, 3, false, {});
 
     expect(output.clients.map((client) => client.client)).toEqual(["CLIENTA"]);
   });
@@ -151,7 +151,7 @@ describe("shapeValidateStructure", () => {
   it("counts every client evaluated even when the client listing truncates", () => {
     const snapshot = snapshotOf([], ["2026", "2026/CLIENTA", "2026/CLIENTB", "2026/CLIENTC"]);
 
-    const output = shapeValidateStructure("example", "Compliance Reports", profile, snapshot, undefined, 3, {
+    const output = shapeValidateStructure("example", "Compliance Reports", profile, snapshot, undefined, 3, false, {
       maxClients: 2,
     });
 
@@ -166,7 +166,7 @@ describe("shapeValidateStructure", () => {
     );
     const snapshot = snapshotOf(files, ["2026", "2026/CLIENTA", "2026/CLIENTA/09"]);
 
-    const output = shapeValidateStructure("example", "Compliance Reports", profile, snapshot, undefined, 3, {});
+    const output = shapeValidateStructure("example", "Compliance Reports", profile, snapshot, undefined, 3, false, {});
     const clienta = output.clients.find((client) => client.client === "CLIENTA");
 
     expect(clienta?.verdict).toBe("non_compliant");
@@ -180,7 +180,7 @@ describe("shapeValidateStructure", () => {
       ["2026", "2026/CLIENTA", "2026/CLIENTA/09"],
     );
 
-    const output = shapeValidateStructure("example", "Compliance Reports", profile, snapshot, undefined, 3, {});
+    const output = shapeValidateStructure("example", "Compliance Reports", profile, snapshot, undefined, 3, false, {});
     const clienta = output.clients.find((client) => client.client === "CLIENTA");
 
     expect(clienta?.verdict).toBe("compliant");
@@ -189,7 +189,7 @@ describe("shapeValidateStructure", () => {
   it("reports the graphRequests it was given", () => {
     const snapshot = snapshotOf([], ["2026", "2026/CLIENTA"]);
 
-    const output = shapeValidateStructure("example", "Compliance Reports", profile, snapshot, undefined, 7, {});
+    const output = shapeValidateStructure("example", "Compliance Reports", profile, snapshot, undefined, 7, false, {});
 
     expect(output.graphRequests).toBe(7);
   });

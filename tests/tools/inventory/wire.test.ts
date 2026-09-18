@@ -3,7 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod";
 import { buildServer } from "../../../src/mcp/build-server.js";
-import { createFakeToolContext } from "../../tools/fake-context.js";
+import { createFakeToolContext, scanCoordinatorStub } from "../../tools/fake-context.js";
 import { INVENTORY_OUTPUT_SCHEMA } from "../../../src/tools/inventory/output.js";
 import { shapeInventory } from "../../../src/tools/inventory/shape.js";
 import type { ScanCoordinator } from "../../../src/scan/coordinator.js";
@@ -42,7 +42,7 @@ describe("inventory_tree over the wire", () => {
   });
 
   it("declares an output schema the shaped inventory validates against", () => {
-    const output = shapeInventory("example", "Compliance Reports", SNAPSHOT, undefined, 3, {});
+    const output = shapeInventory("example", "Compliance Reports", SNAPSHOT, undefined, 3, false, {});
 
     expect(() => z.object(INVENTORY_OUTPUT_SCHEMA).parse(output)).not.toThrow();
   });
@@ -55,8 +55,7 @@ describe("inventory_tree over the wire", () => {
     // transport. This one does, with a snapshot carrying both a file and a
     // folder so the listing's per-kind optional fields (size, modified) are
     // both exercised rather than validated against an empty array.
-    const scans: ScanCoordinator = {
-      run: () =>
+    const scans: ScanCoordinator = scanCoordinatorStub(() =>
         Promise.resolve({
           result: {
             snapshot: SNAPSHOT,
@@ -71,8 +70,7 @@ describe("inventory_tree over the wire", () => {
             unfilteredFolderCount: SNAPSHOT.folderPaths.length,
           },
           joined: false,
-        }),
-    };
+        }));
 
     const context = createFakeToolContext({ scans });
 

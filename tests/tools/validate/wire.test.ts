@@ -3,7 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod";
 import { buildServer } from "../../../src/mcp/build-server.js";
-import { createFakeToolContext } from "../../tools/fake-context.js";
+import { createFakeToolContext, scanCoordinatorStub } from "../../tools/fake-context.js";
 import { VALIDATE_STRUCTURE_OUTPUT_SCHEMA } from "../../../src/tools/validate/output.js";
 import { shapeValidateStructure } from "../../../src/tools/validate/shape.js";
 import type { ScanCoordinator } from "../../../src/scan/coordinator.js";
@@ -111,7 +111,7 @@ describe("validate_structure over the wire", () => {
   });
 
   it("declares an output schema the shaped validation validates against, with real nonConformingFolders and nonConformingFiles entries", () => {
-    const output = shapeValidateStructure("example", "Compliance Reports", PROFILE, SNAPSHOT, undefined, 3, {});
+    const output = shapeValidateStructure("example", "Compliance Reports", PROFILE, SNAPSHOT, undefined, 3, false, {});
     const clientb = output.clients.find((client) => client.client === "CLIENTB");
 
     expect(clientb?.nonConformingFolders.length).toBeGreaterThan(0);
@@ -129,8 +129,7 @@ describe("validate_structure over the wire", () => {
     // populated at least once, including a real entry inside
     // nonConformingFolders and nonConformingFiles rather than only the empty
     // arrays a lone compliant client would produce.
-    const scans: ScanCoordinator = {
-      run: () =>
+    const scans: ScanCoordinator = scanCoordinatorStub(() =>
         Promise.resolve({
           result: {
             snapshot: REAL_EXAMPLE_SNAPSHOT,
@@ -145,8 +144,7 @@ describe("validate_structure over the wire", () => {
             unfilteredFolderCount: REAL_EXAMPLE_SNAPSHOT.folderPaths.length,
           },
           joined: false,
-        }),
-    };
+        }));
 
     const context = createFakeToolContext({ scans });
 

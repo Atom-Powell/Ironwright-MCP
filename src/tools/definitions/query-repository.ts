@@ -10,7 +10,7 @@ export const queryRepository: ToolDefinition = {
   title: "Query the repository index",
   description: [
     "Answer operational questions from the stored repository index: empty folders, files whose names do not meet the standard, and recently modified reports.",
-    "Costs no new requests against SharePoint when the index is fresh, so prefer it over inventory_tree for repeated questions. Results are as current as the last inventory, which the response reports.",
+    "Costs no new requests against SharePoint, on any input, so prefer it over inventory_tree for repeated questions. Results are as current as the last inventory, which the response reports.",
     SAFETY_SENTENCES.read,
   ].join(" "),
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },

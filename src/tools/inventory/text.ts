@@ -41,7 +41,16 @@ export function inventoryText(output: InventoryToolOutput): string[] {
     lines.push(`Listing every item counted above, ${output.listing.returned} in all.`);
   }
 
-  lines.push(`This call cost ${plural(output.graphRequests, "Graph request", "Graph requests")}.`);
+  // A bare "cost 0 Graph requests" for a joiner would read as a scan that was
+  // free, when in fact another call paid for it and this one waited. The two
+  // branches are separate sentences rather than one template with a suffix,
+  // for the reason `reconcileText` records: a suffix appended to one branch
+  // produced a sentence correct clause by clause and false once assembled.
+  lines.push(
+    output.scanSharedWithConcurrentCall
+      ? "This call issued no Graph request of its own because it shared a scan already running."
+      : `This call cost ${plural(output.graphRequests, "Graph request", "Graph requests")}.`,
+  );
 
   return lines;
 }

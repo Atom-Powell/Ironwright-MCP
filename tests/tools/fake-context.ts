@@ -7,6 +7,25 @@ import type { ScanCoordinator } from "../../src/scan/coordinator.js";
 import type { InventoryRecord, ScannedDrive, StateStore } from "../../src/store/types.js";
 
 /**
+ * A `ScanCoordinator` whose `run` is whatever the caller supplies and whose
+ * other two methods answer for a coordinator that has never started a scan.
+ *
+ * Those two answers are truthful rather than convenient. `settle` reports
+ * nothing in flight because nothing this stub did put anything in flight, and
+ * `scansStarted` reports zero for the same reason, so a caller that brackets
+ * its store reads with the counter sees an unchanged count and is right to.
+ * Rejecting from either, the way `run` does by default here, would make a
+ * reader's honest check fail rather than pass truthfully.
+ */
+export function scanCoordinatorStub(run: ScanCoordinator["run"]): ScanCoordinator {
+  return {
+    run,
+    settle: () => Promise.resolve({ awaited: false, failed: false }),
+    scansStarted: () => 0,
+  };
+}
+
+/**
  * A context whose dependencies do nothing useful, for suites that exercise the
  * wiring rather than the work. The Graph client and the scan coordinator reject
  * rather than returning plausible empty data, so a test that accidentally
@@ -40,9 +59,9 @@ export function createFakeToolContext(overrides: Partial<ToolContext> = {}): Too
     requests: () => requestCount,
   };
 
-  const scans: ScanCoordinator = {
-    run: () => Promise.reject(new Error("the fake scan coordinator was called")),
-  };
+  const scans: ScanCoordinator = scanCoordinatorStub(() =>
+    Promise.reject(new Error("the fake scan coordinator was called")),
+  );
 
   return {
     profiles: createProfileRegistry([
