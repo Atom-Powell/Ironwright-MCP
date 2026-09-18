@@ -126,17 +126,29 @@ export function buildWorkbook(options: BuildWorkbookOptions): Uint8Array {
     }
     const owningPartNumber = partNumber(owningSheet, table.sheetIndex);
 
+    const tablePartName = `xl/tables/table${String(tableIndex)}.xml`;
     const headerRowCount = table.headerRowCount !== undefined ? ` headerRowCount="${table.headerRowCount}"` : "";
-    parts[`xl/tables/table${String(tableIndex)}.xml`] = strToU8(
-      '<?xml version="1.0"?><table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
-        `id="${String(tableIndex + 1)}" name="${table.name}" displayName="${table.name}" ref="${table.ref}"` +
-        `${headerRowCount}></table>`,
-    );
-    parts[`xl/worksheets/_rels/sheet${String(owningPartNumber)}.xml.rels`] = strToU8(
-      "<?xml version=\"1.0\"?><Relationships>" +
-        `<Relationship Id="rIdTable${String(tableIndex)}" Type="${REL_TYPE_TABLE}" ` +
-        `Target="../tables/table${String(tableIndex)}.xml"/></Relationships>`,
-    );
+    if (!omit.has(tablePartName)) {
+      parts[tablePartName] = strToU8(
+        '<?xml version="1.0"?><table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
+          `id="${String(tableIndex + 1)}" name="${table.name}" displayName="${table.name}" ref="${table.ref}"` +
+          `${headerRowCount}></table>`,
+      );
+    }
+
+    // Honoring omit here too, consistent with every other part written
+    // above: this is the reverse link findOwningWorksheetPart depends on,
+    // and a caller proving that a table with no such link cannot be
+    // resolved needs to omit exactly this part without also losing the
+    // table part itself.
+    const relsPartName = `xl/worksheets/_rels/sheet${String(owningPartNumber)}.xml.rels`;
+    if (!omit.has(relsPartName)) {
+      parts[relsPartName] = strToU8(
+        "<?xml version=\"1.0\"?><Relationships>" +
+          `<Relationship Id="rIdTable${String(tableIndex)}" Type="${REL_TYPE_TABLE}" ` +
+          `Target="../tables/table${String(tableIndex)}.xml"/></Relationships>`,
+      );
+    }
   });
 
   return zipSync(parts);

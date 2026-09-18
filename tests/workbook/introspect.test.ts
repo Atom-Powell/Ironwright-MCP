@@ -29,6 +29,28 @@ function workbookWithEmptySheet(): Uint8Array {
   return buildWorkbook({ sheets: [{ name: "Blank", rowsXml: "" }] });
 }
 
+function workbookWithBrokenSheet(): Uint8Array {
+  // The sheet list declares "Broken" and the workbook rels resolve it to
+  // sheet0.xml as usual; omitting that part is what breaks the archive,
+  // the same missing-part condition parseWorkbookGrid's resolveWorksheet
+  // raises for a mapped read.
+  return buildWorkbook({
+    sheets: [{ name: "Broken", rowsXml: "" }],
+    omitParts: ["xl/worksheets/sheet0.xml"],
+  });
+}
+
+function workbookWithUnresolvableTable(): Uint8Array {
+  // The table part itself is present, so findTables still finds "Orphan";
+  // omitting the owning worksheet's own rels part is what breaks the
+  // reverse link findOwningWorksheetPart depends on.
+  return buildWorkbook({
+    sheets: [{ name: "Tracking", rowsXml: "", dimension: "A1:D12" }],
+    tables: [{ name: "Orphan", ref: "A1:D12", sheetIndex: 0 }],
+    omitParts: ["xl/worksheets/_rels/sheet0.xml.rels"],
+  });
+}
+
 describe("readWorkbookInventory", () => {
   it("lists every worksheet with its used range and size", () => {
     const inventory = readWorkbookInventory(workbookWithTwoSheets());
@@ -67,5 +89,45 @@ describe("readWorkbookInventory", () => {
     const inventory = readWorkbookInventory(bytes);
 
     expect(inventory.sheets).toEqual([{ name: "Huge", usedRange: "A1:XFD1048576", rows: 1_048_576, columns: 16_384 }]);
+  });
+
+  it("normalizes a single-cell dimension ref, which carries no colon, into a one cell range", () => {
+    const bytes = buildWorkbook({ sheets: [{ name: "OneCell", rowsXml: "", dimension: "B7" }] });
+
+    const inventory = readWorkbookInventory(bytes);
+
+    expect(inventory.sheets).toEqual([{ name: "OneCell", usedRange: "B7", rows: 1, columns: 1 }]);
+  });
+
+  it("records a table whose owning sheet cannot be resolved as unresolved rather than dropping it silently", () => {
+    const inventory = readWorkbookInventory(workbookWithUnresolvableTable());
+
+    expect(inventory.tables).toEqual([]);
+    expect(inventory.unresolved).toEqual([
+      {
+        kind: "table",
+        name: "Orphan",
+        reason: expect.stringContaining("worksheet holds it cannot be determined") as string,
+      },
+    ]);
+  });
+
+  it("does not conflate a sheet whose part is missing with one that legitimately has no cells", () => {
+    const emptyInventory = readWorkbookInventory(workbookWithEmptySheet());
+    const brokenInventory = readWorkbookInventory(workbookWithBrokenSheet());
+
+    expect(emptyInventory.sheets).toEqual([{ name: "Blank", rows: 0, columns: 0 }]);
+    expect(emptyInventory.unresolved).toEqual([]);
+
+    expect(brokenInventory.sheets).toEqual([]);
+    expect(brokenInventory.unresolved).toEqual([
+      { kind: "sheet", name: "Broken", reason: expect.stringContaining("missing from the archive") as string },
+    ]);
+
+    // The assertion the finding says would have caught this: an empty sheet
+    // and a broken one must not compare equal, which a shared
+    // { rows: 0, columns: 0 } shape for both would have let slip past every
+    // other assertion above.
+    expect(emptyInventory).not.toEqual(brokenInventory);
   });
 });

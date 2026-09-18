@@ -27,9 +27,29 @@ export interface TableSummary {
   hasHeaderRow: boolean;
 }
 
+/**
+ * A sheet the workbook's own sheet list declared, or a table findTables
+ * found, whose owning part or owning sheet could not be resolved. Carried
+ * here rather than silently left out of `sheets` or `tables`, the same
+ * reason `read.ts` carries a row it could not turn into a `ClientRecord`
+ * into `rejectedRows` instead of just skipping it: a thing that was
+ * observed to exist and then could not be read must be surfaced, never
+ * swallowed, or a caller cannot tell a workbook that truly has two tables
+ * from one that has three where one could not be resolved.
+ */
+export interface UnresolvedInventoryEntry {
+  /** What kind of thing this was. */
+  kind: "sheet" | "table";
+  /** The name the workbook itself gives it. */
+  name: string;
+  /** Why it could not be resolved, in terms an operator can act on. */
+  reason: string;
+}
+
 export interface WorkbookInventory {
   sheets: SheetSummary[];
   tables: TableSummary[];
+  unresolved: UnresolvedInventoryEntry[];
 }
 
 const DIMENSION_PATTERN = /<dimension\b[^>]*\/>|<dimension\b[^>]*>/;
@@ -101,6 +121,11 @@ function describeUsedRange(sheetXml: string, subject: string): { usedRange?: str
  * worksheet part's own declared <dimension> and each table part's own
  * declared ref, the same parts parseWorkbookGrid reads to resolve a mapped
  * range, read here for their shape rather than their cell contents.
+ *
+ * A sheet or table whose own internal wiring cannot be resolved is never
+ * silently left out of `sheets` or `tables`; it is reported in `unresolved`
+ * instead, so this survey never returns a shorter, confident-looking list
+ * with no trace of what it could not read.
  */
 export function readWorkbookInventory(bytes: Uint8Array): WorkbookInventory {
   const parts = readZipParts(
@@ -122,17 +147,29 @@ export function readWorkbookInventory(bytes: Uint8Array): WorkbookInventory {
 
   const sheetEntries = listSheetEntries(parts, workbookXml, workbookRelsXml);
 
-  const sheets: SheetSummary[] = sheetEntries.map((entry) => {
-    const sheetXml = parts.get(entry.partName);
-    // The workbook's own sheet list names a part parseWorkbookGrid would also
-    // fail to find; consistent with resolveWorksheet's own handling of the
-    // same condition, this reports the sheet as carrying no cells rather than
-    // throwing, since inventory mode's purpose is to survey what is there,
-    // including a workbook whose internal wiring is already broken.
-    if (sheetXml === undefined) return { name: entry.name, rows: 0, columns: 0 };
+  const sheets: SheetSummary[] = [];
+  const unresolved: UnresolvedInventoryEntry[] = [];
 
-    return { name: entry.name, ...describeUsedRange(sheetXml, `The worksheet "${entry.name}"`) };
-  });
+  for (const entry of sheetEntries) {
+    const sheetXml = parts.get(entry.partName);
+    if (sheetXml === undefined) {
+      // The workbook's own sheet list names a part parseWorkbookGrid would
+      // also fail to find, the same broken-wiring condition resolveWorksheet
+      // in xlsx.ts raises for a mapped worksheet read. Recorded as unresolved
+      // rather than reported as a zero-size sheet: a sheet that genuinely
+      // has no cells and a sheet whose part cannot be found are different
+      // facts, and { rows: 0, columns: 0 } for both is the exact conflation
+      // the rejection precedent this function follows exists to prevent.
+      unresolved.push({
+        kind: "sheet",
+        name: entry.name,
+        reason: `resolves to ${entry.partName}, which is missing from the archive`,
+      });
+      continue;
+    }
+
+    sheets.push({ name: entry.name, ...describeUsedRange(sheetXml, `The worksheet "${entry.name}"`) });
+  }
 
   const sheetNameByPart = new Map(sheetEntries.map((entry) => [entry.partName, entry.name]));
 
@@ -140,11 +177,29 @@ export function readWorkbookInventory(bytes: Uint8Array): WorkbookInventory {
   for (const table of findTables(parts)) {
     const owningWorksheetPart = findOwningWorksheetPart(parts, table.partName);
     const sheetName = owningWorksheetPart === undefined ? undefined : sheetNameByPart.get(owningWorksheetPart);
-    // A table whose owning sheet cannot be resolved, the same broken-wiring
-    // condition resolveTable in xlsx.ts raises for a mapped table read, is
-    // left out of the inventory here instead: a survey tool reports what it
-    // could resolve rather than failing the whole listing over one table.
-    if (sheetName === undefined) continue;
+
+    if (sheetName === undefined) {
+      // findTables already observed this table exists, so it is recorded as
+      // unresolved rather than left out of `tables` with no trace: dropping
+      // it silently is exactly what would make a workbook with three tables,
+      // one of them broken, indistinguishable from one that only ever had
+      // two. Two different broken-wiring conditions land here, the same way
+      // read.ts's own rejectedRows carries several distinct causes under one
+      // reason field: no worksheet's relationships point at the table part
+      // at all, or they do but that worksheet is not among the workbook's
+      // own declared sheets.
+      unresolved.push({
+        kind: "table",
+        name: table.name,
+        reason:
+          owningWorksheetPart === undefined
+            ? `is defined in ${table.partName}, but no worksheet's relationships point at that part, so which ` +
+              "worksheet holds it cannot be determined"
+            : `belongs to worksheet part ${owningWorksheetPart}, which is not among the workbook's declared ` +
+              "sheets, so its sheet name cannot be determined",
+      });
+      continue;
+    }
 
     const bounds = parseRangeRef(table.ref, `The table "${table.name}"`);
     tables.push({
@@ -160,5 +215,5 @@ export function readWorkbookInventory(bytes: Uint8Array): WorkbookInventory {
     });
   }
 
-  return { sheets, tables };
+  return { sheets, tables, unresolved };
 }
