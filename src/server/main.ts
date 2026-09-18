@@ -1,4 +1,5 @@
 import { createApp } from "./app.js";
+import { installShutdown } from "./shutdown.js";
 import { loadConfig } from "./config.js";
 import { buildServer } from "../mcp/build-server.js";
 import { loadGraphCredentials, loadGrantedSiteUrl, loadShutdownDeadlineMs, loadStoreConnectionString } from "../config.js";
@@ -10,103 +11,6 @@ import { ensureTables, tableStateStoreFromConnectionString } from "../store/tabl
 import { createScanCoordinator } from "../scan/coordinator.js";
 import type { StateStore } from "../store/types.js";
 import type { ToolContext } from "../tools/context.js";
-
-/**
- * The surface `installShutdown` needs from `http.Server`: draining, closing
- * idle sockets, and the connection count read at the deadline. Kept narrow
- * rather than importing `http.Server` itself, so a test can supply a fake
- * without standing up a real socket.
- *
- * `getConnections`, not a `connections` property. A real `net.Server` has no
- * `connections` property at runtime; only `@types/node` still declares one,
- * a stale type left over from an API Node has since removed. Reading
- * `server.connections` in production therefore returned `undefined` while
- * `tsc` agreed it was a `number`, which is exactly how that defect shipped
- * once already: the compiler cannot be trusted here, only the runtime can.
- * Measured directly against `http.createServer()` before writing this.
- */
-export interface ShutdownServer {
-  close(callback: (error?: Error) => void): void;
-  closeIdleConnections(): void;
-  getConnections(callback: (error: Error | null, count: number) => void): void;
-}
-
-export interface ShutdownDependencies {
-  server: ShutdownServer;
-  deadlineMs: number;
-  exit: (code: number) => void;
-  log: (message: string) => void;
-}
-
-/**
- * Builds and returns the SIGTERM handler rather than registering it directly,
- * so a test can invoke the returned function and observe what it does without
- * sending a real signal to the test runner's own process. `runReconcile`
- * takes its workbook reader the same way, for the same reason: the dependency
- * that would otherwise be unreachable from a test becomes an argument.
- *
- * The drain (`server.close`'s callback) and the deadline timer race each
- * other. Whichever finishes first exits the process; `settled` stops the
- * other from exiting a second time when it eventually fires too, since
- * `server.close`'s callback still runs once an outstanding request finishes
- * even after the deadline has already exited, and clearing the timer stops it
- * firing once the drain has already exited. Two exits is not just noise: it
- * would race a second `process.exit(0)` against whatever cleanup the first
- * one started.
- */
-export function installShutdown({ server, deadlineMs, exit, log }: ShutdownDependencies): () => void {
-  return (): void => {
-    let settled = false;
-
-    function finish(code: number): void {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      exit(code);
-    }
-
-    log("received SIGTERM, finishing in-flight requests before exit");
-
-    const timer = setTimeout(() => {
-      // getConnections is asynchronous, and exit must not wait on it: a
-      // shutdown path that gates exit on a callback has reintroduced the hang
-      // this deadline exists to remove. So the count is requested and finish
-      // is called right behind it, not from inside its callback.
-      //
-      // Measured against a real process.exit: calling it immediately after
-      // starting an asynchronous request starves that request's callback of
-      // a turn, so in production this usually means the callback never gets
-      // a chance to log the number at all. That is accepted rather than
-      // worked around, because the alternative -- delaying exit to improve
-      // the odds of a number -- is exactly the waiting this is not allowed to
-      // do. The one property that must hold is the one that broke last time:
-      // if a number is printed, it was actually read from the server, never
-      // invented, defaulted, or left over from a stale count.
-      server.getConnections((error, count) => {
-        if (error) {
-          log(`shutdown deadline of ${deadlineMs}ms reached with the drain not complete, exiting`);
-          return;
-        }
-        log(
-          `shutdown deadline of ${deadlineMs}ms reached with ${count} ${
-            count === 1 ? "request" : "requests"
-          } still in flight, exiting`,
-        );
-      });
-
-      finish(0);
-    }, deadlineMs);
-
-    server.close(() => {
-      finish(0);
-    });
-
-    // Idle keep-alive sockets are closed explicitly because otherwise they
-    // hold the server open until their own timeout, well past the platform's
-    // grace period, and the process is killed anyway.
-    server.closeIdleConnections();
-  };
-}
 
 async function main(): Promise<void> {
   const config = loadConfig(process.env);
@@ -205,6 +109,12 @@ async function main(): Promise<void> {
   process.on("SIGTERM", installShutdown({ server, deadlineMs: shutdownDeadlineMs, exit: process.exit, log: console.log }));
 }
 
+// This module exports nothing, and that is load bearing rather than incidental.
+// The call below runs on import, so anything that imports this file for a value
+// binds a port and, when a table connection string is present, reaches Azure
+// before the importer's first line runs. A test did exactly that once; the
+// shutdown handler moved to ./shutdown.js so it could stop.
+//
 // The whole point of validating configuration and profiles before binding the
 // port is that a misconfigured deployment fails fast with something an operator
 // can act on. An unhandled top-level rejection would answer that with a raw

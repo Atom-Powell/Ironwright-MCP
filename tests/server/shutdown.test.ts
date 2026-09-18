@@ -1,7 +1,7 @@
 import { createServer, get as httpGet } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
-import { installShutdown, type ShutdownServer } from "../../src/server/main.js";
+import { installShutdown, type ShutdownServer } from "../../src/server/shutdown.js";
 
 interface FakeServerOptions {
   connections: number;
@@ -66,17 +66,52 @@ describe("installShutdown", () => {
     await delay(60);
 
     expect(exits).toEqual([0]);
-    expect(logs.join("\n")).toContain("1 request still in flight");
+    expect(logs.join("\n")).toContain("shutdown deadline of 20ms reached with the drain not complete");
+    expect(logs.join("\n")).toContain("1 connection was still open");
   });
 
-  it("names the count in the plural when more than one request is outstanding", async () => {
+  it("names the count in the plural when more than one connection is open", async () => {
     const server = fakeHttpServer({ closeNeverCompletes: true, connections: 3 });
     const logs: string[] = [];
 
     installShutdown({ server, deadlineMs: 20, exit: () => {}, log: (l) => logs.push(l) })();
     await delay(60);
 
-    expect(logs.join("\n")).toContain("3 requests still in flight");
+    expect(logs.join("\n")).toContain("3 connections were still open");
+  });
+
+  it("logs the deadline line synchronously, before the count is even requested", async () => {
+    // The production exit terminates the process inside the timer callback, so
+    // a deadline line that waits on anything asynchronous is never printed at
+    // all. This pins the ordering that makes the line survive: it is already on
+    // the log when the callback has yielded nothing else.
+    const server = fakeHttpServer({ closeNeverCompletes: true, connections: 1, getConnectionsNeverCompletes: true });
+    const logs: string[] = [];
+
+    installShutdown({ server, deadlineMs: 5, exit: () => {}, log: (l) => logs.push(l) })();
+    await delay(30);
+
+    expect(logs[1]).toContain("shutdown deadline of 5ms reached with the drain not complete");
+  });
+
+  it("ignores a second SIGTERM arriving during the drain", async () => {
+    // A second invocation used to build a fresh closure whose server.close
+    // called back at once with ERR_SERVER_NOT_RUNNING, exiting immediately and
+    // abandoning the drain with no deadline line. This asserts the first
+    // shutdown still owns the outcome.
+    const server = fakeHttpServer({ closeNeverCompletes: true, connections: 1 });
+    const exits: number[] = [];
+    const logs: string[] = [];
+
+    const shutdown = installShutdown({ server, deadlineMs: 30, exit: (c) => exits.push(c), log: (l) => logs.push(l) });
+    shutdown();
+    shutdown();
+
+    expect(exits).toEqual([]);
+    expect(logs.filter((l) => l.includes("SIGTERM"))).toHaveLength(1);
+
+    await delay(80);
+    expect(exits).toEqual([0]);
   });
 
   it("exits as soon as the drain finishes, without waiting for the deadline", async () => {
@@ -124,7 +159,7 @@ describe("installShutdown", () => {
 
     const deadlineLog = logs.join("\n");
     expect(deadlineLog).toContain("drain not complete");
-    expect(deadlineLog).not.toMatch(/\d+ requests?/);
+    expect(deadlineLog).not.toMatch(/\d+ connections?/);
   });
 
   it("exits exactly once even when getConnections never calls back", async () => {
@@ -178,7 +213,13 @@ describe("installShutdown", () => {
       await delay(80);
 
       expect(exits).toEqual([0]);
-      expect(logs.join("\n")).toContain("1 request still in flight");
+      // Both halves of the deadline output. The first sentence is the one that
+      // must survive a real process.exit and is logged synchronously for that
+      // reason; the count only ever reaches an exit that returns, which is what
+      // this test supplies, and it is here to prove the number was read from a
+      // real server rather than invented by a double.
+      expect(logs[1]).toContain("shutdown deadline of 20ms reached with the drain not complete");
+      expect(logs.join("\n")).toContain("1 connection was still open");
     } finally {
       request.destroy();
       await new Promise<void>((resolve) => httpServer.close(() => resolve()));

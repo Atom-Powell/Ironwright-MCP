@@ -432,10 +432,21 @@ a second app registration with a second secret rather than fixing the first one.
 
 ## Running the server
 
-`npm start` runs the MCP server itself, `dist/server/main.js`, after `npm run build`. It reads
-its own environment at startup and fails before the port is bound rather than on the first tool
-call, because a misconfigured deployment should refuse to come up rather than report itself
-healthy and then fail the first request it receives.
+`npm start` runs the MCP server itself, `dist/server/main.js`. It reads its own environment at
+startup and fails before the port is bound rather than on the first tool call, because a
+misconfigured deployment should refuse to come up rather than report itself healthy and then fail
+the first request it receives.
+
+**Build it with `npm run build:prod`, not `npm run build`, for anything an operator will keep.**
+The two compiles differ on purpose and the difference is a security boundary. `npm run build` is
+the development compile and emits `dist/setup/`, the per-tenant setup command, which issues site
+permission grants through a separate application holding `Sites.FullControl.All`. That machinery
+belongs on the workstation you are reading this on and nowhere near a running server, because it
+widens what a compromise of that server reaches from "can read one granted site" to "contains the
+means to grant access to others". `npm run build:prod` clears `dist` and compiles without
+`src/setup`, so what `npm start` then runs carries none of it. Run the development build freely
+while working; run the production build for the artifact you deploy, and note that running the
+development build afterward puts the setup output back.
 
 - `IW_PROFILE_DIR` is required. It names a directory, and every `*.json` file in it is read and
   validated once at startup, indexed by the `profileId` field inside the file rather than by the
@@ -455,13 +466,18 @@ healthy and then fail the first request it receives.
   `describe_workbook` also reads it directly, since that tool runs before any profile exists and
   has no other way to know which site it may reach. Phase 5 hosting must set this in the
   deployment definition or the server will not start.
-- `IW_TABLE_CONNECTION_STRING` is required for anything but a local run. Without it the server
-  falls back to an in-memory state store, the same fallback `npm run scan` uses: nothing persists
-  across a restart, and every tool call that triggers a scan performs a full enumeration rather
-  than an incremental one, since there is no `deltaLink` from an earlier run to resume from.
+- `IW_TABLE_CONNECTION_STRING` is optional to the server and expected of any deployment. The
+  server starts without it and falls back to an in-memory state store, the same fallback
+  `npm run scan` uses: nothing persists across a restart, and every tool call that triggers a scan
+  performs a full enumeration rather than an incremental one, since there is no `deltaLink` from
+  an earlier run to resume from. That is a reasonable local run and a poor deployment, which is
+  why the deployment contract below lists it as optional rather than required: the distinction is
+  what the server enforces, not what an operator should do.
 - `PORT` defaults to 3000 if unset.
 - `IW_ALLOW_WRITES` stays unset, and writes stay disabled, until an operator opts a deployment in
   by setting it to `true`, regardless of the site permission granted by the normal setup run.
+- `IW_SHUTDOWN_DEADLINE_MS` defaults to 25000. It bounds how long the server keeps draining
+  in-flight requests after SIGTERM before exiting anyway. See the deployment contract below.
 
 Until phase 4a wired the first tool, none of this was read by the server itself: only
 `npm run scan` read the Graph credentials and the store connection string, and nothing read
@@ -505,9 +521,19 @@ adds the one that phase 5a introduced.
   the site permission the normal setup run above granted.
 - `IW_SHUTDOWN_DEADLINE_MS`. How long the server waits, once it receives SIGTERM, for in-flight
   requests to drain before exiting anyway. Defaults to 25000, chosen to sit under a platform's
-  usual 30 second grace period so the process exits on its own terms, logging how many requests
-  it abandoned, rather than being killed silently once that period runs out.
+  usual 30 second grace period so the process exits on its own terms rather than being killed
+  silently once that period runs out. When the deadline wins it logs one line saying the deadline
+  was reached with the drain incomplete, and no count: Node's only runtime source for open socket
+  counts answers on a deferred callback, and an exiting process does not wait for it, so a number
+  is not obtainable and is not claimed.
 - `PORT`. Documented above under "Running the server"; defaults to 3000.
+
+**The artifact is what `npm run build:prod` emits, and the development build is not a substitute.**
+It clears `dist` and compiles without `src/setup`, so the deployed tree carries no copy of the
+grant-issuing setup command. See "Running the server" above for why that is a boundary rather than
+a size saving. The clean is part of the script because `tsc` does not prune its own output
+directory: without it, a tree where `npm run build` had run kept `dist/setup/` through the
+production compile, and the boundary held only on a freshly cleaned checkout.
 
 **Profiles arrive as a directory the deployment supplies, never committed and never baked into an
 artifact.** `IW_PROFILE_DIR` names a path the running process reads at startup, and phase 5a's

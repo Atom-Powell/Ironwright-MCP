@@ -184,6 +184,13 @@ registry, so a tool added later inherits every check.
   suite, and sign-off.
 - **Conventional commits.** Direct to main for routine work; feature branches with PRs and no
   auto-merge for anything risky or architectural.
+- **A live sitting is not recorded until this file is corrected too.** Writing the sitting up in
+  `docs/OPEN-ITEMS.md` is half the step; the other half is editing the Build Sequence entry for
+  that phase in the same commit, since it is the entry that says what the phase still owes. This
+  is a written step because the omission has happened twice, after phase 4b and again after 4c:
+  each time the sitting ran, passed, was recorded in `docs/OPEN-ITEMS.md`, and left this file
+  asserting the sitting was still owed. Nobody was careless. The two edits simply belonged to no
+  single task, so neither time was there anything to leave undone.
 - **Project knowledge wins** over background knowledge, but flag drift, since this surface moves
   fast and the locked decisions were current as of September 2026 rather than evergreen.
 - **Direct prose over bullet-point walls** in explanations. This file uses structure because it
@@ -265,9 +272,12 @@ The spec carries the full phase descriptions. Status as of 2026-09-18:
    are equally plausible, and describes a range's columns with inferred types and bounded
    samples. It proposes no `columns` mapping and infers no `date` type, both deliberate, and
    withholds every sample for a source when the workbook is `fullCalcOnLoad` over a range holding
-   a formula. No call this phase's own code makes has run against a tenant; see
-   `docs/OPEN-ITEMS.md` for what the unit tests cover and the live sitting this phase still owes
-   before merge. Phase 4 is complete pending that sitting.
+   a formula. **Verified live on 2026-09-18.** Both modes ran against the live site through the
+   MCP transport and a per-request `McpServer`, and the tool rediscovered a workbook mapping this
+   repository independently knows is correct without being told any of it. The sitting also found
+   a request-count defect no fixture could reach, since a download costs two counted Graph
+   requests and the shared fake charged one. `docs/OPEN-ITEMS.md` carries the dated record and
+   what the sitting does not establish. Phase 4 is complete.
 5. **Hosting.** Split into 5a and 5b at the Azure line, because everything past producing a
    deployable artifact needs an Azure subscription, real spending, and an operator at a keyboard
    for at least the first sign-in.
@@ -277,7 +287,11 @@ The spec carries the full phase descriptions. Status as of 2026-09-18:
      `Sites.FullControl.All` and has no business inside a server image, and `npm run build:prod`
      runs it. Bounds the SIGTERM handler to a deadline, `IW_SHUTDOWN_DEADLINE_MS`, default 25
      seconds, so one request that never completes can no longer hold the process open until the
-     platform sends SIGKILL with nothing said about why; the handler now logs what it abandoned.
+     platform sends SIGKILL with nothing said about why. The deadline logs one sentence
+     synchronously before exiting, saying the drain did not finish, and deliberately no count:
+     `getConnections` is the only API that reports open sockets, it defers its callback through
+     `process.nextTick`, and `process.exit` does not drain that queue, so a number is not
+     obtainable and the line that asked for one printed nothing at all.
      Settles that `GET /health` answers only whether this process can serve, and must never call
      Microsoft Graph, since a health check depending on a third party turns that party's outage
      into an instance restart loop. The container image was moved out of this phase by amendment,

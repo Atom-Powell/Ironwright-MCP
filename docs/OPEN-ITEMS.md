@@ -8,6 +8,12 @@ longer carries it. Things land here when they need to survive past the session t
 because a scratch ledger will not be read by the phase that needs it. Sections are roughly
 ordered by when they will matter, not by when they were written.
 
+**Writing a live sitting up here is only half the step.** The other half is correcting that
+phase's Build Sequence entry in `CLAUDE.md` in the same commit, because that entry is what says
+what the phase still owes and it is the document every session loads. The rule is stated in
+`CLAUDE.md`'s Working Agreement; it is repeated here because this file is where the first half
+gets done and is therefore where the second half gets forgotten, which it has been twice.
+
 ## Decisions required before the first live setup run
 
 **ANSWERED 2026-09-12 by the first live run: the per-site grant was refused.**
@@ -129,9 +135,9 @@ image at some point in the build, and would have left the boundary resting on a 
 rather than on the compiler never having seen the files. `npm run build` (development and CI)
 is untouched and still compiles and typechecks `src/setup`, so nothing about this closes that
 command's own coverage. `tests/build/production-build.test.ts` asserts the outcome on the
-filesystem, deleting `dist` and shelling out to a real `npm run build:prod`, specifically so
-this cannot regress silently the next time something under `src/setup` grows an import; see
-"Phase 5a" below for what that test cost to make reliable.
+filesystem, shelling out to a real `npm run build:prod`, specifically so this cannot regress
+silently the next time something under `src/setup` grows an import; see "Phase 5a" below for what
+that test cost to make reliable and for the clean the script needed before the boundary was real.
 
 **Hosting phase, restated rather than fixed.** The MCP SDK deletes a pending stream-mapping
 entry on close without resolving it, so an aborted request can leave its handler permanently
@@ -145,10 +151,13 @@ rather than draining forever" and "fix(server): read the shutdown deadline's con
 from getConnections".** The SIGTERM handler had no fallback deadline: `close`'s callback fired
 only once every in-flight request finished, so one request that never completed meant the
 process never exited on its own and the platform eventually sent SIGKILL, with no log saying
-why. `installShutdown` in `src/server/main.ts` now races the drain against a timer bounded by
-`IW_SHUTDOWN_DEADLINE_MS` (default 25000ms) and exits on whichever finishes first. See "Phase
-5a" below for the defect this introduced and then fixed on the same branch: the first version
-read a `connections` property that does not exist on a real `http.Server`.
+why. `installShutdown`, now in `src/server/shutdown.ts`, races the drain against a timer bounded by
+`IW_SHUTDOWN_DEADLINE_MS` (default 25000ms) and exits on whichever finishes first, logging one
+sentence synchronously before exit to say the drain did not finish. See "Phase 5a" below for the
+two defects this introduced and then fixed on the same branch: the first version read a
+`connections` property that does not exist on a real `http.Server`, and the second logged
+nothing whatsoever, because the API that replaced that property defers its callback and
+`process.exit` does not wait for it.
 
 **Before phase 4 wires real handlers.** `ToolDefinition.inputSchema` is a `z.ZodRawShape`,
 which structurally forbids an object-level refinement. `generate_move_plan` already needs one,
@@ -1908,13 +1917,25 @@ devDependency failure, `@azure/identity` pulled in by `src/setup/main.ts` under 
 at the boundary the symptom happened to expose, not at removing the symptom itself. This closes a
 carried item that had been open for the hosting phase since phase 2a.
 
-**The shutdown now always exits, on a deadline, and logs what it abandoned.** See the closed
+**The boundary was resting on a clean tree, which is the alternative this phase had rejected by
+name.** `tsc` does not prune its `outDir`. Excluding `src/setup` keeps setup output out of a
+compile, and it removes nothing already sitting in `dist` from the development build that almost
+always ran first: `rm -rf dist && npm run build && npm run build:prod` left `dist/setup/main.js`
+in place, verified by the whole-branch review. That is build-then-prune arrived at by accident,
+and worse, because nothing pruned. The test passed only because the test deleted `dist` itself.
+`build:prod` now clears `dist` before compiling, so the script is the boundary rather than a
+precondition of it, and the test seeds a leftover `dist/setup/main.js` and asserts the script
+removes it. The clean is inline `node -e` rather than a new dependency or a shell command, since
+`rm -rf` is not portable to the machine this project is developed on.
+
+**The shutdown now always exits, on a deadline, and says so before it does.** See the closed
 carried item above for the commit and the mechanism. The defect it replaces: the old handler
 exited only from `server.close`'s callback, so one request that never completed meant `close`
 never called back, the process never exited on its own terms, and the platform eventually sent
 SIGKILL with no log anywhere saying why. `installShutdown` now races the drain against a timer
-bounded by `IW_SHUTDOWN_DEADLINE_MS` and exits on whichever finishes first, logging the count of
-requests still outstanding when the deadline wins.
+bounded by `IW_SHUTDOWN_DEADLINE_MS` and exits on whichever finishes first. When the deadline
+wins it logs, synchronously and before exiting, that the deadline was reached with the drain
+incomplete. It logs no number, and that is the second correction below rather than an omission.
 
 **A stale type nearly shipped a lie, and this is the third instance of the same pattern on this
 project.** The deadline log's first version read `server.connections` to report how many
@@ -1936,6 +1957,34 @@ a usable count logs that the drain was incomplete rather than printing a figure 
 And a test now runs `installShutdown` against a real `node:http` server with a request whose
 handler deliberately never responds, which is the one case a hand-written fake cannot fail: the
 fake defines the very field the defect was in.
+
+**Then the replacement logged nothing at all, and the whole-branch review caught it by running
+it.** Moving the count onto `getConnections` fixed the invented number and introduced a worse
+failure in the same edit. `getConnections` defers its callback through `process.nextTick`, and
+`process.exit` terminates without draining that queue, so calling `exit` anywhere near the
+request starves the callback permanently. The deadline sentence lived inside that callback, so
+the deadline sentence never printed. Driven against a real `http.Server` with a genuinely open
+request and the real `process.exit`, the only output was the SIGTERM line: the spec's own
+requirement unmet, and the exact silence the change had been made to remove, since the closed
+carried item above justified the deadline on the grounds that SIGKILL left no log explaining
+itself.
+
+Three documents asserted the log happened. None of them was wrong about the code's intent and
+all three were wrong about its behavior, which is this project's message-audit defect at the
+scale of a phase rather than a sentence. The fix is an ordering, not new prose: the numberless
+sentence already existed as the error branch, and it now runs synchronously, first, before
+`finish`. `finish` then commits the exit before anything else is attempted, so no synchronous
+throw can cost the guarantee. The `getConnections` attempt stays behind it as best-effort
+enrichment, and the code says plainly that under the real `process.exit` it is not reached at
+all, so nobody restores it as the only line. The tests assert the synchronous sentence as well
+as the count, including the real-server test, which is the one that can tell the difference.
+
+**What this episode says about the earlier fix.** The correction that replaced
+`server.connections` was reviewed, tested against a real `http.Server`, and merged, and it still
+shipped a function whose single output was unreachable. The real-server test passed because it
+injected an exit that returns. A test double for `process.exit` is as capable of hiding a defect
+as a test double for `http.Server` was, and the pattern is the same one this file has now
+recorded four times: the suite checked the code against something that was not the thing.
 
 **Health answers one question and deliberately checks nothing.** `GET /health` reports that this
 process can serve, not that the tenant, Graph, or the state store is reachable, and it must not
@@ -1968,14 +2017,33 @@ SDK behavior on a hunch to work around it. What makes the item tractable is dete
 repair, and detection is telemetry, which belongs to phase 5b: 5a bounds the shutdown it can
 bound, and 5b learns to observe the leak; neither should be read as having fixed the other.
 
+**Importing the server's entry point started the server, and one test did.** `src/server/main.ts`
+calls `main()` at module scope, which was harmless for as long as nothing imported it. This phase
+added the first test that did, to reach the exported `installShutdown`. The whole-branch review
+ran it rather than reasoning about it: with the deployment environment exported, importing that
+module binds a port inside the vitest worker, and with `IW_TABLE_CONNECTION_STRING` set it awaits
+`ensureTables` first and makes a real Azure Table call. The suite was green only because a worker
+with no environment threw in `loadConfig` and the top-level catch set a `process.exitCode` vitest
+ignores. The merge-gate shell is precisely the shell where that environment is exported, so
+running the gate as planned would have had `npm test` bind ports and reach Azure.
+
+The handler moved to `src/server/shutdown.ts` and `main.ts` imports it, rather than guarding
+`main()` behind an entry-point check. Both close this instance; only the extraction leaves the
+entry point with nothing importable at all, so it closes the class for every future test instead
+of for the one that found it, and it is what "modular over monolithic" already asks for. Nothing
+else in the tree imports `main.ts` for a value, checked across `src`, `tests` and `scripts`.
+
+No task owned the question. Task 2 owned exporting `installShutdown`, and exporting anything from
+a self-executing entry point is the seam between that task and the file it was exported from.
+
 **What this phase is covered by, and what it is not.** Every change is covered by unit tests: the
-production compile by a test that deletes `dist` and shells out to a real `npm run build:prod`,
-asserting the server entry point exists and the setup output does not; the shutdown by tests
-driving the real ordering (drain first, deadline first, the same tick) against both a hand-written
-fake and, for the connection count specifically, a real `node:http` server with a genuinely open
-request; and health by a test asserting the handler never invokes the one injected dependency
-seam. `npm test` passed at 136 files and 1980 tests, run twice back to back with no changes
-between the runs, after the branch's own history of a report claiming a clean suite that turned
+production compile by a test that seeds a leftover `dist/setup/main.js` and shells out to a real
+`npm run build:prod`, asserting the server entry point exists afterward and the setup output does
+not; the shutdown by tests driving the real ordering (drain first, deadline first, the same tick,
+a second signal mid-drain) against both a hand-written fake and, for the connection count and the
+synchronous deadline line, a real `node:http` server with a genuinely open request; and health by
+a test asserting the handler never invokes the one injected dependency seam. `npm test` passed at
+136 files and 1984 tests, run repeatedly back to back with no changes between the runs, after the branch's own history of a report claiming a clean suite that turned
 out to be a lucky single run rather than a reproducible one (see the closed shutdown item above:
 the production-compile test's default 5 second timeout had no margin under full-suite worker
 contention and needed an explicit, explained 60 second allowance before it held reliably). Beyond

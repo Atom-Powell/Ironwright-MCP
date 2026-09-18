@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -27,6 +27,26 @@ import { describe, expect, it } from "vitest";
  */
 const PRODUCTION_COMPILE_TIMEOUT_MS = 60_000;
 
+/**
+ * A command string rather than execFileSync with an args array, because an args
+ * array combined with `shell: true`, which npm on Windows requires since Node
+ * refuses to spawn a .cmd without it, raises Node's DEP0190 deprecation.
+ *
+ * stdio is captured rather than inherited so the suite's output stays readable,
+ * and then printed here on failure. This is the test that guards the security
+ * boundary; one that fails without saying what tsc objected to cannot be acted
+ * on, which was the state it shipped in.
+ */
+function runNpmScript(script: string): void {
+  try {
+    execSync(`npm run ${script}`, { stdio: "pipe" });
+  } catch (error) {
+    const failure = error as { stdout?: Buffer; stderr?: Buffer };
+    const output = [failure.stdout?.toString() ?? "", failure.stderr?.toString() ?? ""].join("\n").trim();
+    throw new Error(`npm run ${script} failed:\n${output}`);
+  }
+}
+
 describe("production compile", () => {
   it("the production compile excludes the setup command", () => {
     const config = JSON.parse(readFileSync("tsconfig.build.json", "utf8")) as { exclude?: string[] };
@@ -34,10 +54,20 @@ describe("production compile", () => {
   });
 
   it(
-    "emits the server entry point and no setup output",
+    "emits the server entry point and clears setup output left by an earlier build",
     () => {
-      rmSync("dist", { recursive: true, force: true });
-      execFileSync("npm", ["run", "build:prod"], { stdio: "pipe", shell: process.platform === "win32" });
+      // tsc does not prune its outDir, so excluding src/setup from the compile
+      // only keeps setup output out of a tree that never had it. A developer
+      // machine, or any image built from a cached workspace, has almost always
+      // run the development build first, and dist/setup/main.js survives the
+      // production compile untouched. The stand-in below is written rather than
+      // compiled because the boundary is about what remains in dist, not about
+      // where those bytes came from, and a real second compile would double
+      // this test's cost for nothing.
+      mkdirSync("dist/setup", { recursive: true });
+      writeFileSync("dist/setup/main.js", "// left over from a development build\n");
+
+      runNpmScript("build:prod");
 
       expect(existsSync("dist/server/main.js")).toBe(true);
       expect(existsSync("dist/setup/main.js")).toBe(false);

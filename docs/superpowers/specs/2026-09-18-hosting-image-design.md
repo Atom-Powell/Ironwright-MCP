@@ -91,6 +91,10 @@ A `.dockerignore` excludes `profiles/` explicitly. Profiles are deployment confi
 project never commits, and baking a customer's site, library and client list into an image would
 undo that at the first build.
 
+The first run of that image must take its profile directory as a mount rather than a copy, and must
+prove it. That was the original merge gate for this phase and moved here with the image: the mount
+is the contract 5b implements, and an untested contract is not a contract.
+
 ## The build defect that blocks all of it
 
 `npm ci --omit=dev && npm run build` fails today. The build compiles `src/setup/main.ts`, which
@@ -112,6 +116,14 @@ boundary is the point.
 A test asserts the production build succeeds, so this cannot regress silently the next time
 something under `src/setup` grows an import.
 
+**Amended 2026-09-18: the production script clears `dist` before compiling.** Excluding `src/setup`
+keeps setup output out of a compile, and `tsc` does not prune its `outDir`, so on any tree where the
+development build has already run, `dist/setup/main.js` survived `npm run build:prod` untouched.
+That is the build-then-prune alternative this section rejected, arrived at by accident: the boundary
+rested on whether someone had cleaned the tree. The clean belongs to the script, so the script is
+the boundary rather than a precondition of it, and the test now seeds a leftover `dist/setup/main.js`
+and asserts the script removes it rather than deleting `dist` itself and proving nothing.
+
 ## Shutdown
 
 The SIGTERM handler has no fallback deadline today. One request that never completes means `close`
@@ -120,6 +132,23 @@ never calls back and the platform eventually sends SIGKILL.
 It gains a deadline: stop accepting new work, drain what is in flight, and exit anyway after a
 bounded wait, logging how many requests were still outstanding when the deadline expired. A server
 that cannot say why it was killed teaches nobody anything.
+
+**Amended 2026-09-18 by a measurement, after the first implementation met the letter of the
+paragraph above and delivered none of it.** The count cannot be logged, and asking for it is what
+cost the line. `getConnections` is the only runtime API that reports open sockets and it defers its
+callback through `process.nextTick`; `process.exit` terminates without draining that queue. Driven
+against a real `http.Server` with a genuinely open request and the real `process.exit`, the only
+output was the SIGTERM line: no deadline line, no count, nothing. Any ordering that puts the
+sentence inside that callback prints nothing, and the one ordering that would print a number is the
+one this phase forbids, waiting on the callback before exiting.
+
+So the requirement is what the last sentence above always meant rather than what its first sentence
+asked for. **The deadline logs a sentence, synchronously, before exit, saying that the deadline was
+reached with the drain incomplete.** No number, because a number is not obtainable and the
+project's standing rule is that a function which cannot observe an outcome must not assert it. The
+`getConnections` attempt is kept as best-effort enrichment and is documented in the code as
+unreachable under the real exit, so nobody restores it as the only line. A count would have been
+useful; a line that prints is the requirement.
 
 ## One carried item this phase deliberately does not fix
 
@@ -164,15 +193,29 @@ not decided here.
 
 ## Verification before merge
 
-The container answers all five read tools correctly against the live tenant: same workbook, same
-library, same expected counts, through the image rather than through a local process.
+**Amended 2026-09-18, in the same wave that caught it. The original gate is superseded and is kept
+below only so the amendment has something to point at.** This section was written before the
+amendment that moved the container out of the phase and was never revisited, so it went on
+demanding a run this phase cannot perform. A reader reaching it got a gate with no runtime to
+execute it.
 
-This is the first time this project runs as a shipped artifact rather than as source, and it is
-achievable before any Azure resource exists. A run that passes locally and fails in a container has
-found a packaging defect, which is exactly what this phase exists to surface.
+**The gate is that the compiled production output answers all five read tools correctly against the
+live tenant: same workbook, same library, same expected counts, run as `node dist/server/main.js`
+from `npm run build:prod` rather than `tsx` against source.** This is the first time this project
+runs as a shipped artifact rather than as source, and it is achievable before any Azure resource
+exists or any container runtime is installed. A run that passes under `tsx` and fails from `dist`
+has found a packaging defect, which is exactly what this phase exists to surface, and the
+production compile's exclusion of `src/setup` is precisely where source execution could hide one.
 
-The run must use a profile directory mounted into the container, not copied into it, because that
-is the contract 5b will implement and an untested contract is not a contract.
+The profile directory is supplied to the process as a path in `IW_PROFILE_DIR`, which is the whole
+of 5a's contract with 5b. How that path gets populated is 5b's problem.
+
+**Superseded, from the container-centered original:** the container answers all five read tools
+correctly against the live tenant, through the image rather than through a local process, using a
+profile directory mounted into the container rather than copied into it, because that is the
+contract 5b will implement and an untested contract is not a contract. That mount requirement moves
+with the image to its own slice; it is recorded in "The image, deferred to its own slice" above,
+not dropped.
 
 ## What 5b inherits
 
