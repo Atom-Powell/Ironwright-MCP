@@ -7,6 +7,7 @@ import { GraphRequestError } from "../../src/graph/errors.js";
 import { TokenRequestError } from "../../src/graph/token.js";
 
 const SUBJECT = {
+  tool: "reconcile_workbook_vs_repository",
   profileId: "example",
   siteUrl: "https://contoso.sharepoint.com/sites/Example",
   library: "Compliance Reports",
@@ -15,6 +16,7 @@ const SUBJECT = {
 describe("describeToolFailure", () => {
   it("passes an unknown profile through, since it already names the configured ids", () => {
     const message = describeToolFailure(new UnknownProfileError("nope", ["example", "other"]), {
+      tool: "reconcile_workbook_vs_repository",
       profileId: "nope",
     });
 
@@ -103,6 +105,20 @@ describe("describeToolFailure", () => {
     expect(message).toContain("accessDenied");
     expect(message).toContain("GET /drives/drive-1/root/delta");
     expect(message).toContain("written to the server log");
+  });
+
+  it("names the tool that failed rather than assuming reconciliation", () => {
+    const error = new GraphRequestError({
+      method: "GET",
+      path: "/drives/x/root/delta",
+      status: 503,
+      body: "",
+    });
+
+    const message = describeToolFailure(error, { tool: "inventory_tree", profileId: "example" });
+
+    expect(message).toContain("inventory_tree");
+    expect(message).not.toContain("reconciling");
   });
 
   it("reports a token failure as being about the server application's own credentials", () => {

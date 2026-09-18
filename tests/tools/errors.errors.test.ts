@@ -6,6 +6,7 @@ import { GraphRequestError } from "../../src/graph/errors.js";
 describe("describeToolFailure says nothing it cannot observe", () => {
   it("does not name a site it was not given", () => {
     const message = describeToolFailure(new LibraryNotFoundError("Reports", ["Documents"], 1), {
+      tool: "reconcile_workbook_vs_repository",
       profileId: "example",
     });
 
@@ -16,7 +17,7 @@ describe("describeToolFailure says nothing it cannot observe", () => {
   it("omits the parenthesized code when Graph returned a body carrying none", () => {
     const error = new GraphRequestError({ method: "GET", path: "/sites/x", status: 502, body: "<html>bad gateway</html>" });
 
-    const message = describeToolFailure(error, { profileId: "example" });
+    const message = describeToolFailure(error, { tool: "reconcile_workbook_vs_repository", profileId: "example" });
 
     expect(message).toContain("502");
     expect(message).not.toContain("(undefined)");
@@ -31,6 +32,8 @@ describe("describeToolFailure says nothing it cannot observe", () => {
       body: JSON.stringify({ error: { code: "internalServerError", message: "SECRET-LOOKING-DETAIL" } }),
     });
 
-    expect(describeToolFailure(error, { profileId: "example" })).not.toContain("SECRET-LOOKING-DETAIL");
+    expect(
+      describeToolFailure(error, { tool: "reconcile_workbook_vs_repository", profileId: "example" }),
+    ).not.toContain("SECRET-LOOKING-DETAIL");
   });
 });
