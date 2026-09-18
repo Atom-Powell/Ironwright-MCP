@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { SAFETY_SENTENCES } from "../kinds.js";
 import type { ToolDefinition } from "../types.js";
-import { STUB_OUTPUT_SCHEMA } from "../stub-output.js";
+import { INVENTORY_OUTPUT_SCHEMA } from "../inventory/output.js";
+import { INVENTORY_INPUT_SCHEMA, runInventoryTree } from "../inventory/run.js";
 
 export const inventoryTree: ToolDefinition = {
   name: "inventory_tree",
@@ -14,12 +15,7 @@ export const inventoryTree: ToolDefinition = {
     SAFETY_SENTENCES.read,
   ].join(" "),
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  inputSchema: z.object({
-    profileId: z.string().min(1).describe("Configured profile to inventory, for example \"example\"."),
-    subPath: z
-      .string()
-      .optional()
-      .describe("Library-relative path to limit the scan, for example \"2026/CLIENTA\". Omit to scan the whole library."),
-  }),
-  outputSchema: STUB_OUTPUT_SCHEMA,
+  inputSchema: z.object(INVENTORY_INPUT_SCHEMA),
+  outputSchema: INVENTORY_OUTPUT_SCHEMA,
+  handler: runInventoryTree,
 };
