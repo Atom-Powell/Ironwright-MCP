@@ -57,9 +57,11 @@ describe("runReconcile", () => {
     // named only the scan's cost and called it what the call cost.
     const context = contextWith();
     // The default fake charges the counter and then rejects, which is what
-    // makes a cost assertion against it able to fail. Three charges stand in
-    // for readWorkbookSnapshot's own three: two for resolveDrive and one for
-    // downloadDriveItem.
+    // makes a cost assertion against it able to fail. Four charges stand in
+    // for readWorkbookSnapshot's own four: two for resolveDrive and two for
+    // downloadDriveItem, since the real client's getBytes counts both the
+    // Graph request that answers with a redirect and the follow-up request to
+    // the redirect target.
     const charge = async (): Promise<void> => {
       try {
         await context.graph.get("/probe");
@@ -72,6 +74,7 @@ describe("runReconcile", () => {
       await charge();
       await charge();
       await charge();
+      await charge();
       return WORKBOOK;
     };
 
@@ -80,7 +83,7 @@ describe("runReconcile", () => {
     const structured = result.structuredContent as {
       provenance: { workbookReadGraphRequestsByThisCall: number; graphRequestsByThisCall: number };
     };
-    expect(structured.provenance.workbookReadGraphRequestsByThisCall).toBe(3);
+    expect(structured.provenance.workbookReadGraphRequestsByThisCall).toBe(4);
     // Kept apart from the scan's own figure rather than summed into it.
     expect(structured.provenance.graphRequestsByThisCall).toBe(6);
   });

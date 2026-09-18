@@ -123,7 +123,13 @@ export function createFakeWorkbookGraphClient(options: FakeWorkbookGraphOptions)
       return Promise.reject(new Error("the fake workbook Graph client does not implement post"));
     },
     async getBytes(pathOrUrl: string): Promise<Uint8Array> {
-      requestCount += 1;
+      // Two, not one: the real client's getBytes issues a request to Graph,
+      // which answers the content read with a 302, and a second request to
+      // the redirect target to actually fetch the bytes (see sendForBytes in
+      // src/graph/client.ts). A fake that only charged one made every
+      // download-inclusive cost assertion in this suite one request short of
+      // what a real tenant pays.
+      requestCount += 2;
       const match = Object.entries(options.workbooksByPath).find(([path]) => pathOrUrl.includes(path));
       if (match === undefined) {
         throw new Error(`the fake workbook Graph client has no fixture bytes for ${pathOrUrl}`);

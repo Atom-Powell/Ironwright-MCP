@@ -233,7 +233,7 @@ describe("runDescribeWorkbook", () => {
     expect(output.columns?.[0]?.header).toBe("Client");
   });
 
-  it("reports the Graph cost it actually paid: one site lookup, one drive listing, one content download", async () => {
+  it("reports the Graph cost it actually paid: one site lookup, one drive listing, one content download that costs two requests", async () => {
     const context = makeContext();
     const result = await runDescribeWorkbook({ library: "Documents", workbookPath: "Trackers/Book.xlsx" }, context);
 
@@ -242,9 +242,13 @@ describe("runDescribeWorkbook", () => {
     // compared against context.graph.requests(): a comparison against the
     // same counter the implementation itself reads moves both sides together
     // and would still pass if graphRequests reported the raw, unbracketed
-    // counter instead of this call's own delta.
-    expect(output.graphRequests).toBe(3);
-    expect(context.graph.requests()).toBe(3);
+    // counter instead of this call's own delta. Four, not three: the site
+    // lookup and the drive listing are one request each, and the content
+    // download is two, because the real client's getBytes counts both the
+    // Graph request that answers with a redirect and the follow-up request to
+    // the redirect target.
+    expect(output.graphRequests).toBe(4);
+    expect(context.graph.requests()).toBe(4);
   });
 
   it("reports this call's own cost on a context already used by an earlier call, not the process-lifetime total", async () => {
@@ -252,7 +256,7 @@ describe("runDescribeWorkbook", () => {
     // per-request server, so its requests() counter accumulates for the
     // process's whole life. graphRequests must still report only what this
     // one call paid: a second call on the same context reporting the
-    // cumulative total (6, not 3) is exactly the defect this test exists to
+    // cumulative total (8, not 4) is exactly the defect this test exists to
     // catch, and every other test in this file builds a fresh context per
     // call, so none of them could have caught it.
     const context = makeContext();
@@ -260,8 +264,8 @@ describe("runDescribeWorkbook", () => {
     const second = await runDescribeWorkbook({ library: "Documents", workbookPath: "Trackers/Book.xlsx" }, context);
 
     const output = second.structuredContent as unknown as DescribeToolOutput;
-    expect(output.graphRequests).toBe(3);
-    expect(context.graph.requests()).toBe(6);
+    expect(output.graphRequests).toBe(4);
+    expect(context.graph.requests()).toBe(8);
   });
 
   it("does not claim total resolution when a table part carries a ref but no name, which findTables silently skips", async () => {
