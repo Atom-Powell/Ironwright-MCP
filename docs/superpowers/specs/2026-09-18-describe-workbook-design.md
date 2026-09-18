@@ -69,7 +69,7 @@ Per column, within the resolved range:
 - its one-based position within the range
 - its sheet-absolute column label, so an operator looking at the file in Excel can find it
 - the header text, verbatim
-- an inferred type: `string`, `number`, `boolean`, `date`, `mixed`, or `empty`
+- an inferred type: `string`, `number`, `boolean`, `mixed`, or `empty`
 - counts of non-empty cells and of unevaluable cells
 - a distinct value count
 - up to `MAX_COLUMN_SAMPLES` sample values
@@ -115,10 +115,23 @@ bytes reader established that a cell whose value cannot be read confidently surf
 rather than a substituted value, and a tool whose entire purpose is to be trusted about a file's
 contents cannot be the place that rule is relaxed.
 
-**When the workbook carries `fullCalcOnLoad`, samples from formula cells are withheld.** That flag is
-the file stating its own cached results are stale. Structure is still described, because structure is
-not stale, but a sampled value read from a stale cached result would be shown as though it were
-current. The response says which columns had samples withheld and why.
+**When the workbook carries `fullCalcOnLoad` and the range holds a formula, every sample for that
+source is withheld.** That flag is the file stating its own cached results are stale. Structure is
+still described, because structure is not stale, but a sampled value read from a stale cached result
+would be shown as though it were current. The response says samples were withheld and why.
+
+**Amended 2026-09-18, while the plan was being written.** This originally said samples from formula
+cells are withheld, per cell. `sheetToGrid` reports whether a range contained a formula, not which
+cells did, so per-cell withholding would require teaching the grid reader to track formula cells. That
+module is on the compliance path and is the one phase 2b-2 was built to make trustworthy; destabilizing
+it to improve a sample display is the wrong trade. Withholding every sample for the source is the
+conservative direction and needs nothing new from the reader.
+
+**Also amended 2026-09-18: there is no `date` inferred type.** A date in xlsx is a number carrying a
+number format, and the cell decoder deliberately does not read styles, so a date serial and an
+ordinary number are indistinguishable at this layer. Claiming to infer `date` would assert something
+this code cannot observe. A column of date serials reports as `number`, and its samples show the
+serials, which is what the file actually holds.
 
 ## Caps
 
