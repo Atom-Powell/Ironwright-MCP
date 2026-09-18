@@ -1,4 +1,6 @@
 import type { CellValue } from "./cells.js";
+import { UNEVALUABLE } from "./cells.js";
+import { columnIndexToLabel } from "./sheet.js";
 
 /**
  * How many rows from the top of a grid detectHeaderRow will look at. A
@@ -96,4 +98,175 @@ export function detectHeaderRow(grid: CellValue[][]): HeaderDetection {
       "so this tool proposes none. A header row chosen wrongly shifts every column by one and produces a " +
       "mapping that validates and reads the wrong data.",
   };
+}
+
+/** How many distinct sample values a described column carries by default. */
+export const MAX_COLUMN_SAMPLES = 5;
+
+export type InferredType = "string" | "number" | "boolean" | "mixed" | "empty";
+
+/**
+ * The evidence a human reads to decide which column is which, for one column
+ * of a range. This is deliberately a report of what is there rather than a
+ * guess at what a column means: the tool this feeds never proposes that a
+ * column is "the client column", only what its header says, what type its
+ * values settle on, and a few of them to look at.
+ */
+export interface ColumnDescription {
+  /** The sheet-absolute column number, matching columnLabel. */
+  position: number;
+  /** columnLabel is derived from position, never from the grid's own 0 based index. */
+  columnLabel: string;
+  /** The header cell's text, verbatim. Unset when there is no header row, the header cell is not text, or it is unevaluable. */
+  header?: string;
+  /** True when the header cell exists but could not be read, so header being unset does not read as the cell being blank. */
+  headerUnevaluable: boolean;
+  inferredType: InferredType;
+  /** Cells below the header (or every cell, when there is no header) that were read and hold a value. Never counts an unevaluable cell. */
+  nonEmptyCount: number;
+  /** Cells that were seen but could not be read. Counted separately from nonEmptyCount, since their value was never actually read. */
+  unevaluableCount: number;
+  /** How many distinct values the column holds, before any sample cap is applied. */
+  distinctCount: number;
+  /** Distinct values, in first-seen order, capped at maxSamples. */
+  samples: string[];
+  /** distinctCount minus how many samples were kept, computed before the cap so it stays accurate even when samples themselves are withheld. */
+  samplesOmitted: number;
+}
+
+/**
+ * Renders a read cell value the way an operator would type it, for a sample.
+ * Only called on a value that already passed the null and UNEVALUABLE
+ * checks below, so it never has to decide what an absent or unreadable
+ * value looks like as text.
+ */
+function renderSample(value: string | number | boolean): string {
+  return String(value);
+}
+
+/**
+ * A key that keeps the number 1, the string "1" and the boolean true from
+ * colliding into one distinct value: distinctCount and the sample list both
+ * need to tell a column's actual types apart, not just their printed form.
+ */
+function distinctKey(value: string | number | boolean): string {
+  return `${typeof value}:${String(value)}`;
+}
+
+/**
+ * Describes every column a grid touches: its header text if there is a
+ * header row, the type its data settles on, how many values and how many
+ * unreadable cells it holds, and a bounded, first-seen sample of its
+ * distinct values.
+ *
+ * `headerRow` is 1 based within the grid, the same numbering
+ * detectHeaderRow's own `proposed` field already uses, so its result can be
+ * passed straight through without conversion. `firstColumn` is the
+ * sheet-absolute column the grid's column 0 sits at; every column this
+ * function reports is labelled and positioned against the sheet, not
+ * against the grid's own 0 based index, because a human comparing this
+ * output to the open workbook needs the sheet's own column letters.
+ *
+ * Column count is taken from the widest row anywhere in the grid, header row
+ * included, rather than from the header row alone or the data rows alone.
+ * That is what lets a header wider than its data still report the extra
+ * column as empty instead of dropping it, and lets data reaching past a
+ * narrow or absent header still get described, just with no header text to
+ * show. A row shorter than that width simply has no cell at the missing
+ * position, and this function reads that the same way it reads an explicit
+ * null cell: nothing was written there, not that something unreadable was.
+ * A real workbook never actually produces this shape, since sheetToGrid
+ * always fills a rectangle out to a single width with null rather than
+ * omitting a cell; raggedness only reaches this function from a grid built
+ * by hand.
+ */
+export function describeColumns(
+  grid: CellValue[][],
+  headerRow: number | undefined,
+  firstColumn: number,
+  options?: { samplesWithheld?: boolean; maxSamples?: number },
+): ColumnDescription[] {
+  const maxSamples = options?.maxSamples ?? MAX_COLUMN_SAMPLES;
+  const samplesWithheld = options?.samplesWithheld ?? false;
+
+  const columnCount = grid.reduce((widest, row) => Math.max(widest, row.length), 0);
+
+  const headerRowIndex = headerRow === undefined ? undefined : headerRow - 1;
+  const headerCells = headerRowIndex === undefined ? undefined : grid[headerRowIndex];
+  const dataRows = headerRowIndex === undefined ? grid : grid.slice(headerRowIndex + 1);
+
+  const columns: ColumnDescription[] = [];
+
+  for (let column = 0; column < columnCount; column += 1) {
+    const headerCell = headerCells?.[column];
+    const headerUnevaluable = headerCell === UNEVALUABLE;
+    const header = typeof headerCell === "string" ? headerCell : undefined;
+
+    let nonEmptyCount = 0;
+    let unevaluableCount = 0;
+    let sawString = false;
+    let sawNumber = false;
+    let sawBoolean = false;
+    let distinctCount = 0;
+    const seen = new Set<string>();
+    const samples: string[] = [];
+
+    for (const row of dataRows) {
+      const cell = row[column];
+      // undefined (a row too short to reach this column) and null (a cell
+      // that exists but was never written) are read the same way: neither
+      // is a value and neither was ever unreadable, so both are simply
+      // skipped rather than counted anywhere.
+      if (cell === undefined || cell === null) continue;
+
+      if (cell === UNEVALUABLE) {
+        unevaluableCount += 1;
+        continue;
+      }
+
+      nonEmptyCount += 1;
+      if (typeof cell === "string") sawString = true;
+      else if (typeof cell === "number") sawNumber = true;
+      else sawBoolean = true;
+
+      const key = distinctKey(cell);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      distinctCount += 1;
+      if (!samplesWithheld && samples.length < maxSamples) samples.push(renderSample(cell));
+    }
+
+    const typesSeen = [sawString, sawNumber, sawBoolean].filter(Boolean).length;
+    const inferredType: InferredType =
+      nonEmptyCount === 0
+        ? "empty"
+        : typesSeen > 1
+          ? "mixed"
+          : sawString
+            ? "string"
+            : sawNumber
+              ? "number"
+              : "boolean";
+
+    const position = firstColumn + column;
+
+    columns.push({
+      position,
+      columnLabel: columnIndexToLabel(position),
+      header,
+      headerUnevaluable,
+      inferredType,
+      nonEmptyCount,
+      unevaluableCount,
+      distinctCount,
+      samples,
+      // Zeroed rather than computed when samples are withheld: the counts
+      // are structure and stay intact, but samplesOmitted is a statement
+      // about what the (absent) sample list left out, and there is nothing
+      // to have left out of a list that was never populated.
+      samplesOmitted: samplesWithheld ? 0 : Math.max(0, distinctCount - maxSamples),
+    });
+  }
+
+  return columns;
 }
