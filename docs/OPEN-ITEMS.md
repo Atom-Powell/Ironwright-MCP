@@ -1310,17 +1310,23 @@ variation selectors, zero-width-joiner sequences, and skin-tone modifiers are ac
 is more than a few lines to get right with confidence, so it was left open rather than shipped as
 a check nobody can vouch for.
 
-## Phase 4b: covered only by fakes, 2026-09-17
+## Phase 4b: what the unit tests cover, 2026-09-17
 
 Phase 4b wired `inventory_tree`, `query_repository` and `validate_structure` onto the execution
 layer phase 4a built, on branch `phase-4b-read-tools`, with the suite at 1800 tests across 126
 files when the eight tasks finished and 1821 across 127 after the whole-branch fix wave of
-2026-09-18, all gates green at both points. No call this phase's own code makes has reached a
-tenant. Every layer it composes was verified live in an earlier phase: the Graph and scan layer
-from 2a, the workbook bytes reader from 2b-2, the cross-check from 2c, and the reconciliation
-engine from phase 3. That verification does not transfer to this phase's own code, which is covered
-by fakes and fixtures only, in the same position phase 4a's own read tool was in before "The second
-live tenant sitting, 2026-09-17" above.
+2026-09-18, all gates green at both points.
+
+**This section was written before the live sitting and is kept as it was, minus one sentence that
+is no longer true.** It read "No call this phase's own code makes has reached a tenant," which was
+correct on 2026-09-17 and false from 2026-09-18, when all three tools ran against the live site:
+see "The phase 4b live tenant sitting, 2026-09-18" below, which is the record. Correcting it in
+place rather than appending a line, because this is the document a reader consults to decide what
+counts as evidence, and a false sentence about evidence here is worse than in any other file. Every
+layer this phase composes was also verified live in an earlier phase: the Graph and scan layer from
+2a, the workbook bytes reader from 2b-2, the cross-check from 2c, and the reconciliation engine from
+phase 3. That never transferred to this phase's own code, which is why the sitting was owed and
+why what follows describes fakes.
 
 **What is covered.** Per tool: the handler's own input validation, the run composition against a
 fake Graph transport and the in-memory `StateStore`, the shaping module's truncation and omission
@@ -1524,19 +1530,33 @@ remains open by design and is recorded above.
 ## Phase 4c: covered only by fakes, 2026-09-18
 
 Phase 4c wired `describe_workbook`, the last of the five read tools, on branch
-`phase-4c-describe-workbook`, with the suite at 1934 tests across 134 files, all gates green. No
-call this phase's own code makes has reached a tenant. It reuses the granted-site configuration
-and drive-download path phase 4a and 4b already exercised live, but the enumeration,
-header-detection and column-description logic this phase adds is new to this codebase, and none
-of it has been proven by use.
+`phase-4c-describe-workbook`. No call this phase's own code makes has reached a tenant, and
+nothing on the branch claims otherwise.
+
+Two halves of an earlier draft of this paragraph overstated what the phase inherits, and both are
+corrected here. It said the phase reuses a drive-download path phase 4a and 4b already exercised
+live: only 4a did, since 4b resolves a drive and never downloads content from it. And it credited
+the granted-site configuration to those phases as well, which it cannot: 4a and 4b resolve a site
+from a profile's own `identity.siteUrl`, and resolving one from `IW_SITE_URL` at startup is a
+different mechanism, new on this branch, that has never run anywhere. What this phase genuinely
+inherits from a live run is `resolveDrive` and `downloadDriveItem` as phase 4a exercised them. The
+enumeration, header-detection and column-description logic is new to this codebase and none of it
+has been proven by use.
 
 **What is covered.** `loadGrantedSiteUrl` in `src/config.ts`, present or absent
 (`tests/config.test.ts`). The profile registry's new site-mismatch refusal, a profile whose
 `identity.siteUrl` disagrees with the configured site failing by name at startup rather than
 loading clean (`tests/profiles/registry.test.ts`, `tests/profiles/registry.errors.test.ts`).
 `readWorkbookInventory` in `src/workbook/introspect.ts`: worksheet and table enumeration read
-from each part's own declared dimension or ref rather than a built grid, and every
-unresolved-sheet and unresolved-table shape (`tests/workbook/introspect.test.ts`).
+from each part's own declared dimension or ref rather than a built grid
+(`tests/workbook/introspect.test.ts`). An earlier draft of this line claimed every unresolved-sheet
+and unresolved-table shape was covered, and the whole-branch review disproved it: a declared sheet
+whose `r:id` the rels part does not define was reaching neither `sheets` nor `unresolved`, so no
+test could have covered a shape the code did not produce. The fix wave of 2026-09-18 made the three
+sheet-list rejections first class, split the table reason so a table owned by a declared but
+unresolvable sheet is not told its sheet is undeclared, and added one regression test per shape
+plus a fixture flag that can omit a single workbook relationship. Covered now: all three sheet-list
+rejections, the missing worksheet part, and all three table reasons.
 `detectHeaderRow` in `src/workbook/describe.ts`: an unambiguous candidate, no candidate at all,
 and the tie that must decline rather than guess (`tests/workbook/describe.header.test.ts`).
 `describeColumns`: every inferred type, the non-empty and unevaluable counts, the distinct-value
@@ -1632,3 +1652,70 @@ identical reason. The shape of the blind spot generalizes past this one field: a
 measured against a counter shared across calls will pass a test suite that only ever makes one
 call before checking it, and will still be wrong the moment a second call happens in the same
 process, which is the server's normal operating condition and never the test's.
+
+### The phase 4c whole-branch fix wave, 2026-09-18
+
+Six tasks each passed their own review; the whole-branch review then found what the seams hid. One
+wave closed all of it, leaving the suite at 1955 tests across 134 files with no new test file, all
+four gates green. Nothing below has run against a tenant.
+
+**The Critical: a declared sheet could vanish, and the tool then said nothing had.**
+`listSheetEntries` dropped a `<sheet>` entry on a missing name, a missing `r:id`, or an `r:id` the
+rels part does not define, and a dropped entry reached neither `sheets` nor `unresolved`. The
+inventory came back one sheet short and the prose then said "Every worksheet and table this
+workbook declares resolved cleanly." The third condition is a real workbook defect that
+`resolveWorksheet` raises as a first-class `WorkbookFileError` on the compliance path, so the
+survey and the compliance path disagreed about the same file. All three now return a rejection in
+the shape the module already uses; a dangling `r:id` names the undefined id, and an entry with no
+name is reported under its position in the sheet list, that being the only identifier the file
+gives it. The second-order defect went with it: `sheetNameByPart` was built from the truncated
+list, so a table owned by a dropped sheet was told its sheet "is not among the workbook's declared
+sheets," which the workbook plainly contradicts. That reason now has three branches, and the middle
+one says what was actually observed rather than choosing between two explanations it cannot
+separate.
+
+**Header scoring is one property, and that is now written down rather than outstanding.** The spec
+named two; only the first shipped. The second could only break a tie, and a tie is the evidence
+failing to decide. The design spec carries the ruling as its third dated amendment.
+
+**The tool now says which site it read.** `IW_SITE_URL`'s justification had two halves and only one
+had shipped. `siteUrl` is on the structured output and in the first sentence of the prose. The
+static `description` still names no site: every tool definition is a module-level constant built
+before any configuration is read, so a description carrying the value would make the definition a
+factory and the registry with it.
+
+**`reconcile_workbook_vs_repository` was undercounting its own Graph cost by three on every call,
+and saying something false on every joined one.** `readWorkbookSnapshot` pays `resolveDrive` twice
+and `downloadDriveItem` once, none of it counted, while the prose said "This call cost N Graph
+requests." On a joined scan it said the call "issued no Graph request of its own," which was never
+true: the coordinator shares the repository snapshot and nothing else, so a joiner still reads the
+workbook itself. `workbookReadGraphRequestsByThisCall` is now its own named, unsummed clause,
+measured by bracketing the shared counter rather than assumed as a constant, and the joined
+sentence names what the call did pay. Kept separate rather than folded in, because
+`graphRequestsByThisCall` is the figure this file records a live delta-enumeration baseline for.
+
+**The workbook grid's second door has a mechanical guard.** `resolveWorkbookGrid` returns the
+compliance path's grid without `parseWorkbookGrid`'s `fullCalcOnLoad` refusal, and only a doc
+comment held the line. An eslint `no-restricted-imports` pattern, narrowed by import name so the
+module's other exports stay available, now permits it in the workbook layer and in
+`describe_workbook` alone, pinned by seven cases in `tests/lint-guardrails.test.ts` including the
+two that guard the guard.
+
+**Smaller corrections in the same wave.** A non-text header cell now renders as Excel shows it, so
+a header row holding a year is no longer indistinguishable from a column with no header at all.
+`samplesOmitted` is measured against the sample list actually built, so a column whose samples were
+withheld reports every value as omitted rather than reporting none; the interface comment and the
+implementation had been contradicting each other 130 lines apart. An empty-text sample renders as
+`(empty text)` so it is visible among real values, and the deliberate split between `isBlankCell`
+and `describeColumns` on the empty string is documented at both ends. `position` is sheet-absolute,
+which the spec bullet now says and a test at a non-1 `firstColumn` pins. The prose can no longer
+render `describing the source ""`. The response carries `readAt`, from the tool context's clock,
+which every other read tool had in some form and this one lacked while reading a live file.
+`sheet.ts`'s note that `read.ts` is the only consumer of an unbounded grid was stale and now names
+the second one and why it needs no bounds of its own.
+
+**Documentation corrected in the same wave, in `CLAUDE.md` and in this file.** Phase 4b was
+described as never having run against a tenant, which stopped being true on 2026-09-18; the
+"Status as of" date above the build sequence was a day behind the work it described; and this
+file's phase 4c section overstated both what phase 4a and 4b had exercised live and what the
+introspection tests covered.

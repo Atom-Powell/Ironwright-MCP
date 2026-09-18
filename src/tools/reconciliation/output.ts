@@ -61,6 +61,25 @@ export interface ScanProvenance {
   searchCrossCheckGraphRequestsByThisCall?: number;
 }
 
+/** Everything this call paid for, scan and workbook alike. */
+export interface CallProvenance extends ScanProvenance {
+  /**
+   * What reading the workbook cost this call: resolving the drive, then
+   * downloading the file. Named and reported on its own rather than summed
+   * into `graphRequestsByThisCall`, the same reason
+   * `searchCrossCheckGraphRequestsByThisCall` is: that figure is the one
+   * `docs/OPEN-ITEMS.md` records a live delta-enumeration baseline for, and
+   * a reader comparing today's number against tomorrow's has to be able to
+   * see which of the three costs moved.
+   *
+   * Never absent and never zeroed on a joined scan. A call that joins a scan
+   * another call started still reads the workbook itself: the coordinator
+   * shares the repository snapshot and nothing else, so this is the cost a
+   * joiner does pay.
+   */
+  workbookReadGraphRequestsByThisCall: number;
+}
+
 export interface ReconcileToolOutput {
   profileId: string;
   window: { from: Period; to: Period };
@@ -68,7 +87,7 @@ export interface ReconcileToolOutput {
     scannedAt: string;
     workbookSource: string;
     searchCrossCheckIncluded: boolean;
-  } & ScanProvenance;
+  } & CallProvenance;
   scope: {
     /** The clients the caller narrowed to, or null when the report covers every client. */
     clients: string[] | null;
@@ -156,6 +175,12 @@ export const RECONCILE_OUTPUT_SCHEMA = {
         .optional()
         .describe(
           "What this call's own Search cross-check spent, kept separate from graphRequestsByThisCall so that figure keeps meaning the delta enumeration's cost alone. Absent when this call joined another call's scan or when no cross-check was attempted.",
+        ),
+      workbookReadGraphRequestsByThisCall: z
+        .number()
+        .int()
+        .describe(
+          "What reading the workbook cost this call: resolving the drive, then downloading the file. Kept separate from graphRequestsByThisCall for the same reason the cross-check's cost is. Always present and never zeroed on a shared scan, because the scan coordinator shares the repository snapshot and nothing else, so every call reads the workbook itself.",
         ),
     })
     .describe("Where the two inputs came from, and what this call paid for them."),

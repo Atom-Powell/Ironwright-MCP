@@ -41,7 +41,13 @@ describe("reconcile_workbook_vs_repository over the wire", () => {
 
     const output = shapeReport(
       loadExpectedReport(),
-      { scanMode: "full", resynced: false, graphRequestsByThisCall: 2, scanSharedWithConcurrentCall: false },
+      {
+        scanMode: "full",
+        resynced: false,
+        graphRequestsByThisCall: 2,
+        scanSharedWithConcurrentCall: false,
+        workbookReadGraphRequestsByThisCall: 3,
+      },
       {},
     );
 

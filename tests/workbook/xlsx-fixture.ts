@@ -34,6 +34,35 @@ export interface SheetSpec {
    * a workbook can have, not just "not set".
    */
   dimension?: string;
+  /**
+   * Writes this sheet's <sheet> entry with no name attribute. A real
+   * workbook does not have this, but a truncated or hand-edited one can, and
+   * a reader that drops such an entry silently reports a workbook with fewer
+   * sheets than it declares.
+   */
+  omitName?: boolean;
+  /**
+   * Writes this sheet's <sheet> entry with no r:id attribute, so the entry
+   * states no link at all to a worksheet part.
+   */
+  omitRelationshipId?: boolean;
+  /**
+   * Keeps the <sheet> entry's r:id but leaves this one sheet's
+   * <Relationship> out of xl/_rels/workbook.xml.rels, so the id dangles.
+   * Distinct from omitParts, which can only drop the whole rels part and
+   * with it every sheet's link at once: a dangling single id is the shape
+   * resolveWorksheet in xlsx.ts raises its own WorkbookFileError for, and
+   * nothing could build it before this flag existed.
+   */
+  omitRelationship?: boolean;
+  /**
+   * Writes the worksheet part, and any table rels that hang off it, but no
+   * <sheet> entry and no workbook relationship for it at all. That is a
+   * worksheet part the workbook's own sheet list never declares, which is
+   * the only way to build a table whose owning part is genuinely undeclared
+   * rather than merely unresolvable.
+   */
+  omitSheetListEntry?: boolean;
 }
 
 export interface TableSpec {
@@ -79,10 +108,12 @@ export function buildWorkbook(options: BuildWorkbookOptions): Uint8Array {
   const parts: Record<string, Uint8Array> = {};
 
   const sheetEntries = sheets
-    .map(
-      (sheet, index) =>
-        `<sheet name="${sheet.name}" sheetId="${String(index + 1)}" r:id="${relationshipId(sheet, index)}"/>`,
-    )
+    .map((sheet, index) => {
+      if (sheet.omitSheetListEntry === true) return "";
+      const name = sheet.omitName === true ? "" : ` name="${sheet.name}"`;
+      const rId = sheet.omitRelationshipId === true ? "" : ` r:id="${relationshipId(sheet, index)}"`;
+      return `<sheet${name} sheetId="${String(index + 1)}"${rId}/>`;
+    })
     .join("");
   const calcPr =
     options.fullCalcOnLoad !== undefined
@@ -94,10 +125,11 @@ export function buildWorkbook(options: BuildWorkbookOptions): Uint8Array {
   }
 
   const workbookRelEntries = sheets
-    .map(
-      (sheet, index) =>
-        `<Relationship Id="${relationshipId(sheet, index)}" Type="${REL_TYPE_WORKSHEET}" ` +
-        `Target="worksheets/sheet${String(partNumber(sheet, index))}.xml"/>`,
+    .map((sheet, index) =>
+      sheet.omitRelationship === true || sheet.omitSheetListEntry === true
+        ? ""
+        : `<Relationship Id="${relationshipId(sheet, index)}" Type="${REL_TYPE_WORKSHEET}" ` +
+          `Target="worksheets/sheet${String(partNumber(sheet, index))}.xml"/>`,
     )
     .join("");
   if (!omit.has("xl/_rels/workbook.xml.rels")) {

@@ -16,6 +16,16 @@ describe("describeColumns", () => {
     expect(described.map((column) => column.columnLabel)).toEqual(["C", "D", "E", "F"]);
   });
 
+  it("numbers positions against the sheet too, so position and columnLabel never disagree", () => {
+    // A table that does not start at column A is the case where a
+    // range-relative position and a sheet-absolute label would diverge, and
+    // an operator reading position 1 beside label C has to decide which of
+    // the two to trust. They agree instead.
+    const described = describeColumns(grid, 1, 3, {});
+
+    expect(described.map((column) => column.position)).toEqual([3, 4, 5, 6]);
+  });
+
   it("reports the header verbatim and the type under it", () => {
     const described = describeColumns(grid, 1, 1, {});
     expect(described[0]).toMatchObject({ header: "Client", inferredType: "string", nonEmptyCount: 3, distinctCount: 2 });
@@ -56,10 +66,36 @@ describe("describeColumns", () => {
     expect(described[0]?.header).toBeUndefined();
   });
 
-  it("returns no samples at all when they are withheld", () => {
+  it("returns no samples at all when they are withheld, and says every value was left out", () => {
     const described = describeColumns(grid, 1, 1, { samplesWithheld: true });
     expect(described.every((column) => column.samples.length === 0)).toBe(true);
     expect(described[0]?.distinctCount).toBe(2);
+    // Not zero. Zero would report that nothing was left out of a list that
+    // showed the reader nothing.
+    expect(described[0]?.samplesOmitted).toBe(2);
+  });
+
+  it("renders a non-text header rather than reporting no header for it", () => {
+    // A year in a header row is an ordinary tracking-workbook shape. Leaving
+    // `header` unset for it made it indistinguishable from a column with no
+    // header cell at all, in the field an operator reads most closely.
+    const numericHeader: CellValue[][] = [[2026, null], ["a", "b"]];
+
+    const described = describeColumns(numericHeader, 1, 1, {});
+
+    expect(described[0]).toMatchObject({ header: "2026", headerUnevaluable: false });
+    expect(described[1]).toMatchObject({ header: undefined, headerUnevaluable: false });
+  });
+
+  it("makes an empty text sample visible rather than showing it as nothing", () => {
+    // Reachable from a t="str" formula cell: a column of =IF(A1="","",...)
+    // looks blank in Excel and genuinely holds empty strings.
+    const emptyStrings: CellValue[][] = [["Notes"], [""], [""], ["filled"]];
+
+    const described = describeColumns(emptyStrings, 1, 1, {});
+
+    expect(described[0]).toMatchObject({ nonEmptyCount: 3, distinctCount: 2, inferredType: "string" });
+    expect(described[0]?.samples).toEqual(["(empty text)", "filled"]);
   });
 
   it("describes every column when there is no header row", () => {

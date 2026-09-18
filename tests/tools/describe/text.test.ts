@@ -8,6 +8,8 @@ import type { DescribeToolOutput } from "../../../src/tools/describe/output.js";
 // change the rendered sentence, not merely leave it looking plausible.
 
 const INVENTORY_WHOLE: DescribeToolOutput = {
+  siteUrl: "https://contoso.sharepoint.com/sites/Example",
+  readAt: "2026-09-18T09:15:00.000Z",
   library: "Documents",
   workbookPath: "Trackers/Book.xlsx",
   mode: "inventory",
@@ -27,7 +29,10 @@ describe("describeWorkbookText, inventory mode", () => {
   it("names the workbook, library, and resolved totals in one sentence", () => {
     const lines = describeWorkbookText(INVENTORY_WHOLE);
 
-    expect(lines[0]).toBe('Workbook "Trackers/Book.xlsx" in library "Documents": 2 worksheets and 1 table resolved.');
+    expect(lines[0]).toBe(
+      'Workbook "Trackers/Book.xlsx" in library "Documents" on https://contoso.sharepoint.com/sites/Example, ' +
+        "read at 2026-09-18T09:15:00.000Z: 2 worksheets and 1 table resolved.",
+    );
   });
 
   it("states cleanly resolved wiring as its own sentence when nothing is unresolved", () => {
@@ -65,7 +70,10 @@ describe("describeWorkbookText, inventory mode", () => {
 
     const lines = describeWorkbookText(truncated);
 
-    expect(lines[0]).toBe('Workbook "Trackers/Book.xlsx" in library "Documents": 5 worksheets and 13 tables resolved.');
+    expect(lines[0]).toBe(
+      'Workbook "Trackers/Book.xlsx" in library "Documents" on https://contoso.sharepoint.com/sites/Example, ' +
+        "read at 2026-09-18T09:15:00.000Z: 5 worksheets and 13 tables resolved.",
+    );
     expect(lines[1]).toBe("Listing 3 worksheets of 5 resolved; 2 more were left out to keep this response bounded at 3.");
     expect(lines[2]).toBe("Listing 6 tables of 13 resolved; 7 more were left out to keep this response bounded at 6.");
   });
@@ -90,6 +98,8 @@ describe("describeWorkbookText, inventory mode", () => {
 });
 
 const SOURCE_WHOLE: DescribeToolOutput = {
+  siteUrl: "https://contoso.sharepoint.com/sites/Example",
+  readAt: "2026-09-18T11:47:00.000Z",
   library: "Documents",
   workbookPath: "Trackers/Book.xlsx",
   mode: "source",
@@ -109,7 +119,10 @@ describe("describeWorkbookText, source mode", () => {
   it("names the workbook, library and described source in one sentence", () => {
     const lines = describeWorkbookText(SOURCE_WHOLE);
 
-    expect(lines[0]).toBe('Workbook "Trackers/Book.xlsx" in library "Documents", describing the table "ClientTable".');
+    expect(lines[0]).toBe(
+      'Workbook "Trackers/Book.xlsx" in library "Documents" on https://contoso.sharepoint.com/sites/Example, ' +
+        'read at 2026-09-18T11:47:00.000Z, describing the table "ClientTable".',
+    );
   });
 
   it("states the proposed header row as its own sentence", () => {
@@ -172,10 +185,29 @@ describe("describeWorkbookText, source mode", () => {
 
     const lines = describeWorkbookText(declined);
 
-    expect(lines[0]).toBe('Workbook "Trackers/Book.xlsx" in library "Documents", describing the worksheet "Tracking".');
+    expect(lines[0]).toBe(
+      'Workbook "Trackers/Book.xlsx" in library "Documents" on https://contoso.sharepoint.com/sites/Example, ' +
+        'read at 2026-09-18T11:47:00.000Z, describing the worksheet "Tracking".',
+    );
     expect(lines[1]).toBe("Proposed no header row: Rows 1 and 2 are equally plausible headers, so this tool proposes none.");
     expect(lines[2]).toBe("Describing 5 columns of 8 this range holds; 3 more were left out to keep this response bounded at 5.");
     expect(lines[5]).toBe("This call cost 9 Graph requests.");
+  });
+
+  it("says a source-mode output with no source carries no name, rather than rendering an empty one", () => {
+    // Unreachable through the tool today, since shapeDescribeSource always
+    // sets `source`. Pinned because the alternative renders as
+    // `the source ""`, which is the `profile ""` shape this branch already
+    // refused once: a missing value shown as a present empty one.
+    const nameless: DescribeToolOutput = { ...SOURCE_WHOLE };
+    delete nameless.source;
+
+    const lines = describeWorkbookText(nameless);
+
+    expect(lines[0]).toBe(
+      'Workbook "Trackers/Book.xlsx" in library "Documents" on https://contoso.sharepoint.com/sites/Example, ' +
+        "read at 2026-09-18T11:47:00.000Z, describing a source this response carries no name for.",
+    );
   });
 
   it("states that samples were withheld, and why, as its own whole sentence", () => {

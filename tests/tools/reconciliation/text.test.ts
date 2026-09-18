@@ -2,13 +2,14 @@ import { describe, expect, it } from "vitest";
 import { loadExpectedReport } from "../../domain/reconcile/fixtures/load.js";
 import { shapeReport } from "../../../src/tools/reconciliation/shape.js";
 import { reconcileText } from "../../../src/tools/reconciliation/text.js";
-import type { ScanProvenance } from "../../../src/tools/reconciliation/output.js";
+import type { CallProvenance } from "../../../src/tools/reconciliation/output.js";
 
-const PROVENANCE: ScanProvenance = {
+const PROVENANCE: CallProvenance = {
   scanMode: "incremental",
   resynced: false,
   graphRequestsByThisCall: 4,
   scanSharedWithConcurrentCall: false,
+  workbookReadGraphRequestsByThisCall: 2,
 };
 
 function textFor(options: Parameters<typeof shapeReport>[2] = {}): string {
@@ -184,17 +185,37 @@ describe("reconcileText", () => {
   it("uses the singular for one Graph request", () => {
     const output = shapeReport(loadExpectedReport(), { ...PROVENANCE, graphRequestsByThisCall: 1 }, {});
 
-    expect(reconcileText(output).join("\n")).toContain("cost 1 Graph request.");
+    expect(reconcileText(output).join("\n")).toContain("cost 1 Graph request scanning the repository");
   });
 
-  it("says a joined call issued no Graph request of its own", () => {
+  it("says a joined call shared the scan, while still naming what it paid for the workbook", () => {
     const output = shapeReport(
       loadExpectedReport(),
       { ...PROVENANCE, graphRequestsByThisCall: 0, scanSharedWithConcurrentCall: true },
       {},
     );
 
-    expect(reconcileText(output).join("\n")).toContain("shared a scan already running");
+    const text = reconcileText(output).join("\n");
+    expect(text).toContain("shared a scan already running");
+    expect(text).toContain("cost 2 Graph requests reading the workbook");
+  });
+
+  it("names the workbook read's own cost as its own clause, never summed into the scan's count", () => {
+    // Three costs, three figures, all distinct: 4 for the scan, 3 for the
+    // cross-check, 2 for the workbook. A reader comparing today's number
+    // against tomorrow's has to be able to see which of the three moved.
+    const output = shapeReport(
+      loadExpectedReport(),
+      { ...PROVENANCE, searchCrossCheckGraphRequestsByThisCall: 3 },
+      {},
+    );
+
+    const text = reconcileText(output).join("\n");
+    expect(text).toContain("cost 4 Graph requests scanning the repository");
+    expect(text).toContain("3 Graph requests for the Search cross-check");
+    expect(text).toContain("plus 2 Graph requests reading the workbook");
+    expect(text).not.toContain("9 Graph request");
+    expect(text).not.toContain("6 Graph request");
   });
 
   it("names the filter when one was applied, and says what stayed repository-wide", () => {

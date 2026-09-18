@@ -4,6 +4,19 @@ import type { ToolDefinition } from "../types.js";
 import { DESCRIBE_OUTPUT_SCHEMA } from "../describe/output.js";
 import { DESCRIBE_WORKBOOK_INPUT_SCHEMA, runDescribeWorkbook } from "../describe/run.js";
 
+/**
+ * The description does not name the site, although the design spec's case for
+ * requiring `IW_SITE_URL` had two halves and this was the second of them.
+ *
+ * Every tool definition in this registry is a module-level constant, built
+ * before `main.ts` has read any configuration, so a description carrying the
+ * granted site would have to become a factory taking that value, and the
+ * registry with it. The cheaper half of the promise is kept instead: the site
+ * is on the response, as `siteUrl`, and it is the first thing this tool's own
+ * prose says. A model that calls the tool once learns the site from the
+ * answer, which is one call later than the description would have told it and
+ * costs a read-only call against a site the grant already covers.
+ */
 export const describeWorkbook: ToolDefinition = {
   name: "describe_workbook",
   kind: "read",

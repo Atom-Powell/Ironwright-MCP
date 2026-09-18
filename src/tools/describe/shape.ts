@@ -10,6 +10,21 @@ import {
 
 export { MAX_COLUMNS_DESCRIBED, MAX_SHEETS_LISTED, MAX_TABLES_LISTED };
 
+/**
+ * What every describe response says about where and when it read, grouped so
+ * the two shaping functions take one argument for it rather than four
+ * positional strings each. `siteUrl` is on the response because the tool
+ * takes no site argument: without it, nothing an operator or a model reads
+ * ever names the site this answer came from.
+ */
+export interface DescribeProvenance {
+  siteUrl: string;
+  library: string;
+  workbookPath: string;
+  /** ISO 8601 in UTC, from the tool context's clock, taken once per call. */
+  readAt: string;
+}
+
 export interface DescribeShapeOptions {
   /** Overridden only by tests, so the sheet-listing truncation rule runs on a small fixture. */
   maxSheets?: number;
@@ -38,8 +53,7 @@ export interface DescribeShapeOptions {
  * workbook an operator most needs the complete list for.
  */
 export function shapeDescribeInventory(
-  library: string,
-  workbookPath: string,
+  provenance: DescribeProvenance,
   inventory: WorkbookInventory,
   graphRequests: number,
   options: DescribeShapeOptions,
@@ -51,8 +65,7 @@ export function shapeDescribeInventory(
   const listedTables = inventory.tables.slice(0, maxTables);
 
   return {
-    library,
-    workbookPath,
+    ...provenance,
     mode: "inventory",
     sheets: listedSheets,
     sheetsListing: {
@@ -94,8 +107,7 @@ export interface DescribeSourceResolution {
  * only afterward, the same discipline shapeDescribeInventory applies above.
  */
 export function shapeDescribeSource(
-  library: string,
-  workbookPath: string,
+  provenance: DescribeProvenance,
   source: WorkbookSource,
   resolution: DescribeSourceResolution,
   graphRequests: number,
@@ -105,8 +117,7 @@ export function shapeDescribeSource(
   const listedColumns = resolution.columns.slice(0, maxColumns);
 
   return {
-    library,
-    workbookPath,
+    ...provenance,
     mode: "source",
     source,
     headerRow: resolution.headerRow,

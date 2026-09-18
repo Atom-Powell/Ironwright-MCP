@@ -50,8 +50,12 @@ describe("describe_workbook over the wire", () => {
 
   it("declares an output schema the shaped source description validates against", () => {
     const output = shapeDescribeSource(
-      "Documents",
-      "Trackers/Book.xlsx",
+      {
+        siteUrl: "https://contoso.sharepoint.com/sites/Example",
+        library: "Documents",
+        workbookPath: "Trackers/Book.xlsx",
+        readAt: "2026-09-18T09:15:00.000Z",
+      },
       { kind: "table", name: "ClientTable" },
       {
         columns: [

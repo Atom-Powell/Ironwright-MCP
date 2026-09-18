@@ -8,7 +8,7 @@ import { readWorkbookInventory, type WorkbookInventory } from "../../workbook/in
 import { detectHeaderRow, describeColumns, MAX_COLUMN_SAMPLES, type HeaderDetection } from "../../workbook/describe.js";
 import { resolveWorkbookGrid, type WorkbookGridResolution, type WorkbookSource } from "../../workbook/xlsx.js";
 import { WorkbookMappingError } from "../../workbook/errors.js";
-import { shapeDescribeInventory, shapeDescribeSource } from "./shape.js";
+import { shapeDescribeInventory, shapeDescribeSource, type DescribeProvenance } from "./shape.js";
 import { describeWorkbookText } from "./text.js";
 import type { DescribeToolOutput } from "./output.js";
 
@@ -127,8 +127,7 @@ function resolveHeaderRow(source: WorkbookSource, resolved: WorkbookGridResoluti
 function buildSourceOutput(
   bytes: Uint8Array,
   source: WorkbookSource,
-  library: string,
-  workbookPath: string,
+  provenance: DescribeProvenance,
   graphRequests: number,
 ): DescribeToolOutput {
   const resolved = resolveSourceOrExplain(bytes, source);
@@ -147,8 +146,7 @@ function buildSourceOutput(
   const columns = describeColumns(resolved.grid, headerRow.proposed, resolved.firstColumn, { samplesWithheld });
 
   return shapeDescribeSource(
-    library,
-    workbookPath,
+    provenance,
     source,
     { columns, headerRow, samplesWithheld, sampleCap: MAX_COLUMN_SAMPLES },
     graphRequests,
@@ -184,10 +182,20 @@ export async function runDescribeWorkbook(input: unknown, context: ToolContext):
     const bytes = await downloadDriveItem(context.graph, { driveId, workbookPath: args.workbookPath });
     const graphRequests = context.graph.requests() - requestsAtStart;
 
+    // Stamped after the download rather than before the drive resolution,
+    // because what this timestamp dates is the workbook bytes this answer
+    // describes, not when the call began.
+    const provenance: DescribeProvenance = {
+      siteUrl: context.grantedSiteUrl,
+      library: args.library,
+      workbookPath: args.workbookPath,
+      readAt: context.now().toISOString(),
+    };
+
     const output: DescribeToolOutput =
       args.source === undefined
-        ? shapeDescribeInventory(args.library, args.workbookPath, readWorkbookInventory(bytes), graphRequests, {})
-        : buildSourceOutput(bytes, args.source, args.library, args.workbookPath, graphRequests);
+        ? shapeDescribeInventory(provenance, readWorkbookInventory(bytes), graphRequests, {})
+        : buildSourceOutput(bytes, args.source, provenance, graphRequests);
 
     return {
       structuredContent: output as unknown as Record<string, unknown>,

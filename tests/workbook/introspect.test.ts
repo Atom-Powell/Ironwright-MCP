@@ -51,6 +51,19 @@ function workbookWithUnresolvableTable(): Uint8Array {
   });
 }
 
+function workbookWithDanglingSheetRelationship(): Uint8Array {
+  // Both sheets are declared and both worksheet parts are written; only
+  // "Detached"'s own <Relationship> is left out of the workbook rels, so its
+  // r:id dangles. This is the shape resolveWorksheet in xlsx.ts raises a
+  // WorkbookFileError for on the compliance path.
+  return buildWorkbook({
+    sheets: [
+      { name: "Tracking", rowsXml: "", dimension: "A1:D12" },
+      { name: "Detached", rowsXml: "", dimension: "A1:B5", rId: "rIdMissing", omitRelationship: true },
+    ],
+  });
+}
+
 describe("readWorkbookInventory", () => {
   it("lists every worksheet with its used range and size", () => {
     const inventory = readWorkbookInventory(workbookWithTwoSheets());
@@ -129,5 +142,122 @@ describe("readWorkbookInventory", () => {
     // { rows: 0, columns: 0 } shape for both would have let slip past every
     // other assertion above.
     expect(emptyInventory).not.toEqual(brokenInventory);
+  });
+
+  it("reports a declared sheet whose r:id the rels part does not define, naming the undefined id", () => {
+    // The defect this covers: the entry reached neither `sheets` nor
+    // `unresolved`, so the workbook came back one sheet shorter and the
+    // prose layer then said every declared sheet had resolved cleanly.
+    const inventory = readWorkbookInventory(workbookWithDanglingSheetRelationship());
+
+    expect(inventory.sheets).toEqual([{ name: "Tracking", usedRange: "A1:D12", rows: 12, columns: 4 }]);
+    expect(inventory.unresolved).toEqual([
+      {
+        kind: "sheet",
+        name: "Detached",
+        reason: 'points at relationship "rIdMissing", which xl/_rels/workbook.xml.rels does not define',
+      },
+    ]);
+  });
+
+  it("reports a sheet entry carrying no name under its position in the sheet list", () => {
+    const inventory = readWorkbookInventory(
+      buildWorkbook({
+        sheets: [
+          { name: "Tracking", rowsXml: "", dimension: "A1:D12" },
+          { name: "Ignored", rowsXml: "", dimension: "A1:B5", omitName: true },
+        ],
+      }),
+    );
+
+    expect(inventory.sheets).toEqual([{ name: "Tracking", usedRange: "A1:D12", rows: 12, columns: 4 }]);
+    expect(inventory.unresolved).toEqual([
+      {
+        kind: "sheet",
+        name: "position 2 in the workbook's sheet list",
+        reason: "carries no name attribute, so the workbook itself does not name it and nothing can address it by name",
+      },
+    ]);
+  });
+
+  it("reports a sheet entry carrying no r:id", () => {
+    const inventory = readWorkbookInventory(
+      buildWorkbook({
+        sheets: [
+          { name: "Tracking", rowsXml: "", dimension: "A1:D12" },
+          { name: "Unlinked", rowsXml: "", dimension: "A1:B5", omitRelationshipId: true },
+        ],
+      }),
+    );
+
+    expect(inventory.sheets).toEqual([{ name: "Tracking", usedRange: "A1:D12", rows: 12, columns: 4 }]);
+    expect(inventory.unresolved).toEqual([
+      {
+        kind: "sheet",
+        name: "Unlinked",
+        reason: "carries no r:id attribute, so the workbook states no link from it to the worksheet part that holds it",
+      },
+    ]);
+  });
+
+  it("does not tell a table that its declared owning sheet is undeclared", () => {
+    // The second-order defect: sheetNameByPart was built from the truncated
+    // sheet list, so a table owned by a sheet the workbook does declare was
+    // told that sheet is not declared at all. That is correct about the
+    // lookup and false about the file.
+    const inventory = readWorkbookInventory(
+      buildWorkbook({
+        sheets: [
+          { name: "Tracking", rowsXml: "", dimension: "A1:D12" },
+          { name: "Detached", rowsXml: "", dimension: "A1:B5", rId: "rIdMissing", omitRelationship: true },
+        ],
+        tables: [{ name: "ClientTable", ref: "A1:B5", sheetIndex: 1 }],
+      }),
+    );
+
+    expect(inventory.tables).toEqual([]);
+    expect(inventory.unresolved).toEqual([
+      {
+        kind: "sheet",
+        name: "Detached",
+        reason: 'points at relationship "rIdMissing", which xl/_rels/workbook.xml.rels does not define',
+      },
+      {
+        kind: "table",
+        name: "ClientTable",
+        reason:
+          "belongs to worksheet part xl/worksheets/sheet1.xml, which none of the sheets this tool resolved " +
+          "claims. The workbook declares 1 sheet entry this tool could not resolve, also reported here, so " +
+          "whether that part is one of those or is claimed by no sheet entry at all cannot be determined until " +
+          "they are fixed",
+      },
+    ]);
+  });
+
+  it("still says a table's owning part is undeclared when every declared sheet did resolve", () => {
+    // Guards the branch above from swallowing the case it was split out of.
+    // Here the worksheet part and its table rels exist but no <sheet> entry
+    // names that part, so nothing was left unresolved and "not among the
+    // workbook's declared sheets" is the true answer.
+    const inventory = readWorkbookInventory(
+      buildWorkbook({
+        sheets: [
+          { name: "Tracking", rowsXml: "", dimension: "A1:D12" },
+          { name: "Hidden", rowsXml: "", dimension: "A1:B5", omitSheetListEntry: true },
+        ],
+        tables: [{ name: "ClientTable", ref: "A1:B5", sheetIndex: 1 }],
+      }),
+    );
+
+    expect(inventory.tables).toEqual([]);
+    expect(inventory.unresolved).toEqual([
+      {
+        kind: "table",
+        name: "ClientTable",
+        reason:
+          "belongs to worksheet part xl/worksheets/sheet1.xml, which is not among the workbook's declared " +
+          "sheets, so its sheet name cannot be determined",
+      },
+    ]);
   });
 });

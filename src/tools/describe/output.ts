@@ -79,7 +79,7 @@ export interface DescribeHeaderRow {
 export interface DescribeColumnDescription {
   position: number;
   columnLabel: string;
-  /** Absent when there is no header row, the header cell is not text, or it is unevaluable. */
+  /** The header cell as Excel shows it. Absent when there is no header row, the header cell is blank, or it is unevaluable. */
   header?: string;
   headerUnevaluable: boolean;
   inferredType: (typeof DESCRIBE_INFERRED_TYPES)[number];
@@ -96,6 +96,12 @@ export interface DescribeColumnDescription {
  * `ToolDefinition.outputSchema` and the SDK's `registerTool` both take.
  */
 export const DESCRIBE_OUTPUT_SCHEMA = {
+  siteUrl: z
+    .string()
+    .describe(
+      "The SharePoint site this call read, which is the one site this server's Sites.Selected grant covers. " +
+        "This tool takes no site argument and can reach no other.",
+    ),
   library: z.string().describe("The document library this call named."),
   workbookPath: z.string().describe("The library-relative path to the workbook this call named."),
   mode: z
@@ -181,19 +187,40 @@ export const DESCRIBE_OUTPUT_SCHEMA = {
   columns: z
     .array(
       z.object({
-        position: z.number().int(),
+        position: z
+          .number()
+          .int()
+          .describe(
+            "The column's own number in the sheet, counting column A as 1, so it always agrees with " +
+              "columnLabel beside it. For a table that does not start at column A this is larger than the " +
+              "column's place within the table's own range.",
+          ),
         columnLabel: z.string(),
         header: z
           .string()
           .optional()
-          .describe("Absent when there is no header row, the header cell is not text, or it is unevaluable."),
+          .describe(
+            "The header cell as Excel shows it, text verbatim and a number or boolean rendered. Absent when " +
+              "there is no header row, the header cell is blank, or it is unevaluable.",
+          ),
         headerUnevaluable: z.boolean(),
         inferredType: z.enum(DESCRIBE_INFERRED_TYPES),
         nonEmptyCount: z.number().int(),
         unevaluableCount: z.number().int(),
         distinctCount: z.number().int(),
-        samples: z.array(z.string()).describe("Distinct values, first seen order. Empty when samplesWithheld is true."),
-        samplesOmitted: z.number().int(),
+        samples: z
+          .array(z.string())
+          .describe(
+            "Distinct values, first seen order. Empty when samplesWithheld is true. A cell holding empty text, " +
+              "which a formula can produce, renders as \"(empty text)\" so it is visible among real values.",
+          ),
+        samplesOmitted: z
+          .number()
+          .int()
+          .describe(
+            "How many of this column's distinct values are not in samples. Equals distinctCount when " +
+              "samplesWithheld is true, because none of them was shown.",
+          ),
       }),
     )
     .optional()
@@ -222,6 +249,13 @@ export const DESCRIBE_OUTPUT_SCHEMA = {
         "Always false in inventory mode, which describes no column samples at all.",
     ),
   graphRequests: z.number().int().describe("What this call itself paid: resolving the drive and downloading the workbook."),
+  readAt: z
+    .string()
+    .describe(
+      "When this call downloaded the workbook, ISO 8601 in UTC. Every other read tool reports the age of the " +
+        "stored inventory it answered from; this tool reads the live file, so this is the moment its answer " +
+        "describes and a later edit to the workbook is not reflected in it.",
+    ),
 } satisfies z.ZodRawShape;
 
 /**
@@ -232,6 +266,7 @@ export const DESCRIBE_OUTPUT_SCHEMA = {
  * treats that as the unused variable it is.
  */
 export interface DescribeToolOutput {
+  siteUrl: string;
   library: string;
   workbookPath: string;
   mode: DescribeMode;
@@ -247,4 +282,5 @@ export interface DescribeToolOutput {
   sampleCap?: number;
   samplesWithheld: boolean;
   graphRequests: number;
+  readAt: string;
 }

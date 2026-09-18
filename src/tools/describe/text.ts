@@ -28,8 +28,9 @@ function inventoryLines(output: DescribeToolOutput): string[] {
   // enough to land in unresolved instead, must not have that shortfall
   // reported as though it were the full declared count.
   lines.push(
-    `Workbook "${output.workbookPath}" in library "${output.library}": ` +
-      `${plural(sheetsTotal, "worksheet", "worksheets")} and ${plural(tablesTotal, "table", "tables")} resolved.`,
+    `Workbook "${output.workbookPath}" in library "${output.library}" on ${output.siteUrl}, read at ` +
+      `${output.readAt}: ${plural(sheetsTotal, "worksheet", "worksheets")} and ` +
+      `${plural(tablesTotal, "table", "tables")} resolved.`,
   );
 
   // Read from the listing's own `returned` rather than recomputed from
@@ -81,9 +82,20 @@ function sourceLines(output: DescribeToolOutput): string[] {
   const columnsTotal = total(output.columnsListing);
   const headerRow = output.headerRow;
 
+  // The source is set on every source-mode output shapeDescribeSource
+  // builds, so the fallback is unreachable today. It is written as a
+  // sentence rather than as an empty pair of quotes because `profile ""` is
+  // the exact shape this branch already refused to let ship elsewhere: a
+  // message that renders a missing value as a present empty one tells the
+  // reader the workbook holds a source with no name.
+  const describing =
+    source === undefined
+      ? "describing a source this response carries no name for"
+      : `describing the ${source.kind} "${source.name}"`;
+
   lines.push(
-    `Workbook "${output.workbookPath}" in library "${output.library}", describing the ${source?.kind ?? "source"} ` +
-      `"${source?.name ?? ""}".`,
+    `Workbook "${output.workbookPath}" in library "${output.library}" on ${output.siteUrl}, read at ` +
+      `${output.readAt}, ${describing}.`,
   );
 
   lines.push(

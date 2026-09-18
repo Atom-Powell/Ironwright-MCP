@@ -59,13 +59,25 @@ export async function runReconcile(
     subject.siteUrl = profile.identity.siteUrl;
     subject.library = profile.identity.library;
 
+    // Bracketed the way `src/scan/run.ts` and `describe_workbook` bracket
+    // the same counter. It lives on the per-process client, so reading it
+    // raw would answer what the process has spent since it started; the
+    // delta across this one call is what the report promises. Measured
+    // rather than asserted as a constant, so an injected reader that issues
+    // no request reports none and a future reader that pays more reports
+    // that instead.
+    const requestsBeforeWorkbook = context.graph.requests();
     const workbook = await readWorkbook(context.graph, profile);
+    const workbookReadGraphRequestsByThisCall = context.graph.requests() - requestsBeforeWorkbook;
+
     const scan = await context.scans.run(profile);
 
     const report = reconcile(profile, workbook, scan.result.snapshot, periodFromDate(context.now()));
-    const output = shapeReport(report, scanProvenance(scan.result, scan.joined), {
-      ...(args.clients === undefined ? {} : { clients: args.clients }),
-    });
+    const output = shapeReport(
+      report,
+      { ...scanProvenance(scan.result, scan.joined), workbookReadGraphRequestsByThisCall },
+      { ...(args.clients === undefined ? {} : { clients: args.clients }) },
+    );
 
     return {
       structuredContent: output as unknown as Record<string, unknown>,

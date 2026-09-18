@@ -217,6 +217,81 @@ describe("the reconciliation engine's single entry point", () => {
   });
 });
 
+describe("the workbook grid's unchecked second door", () => {
+  it("refuses resolveWorkbookGrid from a scan module", async () => {
+    // src/scan/workbook.ts is the compliance path's own workbook reader and
+    // the caller most likely to reach for the shorter name.
+    const ruleIds = await ruleIdsFor(
+      "src/scan/probe.ts",
+      'import { resolveWorkbookGrid } from "../workbook/xlsx.js";\nexport const use = resolveWorkbookGrid;\n',
+    );
+
+    expect(ruleIds).toContain("no-restricted-imports");
+  });
+
+  it("says to import parseWorkbookGrid instead, and why", async () => {
+    const messages = await messagesFor(
+      "src/tools/inventory/probe.ts",
+      'import { resolveWorkbookGrid } from "../../workbook/xlsx.js";\nexport const use = resolveWorkbookGrid;\n',
+    );
+
+    expect(messages.join("\n")).toContain("fullCalcOnLoad");
+    expect(messages.join("\n")).toContain("parseWorkbookGrid");
+  });
+
+  it("refuses it from a test outside the two exempt trees", async () => {
+    const ruleIds = await ruleIdsFor(
+      "tests/scan/probe.test.ts",
+      'import { resolveWorkbookGrid } from "../../src/workbook/xlsx.js";\nexport const use = resolveWorkbookGrid;\n',
+    );
+
+    expect(ruleIds).toContain("no-restricted-imports");
+  });
+
+  it("allows describe_workbook, the one tool that withholds samples rather than reporting them", async () => {
+    const ruleIds = await ruleIdsFor(
+      "src/tools/describe/probe.ts",
+      'import { resolveWorkbookGrid } from "../../workbook/xlsx.js";\nexport const use = resolveWorkbookGrid;\n',
+    );
+
+    expect(ruleIds).not.toContain("no-restricted-imports");
+  });
+
+  it("allows the workbook layer itself, which declares it", async () => {
+    const ruleIds = await ruleIdsFor(
+      "src/workbook/probe.ts",
+      'import { resolveWorkbookGrid } from "./xlsx.js";\nexport const use = resolveWorkbookGrid;\n',
+    );
+
+    expect(ruleIds).not.toContain("no-restricted-imports");
+  });
+
+  it("leaves parseWorkbookGrid and the module's other exports alone", async () => {
+    // Guards the guard. A rule that fenced the whole module off would satisfy
+    // every assertion above while breaking the compliance path's own reader
+    // and introspect.ts's reuse of the OOXML helpers.
+    const ruleIds = await ruleIdsFor(
+      "src/scan/probe.ts",
+      'import { parseWorkbookGrid, parseRangeRef } from "../workbook/xlsx.js";\nexport const use = [parseWorkbookGrid, parseRangeRef];\n',
+    );
+
+    expect(ruleIds).not.toContain("no-restricted-imports");
+  });
+
+  it("still refuses a reconcile stage import from a file this block also covers", async () => {
+    // The two patterns are configured in overlapping blocks over the same
+    // files, and ESLint gives one rule one set of options per file, so the
+    // later block dropping the earlier pattern would switch the entry-point
+    // rule off across most of the repo with nothing failing.
+    const ruleIds = await ruleIdsFor(
+      "src/scan/probe.ts",
+      'import { deriveExpected } from "../domain/reconcile/expected.js";\nexport const use = deriveExpected;\n',
+    );
+
+    expect(ruleIds).toContain("no-restricted-imports");
+  });
+});
+
 describe("the domain layer's freedom from the clock", () => {
   it("refuses new Date() in the engine", async () => {
     const ruleIds = await ruleIdsFor("src/domain/reconcile/probe.ts", "export const now = new Date();\n");

@@ -43,6 +43,31 @@ describe("createProfileRegistry", () => {
     ).toThrow(/"example".*sites\/Other.*sites\/Ops/s);
   });
 
+  it("accepts a profile whose site matches, ignoring case", () => {
+    // The comparison is a permission boundary, so both halves of what it
+    // normalizes are pinned. Only the trailing slash was, which left the
+    // case fold free to be narrowed, or widened to a host-only comparison
+    // that would accept a profile pointed at a different site on the same
+    // tenant, with nothing failing.
+    const contents = exampleProfile();
+    const identity = contents.identity as Record<string, unknown>;
+    const profile = { ...contents, identity: { ...identity, siteUrl: "https://CONTOSO.sharepoint.com/sites/Ops" } };
+
+    expect(() =>
+      createProfileRegistry([{ source: "a.json", contents: profile }], "https://contoso.sharepoint.com/sites/ops"),
+    ).not.toThrow();
+  });
+
+  it("still refuses a different path on the same host, which no normalization may fold away", () => {
+    const contents = exampleProfile();
+    const identity = contents.identity as Record<string, unknown>;
+    const profile = { ...contents, identity: { ...identity, siteUrl: "https://contoso.sharepoint.com/sites/OpsArchive" } };
+
+    expect(() =>
+      createProfileRegistry([{ source: "a.json", contents: profile }], "https://contoso.sharepoint.com/sites/Ops"),
+    ).toThrow(/sites\/OpsArchive/);
+  });
+
   it("accepts a profile whose site matches, ignoring a trailing slash", () => {
     const contents = exampleProfile();
     const identity = contents.identity as Record<string, unknown>;

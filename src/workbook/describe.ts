@@ -34,6 +34,17 @@ export interface HeaderDetection {
  * A cell that reads as genuinely absent: no value was ever written there.
  * An unevaluable cell is not blank by this test, because something is
  * there and this function only does not know what it says.
+ *
+ * The empty string counts as absent HERE and as a present value in
+ * `describeColumns` below, and that split is deliberate rather than an
+ * oversight the two should be unified out of. This test serves header
+ * detection, where an empty cell in a candidate row is a column with no
+ * label and must not be scored as one. `describeColumns` reports what a
+ * column holds, and `t="str"` formula cells make the empty string a value
+ * the file genuinely carries: a column of `=IF(A1="","",...)` looks blank in
+ * Excel and really does hold hundreds of empty strings, which that function
+ * counts and this one does not. Both readings are honest about their own
+ * question; a shared one would have to be wrong about one of them.
  */
 function isBlankCell(value: CellValue): boolean {
   return value === null || value === "";
@@ -59,6 +70,13 @@ function isBlankCell(value: CellValue): boolean {
  * validates, and the server then reports compliance computed from the
  * wrong column. An operator can resolve that ambiguity by looking at the
  * two rows; this function cannot, and must not guess in its place.
+ *
+ * This is one property, not the two the design spec first named. The
+ * second, whether the row beneath a candidate differs in type from it,
+ * could only ever break a tie, and a tie here is the evidence failing to
+ * decide rather than a question waiting for a second opinion. See the
+ * 2026-09-18 amendment in the phase 4c spec for why the signal was dropped
+ * rather than delivered.
  */
 export function detectHeaderRow(grid: CellValue[][]): HeaderDetection {
   const candidates: HeaderCandidate[] = [];
@@ -117,7 +135,12 @@ export interface ColumnDescription {
   position: number;
   /** columnLabel is derived from position, never from the grid's own 0 based index. */
   columnLabel: string;
-  /** The header cell's text, verbatim. Unset when there is no header row, the header cell is not text, or it is unevaluable. */
+  /**
+   * The header cell as Excel shows it: text verbatim, and a number or
+   * boolean rendered the way it is displayed. Unset only when the header
+   * cell is genuinely absent or blank, or when there is no header row at
+   * all, or when the cell is unevaluable and headerUnevaluable says so.
+   */
   header?: string;
   /** True when the header cell exists but could not be read, so header being unset does not read as the cell being blank. */
   headerUnevaluable: boolean;
@@ -130,17 +153,45 @@ export interface ColumnDescription {
   distinctCount: number;
   /** Distinct values, in first-seen order, capped at maxSamples. */
   samples: string[];
-  /** distinctCount minus how many samples were kept, computed before the cap so it stays accurate even when samples themselves are withheld. */
+  /** distinctCount minus how many samples were kept, so it stays accurate even when samples themselves are withheld. */
   samplesOmitted: number;
 }
+
+/** What an empty text cell renders as in a sample list. */
+export const EMPTY_TEXT_SAMPLE = "(empty text)";
 
 /**
  * Renders a read cell value the way an operator would type it, for a sample.
  * Only called on a value that already passed the null and UNEVALUABLE
  * checks below, so it never has to decide what an absent or unreadable
  * value looks like as text.
+ *
+ * The empty string is the one value that cannot render as itself. A `t="str"`
+ * formula cell can genuinely hold it, and an empty entry sitting in a list
+ * of real values reads as nothing at all rather than as a value the column
+ * holds, which is the same conflation between absent and present this module
+ * refuses everywhere else. A cell whose text is literally "(empty text)"
+ * would be indistinguishable from it; that is accepted, because the trade is
+ * a contrived collision against a value an operator would otherwise not see.
  */
 function renderSample(value: string | number | boolean): string {
+  return value === "" ? EMPTY_TEXT_SAMPLE : String(value);
+}
+
+/**
+ * The header cell as Excel displays it. A header row holding the year 2026
+ * is an ordinary tracking-workbook shape, and leaving `header` unset for it
+ * made a numeric header indistinguishable from a column with no header cell
+ * at all, in the field an operator reads most closely. Rendering it is what
+ * Excel itself shows and what the operator will compare this output
+ * against; the alternative, a second flag beside headerUnevaluable, adds a
+ * field to say what the value could already have said.
+ *
+ * Absent, blank and unevaluable cells never reach here: each is its own
+ * answer and none of them has a display form to render.
+ */
+function renderHeader(value: CellValue | undefined): string | undefined {
+  if (value === null || value === undefined || value === UNEVALUABLE || value === "") return undefined;
   return String(value);
 }
 
@@ -200,7 +251,7 @@ export function describeColumns(
   for (let column = 0; column < columnCount; column += 1) {
     const headerCell = headerCells?.[column];
     const headerUnevaluable = headerCell === UNEVALUABLE;
-    const header = typeof headerCell === "string" ? headerCell : undefined;
+    const header = renderHeader(headerCell);
 
     let nonEmptyCount = 0;
     let unevaluableCount = 0;
@@ -224,6 +275,11 @@ export function describeColumns(
         continue;
       }
 
+      // The empty string is counted here as a value the column holds, unlike
+      // isBlankCell above, which reads it as absent for header detection.
+      // See that function for why the two differ: a `t="str"` formula cell
+      // genuinely carries it, so a column of `=IF(A1="","",...)` looks blank
+      // in Excel and truthfully reports hundreds of non-empty strings here.
       nonEmptyCount += 1;
       if (typeof cell === "string") sawString = true;
       else if (typeof cell === "number") sawNumber = true;
@@ -260,11 +316,14 @@ export function describeColumns(
       unevaluableCount,
       distinctCount,
       samples,
-      // Zeroed rather than computed when samples are withheld: the counts
-      // are structure and stay intact, but samplesOmitted is a statement
-      // about what the (absent) sample list left out, and there is nothing
-      // to have left out of a list that was never populated.
-      samplesOmitted: samplesWithheld ? 0 : Math.max(0, distinctCount - maxSamples),
+      // Measured against the sample list actually built, which is what makes
+      // it right in both directions: distinctCount minus the cap when the cap
+      // bit, and the whole distinctCount when every sample was withheld.
+      // Zeroing it under withholding was the alternative and it is the
+      // project's named defect in miniature: true of the cap, which left
+      // nothing out, and false about the response, which showed the reader
+      // none of a column's values while reporting that none were missing.
+      samplesOmitted: distinctCount - samples.length,
     });
   }
 

@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest";
 import { shapeDescribeInventory, shapeDescribeSource } from "../../../src/tools/describe/shape.js";
 import type { WorkbookInventory } from "../../../src/workbook/introspect.js";
 import type { ColumnDescription, HeaderDetection } from "../../../src/workbook/describe.js";
+import type { DescribeProvenance } from "../../../src/tools/describe/shape.js";
+
+const PROVENANCE: DescribeProvenance = {
+  siteUrl: "https://contoso.sharepoint.com/sites/Example",
+  library: "Documents",
+  workbookPath: "Trackers/Book.xlsx",
+  readAt: "2026-09-18T09:15:00.000Z",
+};
 
 const INVENTORY: WorkbookInventory = {
   sheets: [
@@ -18,11 +26,13 @@ const INVENTORY: WorkbookInventory = {
 
 describe("shapeDescribeInventory", () => {
   it("reports exact totals over the complete set before either listing is cut", () => {
-    const output = shapeDescribeInventory("Documents", "Trackers/Book.xlsx", INVENTORY, 3, {});
+    const output = shapeDescribeInventory(PROVENANCE, INVENTORY, 3, {});
 
     expect(output.mode).toBe("inventory");
+    expect(output.siteUrl).toBe("https://contoso.sharepoint.com/sites/Example");
     expect(output.library).toBe("Documents");
     expect(output.workbookPath).toBe("Trackers/Book.xlsx");
+    expect(output.readAt).toBe("2026-09-18T09:15:00.000Z");
     expect(output.sheets).toEqual(INVENTORY.sheets);
     expect(output.tables).toEqual(INVENTORY.tables);
     expect(output.sheetsListing).toEqual({ returned: 3, omitted: 0, cap: 200, truncated: false });
@@ -34,13 +44,13 @@ describe("shapeDescribeInventory", () => {
   });
 
   it("preserves the workbook's own declared order rather than sorting", () => {
-    const output = shapeDescribeInventory("Documents", "Trackers/Book.xlsx", INVENTORY, 1, {});
+    const output = shapeDescribeInventory(PROVENANCE, INVENTORY, 1, {});
 
     expect(output.sheets?.map((sheet) => sheet.name)).toEqual(["Tracking", "Notes", "Archive"]);
   });
 
   it("cuts the sheet listing at the cap, keeping the total exact", () => {
-    const output = shapeDescribeInventory("Documents", "Trackers/Book.xlsx", INVENTORY, 1, { maxSheets: 2 });
+    const output = shapeDescribeInventory(PROVENANCE, INVENTORY, 1, { maxSheets: 2 });
 
     expect(output.sheets).toHaveLength(2);
     expect(output.sheetsListing).toEqual({ returned: 2, omitted: 1, cap: 2, truncated: true });
@@ -50,21 +60,21 @@ describe("shapeDescribeInventory", () => {
   });
 
   it("cuts the table listing at the cap, keeping the total exact", () => {
-    const output = shapeDescribeInventory("Documents", "Trackers/Book.xlsx", INVENTORY, 1, { maxTables: 1 });
+    const output = shapeDescribeInventory(PROVENANCE, INVENTORY, 1, { maxTables: 1 });
 
     expect(output.tables).toHaveLength(1);
     expect(output.tablesListing).toEqual({ returned: 1, omitted: 1, cap: 1, truncated: true });
   });
 
   it("never caps the unresolved list, regardless of the sheet or table caps", () => {
-    const output = shapeDescribeInventory("Documents", "Trackers/Book.xlsx", INVENTORY, 1, { maxSheets: 1, maxTables: 1 });
+    const output = shapeDescribeInventory(PROVENANCE, INVENTORY, 1, { maxSheets: 1, maxTables: 1 });
 
     expect(output.unresolved).toEqual(INVENTORY.unresolved);
   });
 
   it("reports an empty unresolved list rather than omitting the field, when nothing was unresolved", () => {
     const clean: WorkbookInventory = { ...INVENTORY, unresolved: [] };
-    const output = shapeDescribeInventory("Documents", "Trackers/Book.xlsx", clean, 1, {});
+    const output = shapeDescribeInventory(PROVENANCE, clean, 1, {});
 
     expect(output.unresolved).toEqual([]);
   });
@@ -114,8 +124,7 @@ const HEADER_ROW: HeaderDetection = { proposed: 1, candidates: [{ row: 1, distin
 describe("shapeDescribeSource", () => {
   it("reports exact column totals before the listing is cut", () => {
     const output = shapeDescribeSource(
-      "Documents",
-      "Trackers/Book.xlsx",
+      PROVENANCE,
       { kind: "table", name: "ClientTable" },
       { columns: COLUMNS, headerRow: HEADER_ROW, samplesWithheld: false, sampleCap: 5 },
       4,
@@ -123,6 +132,10 @@ describe("shapeDescribeSource", () => {
     );
 
     expect(output.mode).toBe("source");
+    // Source mode carries the same provenance inventory mode does: nothing
+    // else in a describe response names the site this answer came from.
+    expect(output.siteUrl).toBe("https://contoso.sharepoint.com/sites/Example");
+    expect(output.readAt).toBe("2026-09-18T09:15:00.000Z");
     expect(output.source).toEqual({ kind: "table", name: "ClientTable" });
     expect(output.headerRow).toEqual(HEADER_ROW);
     expect(output.columns).toEqual(COLUMNS);
@@ -135,8 +148,7 @@ describe("shapeDescribeSource", () => {
 
   it("cuts the column listing at the cap, keeping the total exact", () => {
     const output = shapeDescribeSource(
-      "Documents",
-      "Trackers/Book.xlsx",
+      PROVENANCE,
       { kind: "table", name: "ClientTable" },
       { columns: COLUMNS, headerRow: HEADER_ROW, samplesWithheld: false, sampleCap: 5 },
       4,
@@ -149,8 +161,7 @@ describe("shapeDescribeSource", () => {
 
   it("passes samplesWithheld through unchanged", () => {
     const output = shapeDescribeSource(
-      "Documents",
-      "Trackers/Book.xlsx",
+      PROVENANCE,
       { kind: "worksheet", name: "Tracking" },
       { columns: COLUMNS, headerRow: HEADER_ROW, samplesWithheld: true, sampleCap: 5 },
       2,
@@ -162,8 +173,7 @@ describe("shapeDescribeSource", () => {
 
   it("passes sampleCap through unchanged, whatever describeColumns actually applied", () => {
     const output = shapeDescribeSource(
-      "Documents",
-      "Trackers/Book.xlsx",
+      PROVENANCE,
       { kind: "table", name: "ClientTable" },
       { columns: COLUMNS, headerRow: HEADER_ROW, samplesWithheld: false, sampleCap: 3 },
       1,

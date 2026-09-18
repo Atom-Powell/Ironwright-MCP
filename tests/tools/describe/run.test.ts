@@ -90,6 +90,18 @@ describe("runDescribeWorkbook", () => {
     expect(output.columns).toBeUndefined();
   });
 
+  it("reports the granted site and the moment it read, neither of which the caller supplies", async () => {
+    // The tool takes no site argument, so the response is the only place a
+    // caller learns which site this answer came from, and the workbook is
+    // read live rather than out of a stored inventory, so the response is
+    // also the only place the age of the answer exists at all.
+    const result = await runDescribeWorkbook({ library: "Documents", workbookPath: "Trackers/Book.xlsx" }, makeContext());
+
+    const output = result.structuredContent as unknown as DescribeToolOutput;
+    expect(output.siteUrl).toBe("https://contoso.sharepoint.com/sites/Example");
+    expect(output.readAt).toBe("2026-09-14T12:00:00.000Z");
+  });
+
   it("describes one source when given", async () => {
     const result = await runDescribeWorkbook(
       { library: "Documents", workbookPath: "Trackers/Book.xlsx", source: { kind: "table", name: "ClientTable" } },

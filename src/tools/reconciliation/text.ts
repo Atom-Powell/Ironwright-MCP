@@ -228,9 +228,16 @@ export function reconcileText(output: ReconcileToolOutput): string[] {
     output.provenance.searchCrossCheckGraphRequestsByThisCall === undefined
       ? ""
       : `, plus ${plural(output.provenance.searchCrossCheckGraphRequestsByThisCall, "Graph request", "Graph requests")} for the Search cross-check`;
+  // The workbook read is its own clause on both branches, never summed into
+  // the scan's count and never omitted from the shared-scan one. The joined
+  // branch used to read "issued no Graph request of its own because it
+  // shared a scan already running", which was false on every call that took
+  // it: the coordinator shares the repository snapshot, and this call still
+  // resolved the drive and downloaded the workbook by itself.
+  const workbookCost = `${plural(output.provenance.workbookReadGraphRequestsByThisCall, "Graph request", "Graph requests")} reading the workbook`;
   const cost = output.provenance.scanSharedWithConcurrentCall
-    ? "issued no Graph request of its own because it shared a scan already running"
-    : `cost ${plural(output.provenance.graphRequestsByThisCall, "Graph request", "Graph requests")}${crossCheckCost}`;
+    ? `cost ${workbookCost}, and issued no Graph request of its own for the repository scan because it shared a scan already running`
+    : `cost ${plural(output.provenance.graphRequestsByThisCall, "Graph request", "Graph requests")} scanning the repository${crossCheckCost}, plus ${workbookCost}`;
 
   lines.push(
     `Repository read by ${output.provenance.scanMode} scan at ${output.provenance.scannedAt}` +

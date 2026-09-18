@@ -60,30 +60,91 @@ interface SheetEntry {
 }
 
 /**
+ * The declared sheets this walk could resolve to a worksheet part, and the
+ * declared sheets it could not, returned together.
+ *
+ * Together rather than as a resolved list alone, because the entries this
+ * walk cannot resolve are the ones a survey most needs to report. A sheet
+ * dropped here reached neither `sheets` nor `unresolved`, so the inventory
+ * came back one sheet shorter with nothing said, and the prose layer then
+ * stated that every declared sheet had resolved cleanly: a sentence correct
+ * about the list it was handed and false about the workbook.
+ */
+interface SheetEntryScan {
+  entries: SheetEntry[];
+  unresolved: UnresolvedInventoryEntry[];
+}
+
+/**
  * Walks the <sheets> section of xl/workbook.xml and resolves each entry's
  * r:id to the worksheet part it names, the same resolution
  * findSheetRelationshipId and resolveWorksheet in xlsx.ts do one name at a
  * time. Done once, for every declared sheet, because both the sheet listing
  * below and the table-to-sheet-name lookup need it and neither should walk
  * it separately.
+ *
+ * Each of the three ways an entry fails to resolve is reported as its own
+ * rejection with its own reason, rather than collapsed into one, because
+ * they send an operator to different places: a missing name is a malformed
+ * sheet entry, a missing r:id is a sheet entry that states no link at all,
+ * and an r:id the rels part does not define is a broken cross-reference
+ * between two parts that are each individually well formed. The last is the
+ * same defect resolveWorksheet in xlsx.ts raises as a first-class
+ * WorkbookFileError when a mapped read hits it, so a survey that swallowed
+ * it would disagree with the compliance path about the same workbook.
  */
-function listSheetEntries(parts: Map<string, string>, workbookXml: string, workbookRelsXml: string): SheetEntry[] {
+function listSheetEntries(workbookXml: string, workbookRelsXml: string): SheetEntryScan {
   const relationships = parseRelationships(workbookRelsXml);
   const sheetsSection = /<sheets>([\s\S]*?)<\/sheets>/.exec(workbookXml)?.[1] ?? "";
 
   const entries: SheetEntry[] = [];
+  const unresolved: UnresolvedInventoryEntry[] = [];
+  let position = 0;
+
   for (const match of sheetsSection.matchAll(SHEET_ENTRY_PATTERN)) {
     const tag = match[0];
+    position += 1;
     const name = attribute(tag, "name");
     const rId = attribute(tag, "r:id");
-    if (name === undefined || rId === undefined) continue;
+
+    if (name === undefined) {
+      // There is no name to report it under, so it is reported under the
+      // only identifier the file gives it: where it sits in the sheet list.
+      // Position is counted over every <sheet> entry seen, resolvable or
+      // not, so it matches what an operator counts down the same XML.
+      unresolved.push({
+        kind: "sheet",
+        name: `position ${String(position)} in the workbook's sheet list`,
+        reason: "carries no name attribute, so the workbook itself does not name it and nothing can address it by name",
+      });
+      continue;
+    }
+
+    if (rId === undefined) {
+      unresolved.push({
+        kind: "sheet",
+        name,
+        reason: "carries no r:id attribute, so the workbook states no link from it to the worksheet part that holds it",
+      });
+      continue;
+    }
 
     const target = relationships.get(rId);
-    if (target === undefined) continue;
+    if (target === undefined) {
+      unresolved.push({
+        kind: "sheet",
+        name,
+        // The undefined id is named rather than described, because it is the
+        // string an operator searches both parts for to find the break.
+        reason: `points at relationship "${rId}", which xl/_rels/workbook.xml.rels does not define`,
+      });
+      continue;
+    }
 
     entries.push({ name, partName: resolveRelativeTarget("xl/workbook.xml", target) });
   }
-  return entries;
+
+  return { entries, unresolved };
 }
 
 /**
@@ -116,6 +177,53 @@ function describeUsedRange(sheetXml: string, subject: string): { usedRange?: str
 }
 
 /**
+ * Why a table's owning worksheet could not be named, in terms of what was
+ * actually observed rather than of one blanket explanation.
+ *
+ * The middle branch is the one that has to exist. When a declared sheet's
+ * own r:id does not resolve, that sheet never gets a part name, so it is
+ * absent from the part-to-name lookup a table's owner is found in, and the
+ * "not among the workbook's declared sheets" reason would then be stated
+ * about a sheet the workbook plainly does declare. That sentence is correct
+ * about the lookup and false about the file, which is the defect this
+ * module's rejection shape exists to prevent, and the two send an operator
+ * to different places: one to a broken relationship between two parts, the
+ * other to a worksheet part nothing in the workbook claims.
+ *
+ * `unresolvedSheetEntries` counts only sheet-list entries that never reached
+ * a part name. A declared sheet whose part is merely missing from the
+ * archive still resolves to a part name, so it is still in the lookup and
+ * still names any table it owns.
+ */
+function unownedTableReason(
+  tablePartName: string,
+  owningWorksheetPart: string | undefined,
+  unresolvedSheetEntries: number,
+): string {
+  if (owningWorksheetPart === undefined) {
+    return (
+      `is defined in ${tablePartName}, but no worksheet's relationships point at that part, so which ` +
+      "worksheet holds it cannot be determined"
+    );
+  }
+
+  if (unresolvedSheetEntries > 0) {
+    return (
+      `belongs to worksheet part ${owningWorksheetPart}, which none of the sheets this tool resolved claims. ` +
+      `The workbook declares ${String(unresolvedSheetEntries)} sheet ` +
+      `${unresolvedSheetEntries === 1 ? "entry" : "entries"} this tool could not resolve, also reported here, so ` +
+      "whether that part is one of those or is claimed by no sheet entry at all cannot be determined until they " +
+      "are fixed"
+    );
+  }
+
+  return (
+    `belongs to worksheet part ${owningWorksheetPart}, which is not among the workbook's declared ` +
+    "sheets, so its sheet name cannot be determined"
+  );
+}
+
+/**
  * Enumerates a workbook's worksheets and tables, with their bounds, without
  * materializing a cell grid for any of them. Sizes come entirely from each
  * worksheet part's own declared <dimension> and each table part's own
@@ -145,10 +253,14 @@ export function readWorkbookInventory(bytes: Uint8Array): WorkbookInventory {
     "fileError",
   );
 
-  const sheetEntries = listSheetEntries(parts, workbookXml, workbookRelsXml);
+  const sheetScan = listSheetEntries(workbookXml, workbookRelsXml);
+  const sheetEntries = sheetScan.entries;
 
   const sheets: SheetSummary[] = [];
-  const unresolved: UnresolvedInventoryEntry[] = [];
+  // Seeded with what the sheet-list walk itself could not resolve, so those
+  // entries are carried onto the report in declaration order ahead of
+  // anything found below rather than being left behind in the walk.
+  const unresolved: UnresolvedInventoryEntry[] = [...sheetScan.unresolved];
 
   for (const entry of sheetEntries) {
     const sheetXml = parts.get(entry.partName);
@@ -183,20 +295,14 @@ export function readWorkbookInventory(bytes: Uint8Array): WorkbookInventory {
       // unresolved rather than left out of `tables` with no trace: dropping
       // it silently is exactly what would make a workbook with three tables,
       // one of them broken, indistinguishable from one that only ever had
-      // two. Two different broken-wiring conditions land here, the same way
+      // two. Three different broken-wiring conditions land here, the same way
       // read.ts's own rejectedRows carries several distinct causes under one
-      // reason field: no worksheet's relationships point at the table part
-      // at all, or they do but that worksheet is not among the workbook's
-      // own declared sheets.
+      // reason field, and they are kept apart because they send an operator
+      // to three different places.
       unresolved.push({
         kind: "table",
         name: table.name,
-        reason:
-          owningWorksheetPart === undefined
-            ? `is defined in ${table.partName}, but no worksheet's relationships point at that part, so which ` +
-              "worksheet holds it cannot be determined"
-            : `belongs to worksheet part ${owningWorksheetPart}, which is not among the workbook's declared ` +
-              "sheets, so its sheet name cannot be determined",
+        reason: unownedTableReason(table.partName, owningWorksheetPart, sheetScan.unresolved.length),
       });
       continue;
     }

@@ -191,7 +191,7 @@ registry, so a tool added later inherits every check.
 
 ## Build Sequence
 
-The spec carries the full phase descriptions. Status as of 2026-09-17:
+The spec carries the full phase descriptions. Status as of 2026-09-18:
 
 1. **Foundation.** Complete and merged. Stateless transport, all ten tools registered as honest
    stubs behind the contract test, the pure profile schema, the two-layer write gate, and a
@@ -243,13 +243,17 @@ The spec carries the full phase descriptions. Status as of 2026-09-17:
    Table Storage and the workbook bytes reader have all been exercised live, and
    `reconcile_workbook_vs_repository` returned a report against a real library on 2026-09-17 once
    phase 2b-2 supplied the workbook snapshot.
-   **4b: the three index-served read tools.** Complete, covered by fakes only; see
-   `docs/OPEN-ITEMS.md` for what the unit tests cover and what the live sitting still owes.
+   **4b: the three index-served read tools. Complete and verified live on 2026-09-18.**
    `inventory_tree`, `query_repository` and `validate_structure` are wired onto the 4a execution
    layer. The tool contract widened so `inputSchema` can be a full Zod schema rather than a raw
    shape, which is what lets a future refinement be expressed; `StateStore` gained one read
    method, `getScannedDrives`; and a pure taxonomy conformance matcher was added at
-   `src/domain/structure/conform.ts`. No call this phase's own code makes has run against a tenant.
+   `src/domain/structure/conform.ts`. All three tools ran against the live site through the MCP
+   transport: `inventory_tree` reproduced phase 2a's 4-request cold scan through the tool layer,
+   `query_repository` returned all three questions at zero Graph requests and refused before any
+   scan had run, and `validate_structure` matched the seeded tree. The sitting found a cap defect
+   no fixture could reach; `docs/OPEN-ITEMS.md` carries the dated record and what the sitting does
+   not establish.
    **4c: `describe_workbook`. Complete, covered by fakes only.** All five read tools are now
    wired, which closes phase 4. `IW_SITE_URL` becomes required server configuration, replacing
    the stub's `siteUrl` input, which promised a reach the `Sites.Selected` permission model could
