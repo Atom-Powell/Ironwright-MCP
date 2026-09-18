@@ -16,11 +16,19 @@ import type { ToolContext } from "../tools/context.js";
  * idle sockets, and the connection count read at the deadline. Kept narrow
  * rather than importing `http.Server` itself, so a test can supply a fake
  * without standing up a real socket.
+ *
+ * `getConnections`, not a `connections` property. A real `net.Server` has no
+ * `connections` property at runtime; only `@types/node` still declares one,
+ * a stale type left over from an API Node has since removed. Reading
+ * `server.connections` in production therefore returned `undefined` while
+ * `tsc` agreed it was a `number`, which is exactly how that defect shipped
+ * once already: the compiler cannot be trusted here, only the runtime can.
+ * Measured directly against `http.createServer()` before writing this.
  */
 export interface ShutdownServer {
   close(callback: (error?: Error) => void): void;
   closeIdleConnections(): void;
-  connections: number;
+  getConnections(callback: (error: Error | null, count: number) => void): void;
 }
 
 export interface ShutdownDependencies {
@@ -60,16 +68,32 @@ export function installShutdown({ server, deadlineMs, exit, log }: ShutdownDepen
     log("received SIGTERM, finishing in-flight requests before exit");
 
     const timer = setTimeout(() => {
-      // Read at the moment the deadline actually fires, from the server's own
-      // count, rather than a counter this code maintains: a count this code
-      // maintains is a count it can get wrong, and a shutdown message that
-      // lies about what it abandoned is worse than one that says nothing.
-      const outstanding = server.connections;
-      log(
-        `shutdown deadline of ${deadlineMs}ms reached with ${outstanding} ${
-          outstanding === 1 ? "request" : "requests"
-        } still in flight, exiting`,
-      );
+      // getConnections is asynchronous, and exit must not wait on it: a
+      // shutdown path that gates exit on a callback has reintroduced the hang
+      // this deadline exists to remove. So the count is requested and finish
+      // is called right behind it, not from inside its callback.
+      //
+      // Measured against a real process.exit: calling it immediately after
+      // starting an asynchronous request starves that request's callback of
+      // a turn, so in production this usually means the callback never gets
+      // a chance to log the number at all. That is accepted rather than
+      // worked around, because the alternative -- delaying exit to improve
+      // the odds of a number -- is exactly the waiting this is not allowed to
+      // do. The one property that must hold is the one that broke last time:
+      // if a number is printed, it was actually read from the server, never
+      // invented, defaulted, or left over from a stale count.
+      server.getConnections((error, count) => {
+        if (error) {
+          log(`shutdown deadline of ${deadlineMs}ms reached with the drain not complete, exiting`);
+          return;
+        }
+        log(
+          `shutdown deadline of ${deadlineMs}ms reached with ${count} ${
+            count === 1 ? "request" : "requests"
+          } still in flight, exiting`,
+        );
+      });
+
       finish(0);
     }, deadlineMs);
 
