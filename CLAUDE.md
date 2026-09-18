@@ -184,6 +184,13 @@ registry, so a tool added later inherits every check.
   suite, and sign-off.
 - **Conventional commits.** Direct to main for routine work; feature branches with PRs and no
   auto-merge for anything risky or architectural.
+- **A live sitting is not recorded until this file is corrected too.** Writing the sitting up in
+  `docs/OPEN-ITEMS.md` is half the step; the other half is editing the Build Sequence entry for
+  that phase in the same commit, since it is the entry that says what the phase still owes. This
+  is a written step because the omission has happened twice, after phase 4b and again after 4c:
+  each time the sitting ran, passed, was recorded in `docs/OPEN-ITEMS.md`, and left this file
+  asserting the sitting was still owed. Nobody was careless. The two edits simply belonged to no
+  single task, so neither time was there anything to leave undone.
 - **Project knowledge wins** over background knowledge, but flag drift, since this surface moves
   fast and the locked decisions were current as of September 2026 rather than evergreen.
 - **Direct prose over bullet-point walls** in explanations. This file uses structure because it
@@ -265,10 +272,52 @@ The spec carries the full phase descriptions. Status as of 2026-09-18:
    are equally plausible, and describes a range's columns with inferred types and bounded
    samples. It proposes no `columns` mapping and infers no `date` type, both deliberate, and
    withholds every sample for a source when the workbook is `fullCalcOnLoad` over a range holding
-   a formula. No call this phase's own code makes has run against a tenant; see
-   `docs/OPEN-ITEMS.md` for what the unit tests cover and the live sitting this phase still owes
-   before merge. Phase 4 is complete pending that sitting. Then
-   **hosting**, then
+   a formula. **Verified live on 2026-09-18.** Both modes ran against the live site through the
+   MCP transport and a per-request `McpServer`, and the tool rediscovered a workbook mapping this
+   repository independently knows is correct without being told any of it. The sitting also found
+   a request-count defect no fixture could reach, since a download costs two counted Graph
+   requests and the shared fake charged one. `docs/OPEN-ITEMS.md` carries the dated record and
+   what the sitting does not establish. Phase 4 is complete.
+5. **Hosting.** Split into 5a and 5b at the Azure line, because everything past producing a
+   deployable artifact needs an Azure subscription, real spending, and an operator at a keyboard
+   for at least the first sign-in.
+   - **5a: the deployable server. Complete and verified on 2026-09-18.** The compiled production
+     output answered all five read tools against the live tenant, every figure matching the phase 4b
+     and 4c sittings; this was the first time this project executed its compiled artifact at all,
+     every earlier sitting having run `tsx` against source. The shutdown deadline is NOT covered by
+     that run, because Windows does not deliver a POSIX SIGTERM; it is covered by tests and by a
+     probe against the compiled shutdown module. See `docs/OPEN-ITEMS.md`.
+     Separates the production compile from the development one: `tsconfig.build.json` excludes
+     `src/setup`, which issues per-site permission grants using a separate application holding
+     `Sites.FullControl.All` and has no business inside a server image, and `npm run build:prod`
+     runs it. Bounds the SIGTERM handler to a deadline, `IW_SHUTDOWN_DEADLINE_MS`, default 25
+     seconds, so one request that never completes can no longer hold the process open until the
+     platform sends SIGKILL with nothing said about why. The deadline logs one sentence
+     synchronously before exiting, saying the drain did not finish, and deliberately no count:
+     `getConnections` is the only API that reports open sockets, it defers its callback through
+     `process.nextTick`, and `process.exit` does not drain that queue, so a number is not
+     obtainable and the line that asked for one printed nothing at all.
+     Settles that `GET /health` answers only whether this process can serve, and must never call
+     Microsoft Graph, since a health check depending on a third party turns that party's outage
+     into an instance restart loop. The container image was moved out of this phase by amendment,
+     after discovering mid-plan that the development machine has no container runtime; it is held
+     for its own slice rather than dropped, and the merge gate became the compiled production
+     output answering live in its place. That gate, `node dist/server/main.js` built from `npm
+     run build:prod` against all five read tools on the live tenant, is the controller's to run
+     before merge and has not run yet; every live sitting this project has performed so far used
+     `tsx` against source, never the compiled artifact. `docs/SETUP.md` carries the full
+     deployment configuration contract this phase settled.
+   - **5b: everything past the image.** Held rather than started. The container image itself,
+     recorded in the design spec so this slice does not restart from nothing; the federated
+     managed-identity credential replacing the client secret, which begins with a live probe
+     rather than an interface built on an assumption, per the rule phase 2b-1 cost this project;
+     Container Apps at one replica with a rollout that never runs a new revision alongside the
+     old, since phase 4c made the single-process assumption load-bearing for correctness and not
+     only for the delta link; the Entra authentication front door already decided in
+     `docs/OPEN-ITEMS.md`; CI/CD; and telemetry, which carries two jobs, the Graph call volume
+     evidence this project was started to produce and detection for the pending stream-mapping
+     leak phase 5a deliberately left unfixed, since the tractable half of that item is detection
+     rather than repair. Then
    **write tools**, then **Copilot Studio integration and governance**, then the **evaluation
    suite**, whose questions are already written in `docs/EVALUATION-QUESTIONS.md`. They exist
    early on purpose, so phase 3 has a concrete target rather than inventing its own test

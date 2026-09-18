@@ -1,7 +1,8 @@
 import { createApp } from "./app.js";
+import { installShutdown } from "./shutdown.js";
 import { loadConfig } from "./config.js";
 import { buildServer } from "../mcp/build-server.js";
-import { loadGraphCredentials, loadGrantedSiteUrl, loadStoreConnectionString } from "../config.js";
+import { loadGraphCredentials, loadGrantedSiteUrl, loadShutdownDeadlineMs, loadStoreConnectionString } from "../config.js";
 import { loadProfileDirectory } from "../profiles/registry.js";
 import { createGraphClient } from "../graph/client.js";
 import { clientCredentialsTokenProvider } from "../graph/token.js";
@@ -16,6 +17,7 @@ async function main(): Promise<void> {
   const credentials = loadGraphCredentials(process.env);
   const grantedSiteUrl = loadGrantedSiteUrl(process.env);
   const connectionString = loadStoreConnectionString(process.env);
+  const shutdownDeadlineMs = loadShutdownDeadlineMs(process.env);
 
   // Everything that can fail on configuration fails here, before the port is
   // bound, so a container that cannot answer a call never reports itself healthy.
@@ -101,18 +103,18 @@ async function main(): Promise<void> {
 
   // Container Apps sends SIGTERM on scale-in and on a revision swap, and Node's
   // default action for it is immediate termination, which drops whatever requests
-  // are in flight. Idle keep-alive sockets are closed explicitly because otherwise
-  // they hold the server open until their own timeout, well past the platform's
-  // grace period, and the process is killed anyway.
-  process.on("SIGTERM", () => {
-    console.log("received SIGTERM, finishing in-flight requests before exit");
-    server.close(() => {
-      process.exit(0);
-    });
-    server.closeIdleConnections();
-  });
+  // are in flight. installShutdown bounds the drain to shutdownDeadlineMs so a
+  // request that never completes cannot hold the process open past the
+  // platform's own grace period.
+  process.on("SIGTERM", installShutdown({ server, deadlineMs: shutdownDeadlineMs, exit: process.exit, log: console.log }));
 }
 
+// This module exports nothing, and that is load bearing rather than incidental.
+// The call below runs on import, so anything that imports this file for a value
+// binds a port and, when a table connection string is present, reaches Azure
+// before the importer's first line runs. A test did exactly that once; the
+// shutdown handler moved to ./shutdown.js so it could stop.
+//
 // The whole point of validating configuration and profiles before binding the
 // port is that a misconfigured deployment fails fast with something an operator
 // can act on. An unhandled top-level rejection would answer that with a raw

@@ -71,3 +71,28 @@ export function loadStoreConnectionString(env: NodeJS.ProcessEnv): string | unde
   const value = env.IW_TABLE_CONNECTION_STRING;
   return present(value) ? value : undefined;
 }
+
+/**
+ * How long shutdown waits for in-flight requests to drain before exiting
+ * anyway. Defaults to 25 seconds, which sits under a platform's usual 30
+ * second grace period so the process exits on its own terms and can say why,
+ * rather than being killed silently once the grace period runs out.
+ *
+ * Optional, unlike the credentials and site URL above: a deployment that
+ * never sets it still shuts down safely on the default, so there is nothing
+ * to add to their missing-variable message.
+ */
+export function loadShutdownDeadlineMs(env: NodeJS.ProcessEnv): number {
+  const raw = env.IW_SHUTDOWN_DEADLINE_MS;
+  if (!present(raw)) return 25_000;
+
+  // Matched before parsing, for the same reason src/server/config.ts matches
+  // PORT before parsing it: parseInt stops at the first character it cannot
+  // read, so "25000abc" would otherwise silently run with a real deadline and
+  // give an operator no sign that the value they set was wrong.
+  const deadlineMs = /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : Number.NaN;
+  if (!Number.isInteger(deadlineMs) || deadlineMs <= 0) {
+    throw new Error(`IW_SHUTDOWN_DEADLINE_MS must be a positive integer of milliseconds, received "${raw}"`);
+  }
+  return deadlineMs;
+}

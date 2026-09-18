@@ -8,6 +8,12 @@ longer carries it. Things land here when they need to survive past the session t
 because a scratch ledger will not be read by the phase that needs it. Sections are roughly
 ordered by when they will matter, not by when they were written.
 
+**Writing a live sitting up here is only half the step.** The other half is correcting that
+phase's Build Sequence entry in `CLAUDE.md` in the same commit, because that entry is what says
+what the phase still owes and it is the document every session loads. The rule is stated in
+`CLAUDE.md`'s Working Agreement; it is repeated here because this file is where the first half
+gets done and is therefore where the second half gets forgotten, which it has been twice.
+
 ## Decisions required before the first live setup run
 
 **ANSWERED 2026-09-12 by the first live run: the per-site grant was refused.**
@@ -114,18 +120,44 @@ phase 2a and phase 2a does not close it.
 
 ## Carried into later phases
 
-**Hosting phase.** A production image built with `npm ci --omit=dev && npm run build` will
-fail, because the build compiles `src/setup/main.ts`, which imports `@azure/identity`, now a
-devDependency. Either build before pruning or exclude `src/setup` from the production
-tsconfig.
+**CLOSED 2026-09-18 by phase 5a, `1c79bbf`, "build: compile the server without the setup
+command for production", carried through a timeout fix in `4acce7c`.** A production image
+built with `npm ci --omit=dev && npm run build` would fail, because the build compiled
+`src/setup/main.ts`, which imports `@azure/identity`, a devDependency. `tsconfig.build.json`
+extends the base config and excludes `src/setup`, and `npm run build:prod` runs `tsc` against
+it; `npm start` already pointed at `dist/server/main.js`. Excluding `src/setup` was chosen over
+building before pruning. The setup command issues per-site permission grants using a separate
+application holding `Sites.FullControl.All`, an operator tool with no business inside a server
+image; compiling it into a deployment would widen what a compromise of that image reaches, from
+"can read one granted site" to "contains the machinery for granting access to others." Building
+everything and deleting the setup output afterward would still have shipped that code into the
+image at some point in the build, and would have left the boundary resting on a cleanup step
+rather than on the compiler never having seen the files. `npm run build` (development and CI)
+is untouched and still compiles and typechecks `src/setup`, so nothing about this closes that
+command's own coverage. `tests/build/production-build.test.ts` asserts the outcome on the
+filesystem, shelling out to a real `npm run build:prod`, specifically so this cannot regress
+silently the next time something under `src/setup` grows an import; see "Phase 5a" below for what
+that test cost to make reliable and for the clean the script needed before the boundary was real.
 
-**Hosting phase.** The MCP SDK deletes a pending stream-mapping entry on close without
-resolving it, so an aborted request can leave its handler permanently pending and retain the
-closure. This matches the SDK's own stateless example and is not a local defect. Watch it
-under load.
+**Hosting phase, restated rather than fixed.** The MCP SDK deletes a pending stream-mapping
+entry on close without resolving it, so an aborted request can leave its handler permanently
+pending and retain the closure. This matches the SDK's own stateless example and is not a local
+defect, and phase 5a does not fork SDK behavior on a hunch to work around it. What makes the
+item tractable is detection rather than repair, and detection is telemetry, which belongs to
+phase 5b. See "Phase 5a" below.
 
-**Hosting phase.** The SIGTERM handler has no fallback deadline. One request that never
-completes means `close` never calls back and the platform eventually sends SIGKILL.
+**CLOSED 2026-09-18 by phase 5a, `51ca8a1` and `4043930`, "fix(server): exit on a deadline
+rather than draining forever" and "fix(server): read the shutdown deadline's connection count
+from getConnections".** The SIGTERM handler had no fallback deadline: `close`'s callback fired
+only once every in-flight request finished, so one request that never completed meant the
+process never exited on its own and the platform eventually sent SIGKILL, with no log saying
+why. `installShutdown`, now in `src/server/shutdown.ts`, races the drain against a timer bounded by
+`IW_SHUTDOWN_DEADLINE_MS` (default 25000ms) and exits on whichever finishes first, logging one
+sentence synchronously before exit to say the drain did not finish. See "Phase 5a" below for the
+two defects this introduced and then fixed on the same branch: the first version read a
+`connections` property that does not exist on a real `http.Server`, and the second logged
+nothing whatsoever, because the API that replaced that property defers its callback and
+`process.exit` does not wait for it.
 
 **Before phase 4 wires real handlers.** `ToolDefinition.inputSchema` is a `z.ZodRawShape`,
 which structurally forbids an object-level refinement. `generate_move_plan` already needs one,
@@ -1849,3 +1881,274 @@ samples are withheld. Every one of those is covered by fixtures only.
 In particular the header row here was determinate, read from the table's own declaration, so
 the worksheet heuristic and its refusal to decide between two equally plausible candidates have
 still never run against a real file.
+
+## Phase 5a: making the server deployable, 2026-09-18
+
+Phase 5a covers three changes verifiable on a development machine: separating the production
+compile from the development one, bounding the shutdown, and settling what health means. It was
+sliced this way, rather than building the container image the parent design originally centered
+on, because the amendment recorded in
+`docs/superpowers/specs/2026-09-18-hosting-image-design.md` found, while writing the
+implementation plan and before any code, that the development machine has no container runtime
+at all: no Docker, no Podman, no WSL distribution. Writing a Dockerfile nobody can build and
+merging it anyway is the same shape as phase 2b-1, designed, built, reviewed across six tasks and
+merged against an Excel API nobody had ever called; this project does not repeat that. The image
+is held for its own slice, not dropped: the multi-stage build, the `node:22-slim` base and the
+reasoning against Alpine, the non-root runtime user, and the `.dockerignore` excluding `profiles/`
+are all recorded in the design spec so that slice does not restart from nothing.
+
+Because the container is deferred, the merge gate changed to match what this phase can actually
+prove. It is that the COMPILED PRODUCTION OUTPUT answers all five read tools correctly against
+the live tenant, run as `node dist/server/main.js` from `npm run build:prod`, not `tsx` against
+source. Every live sitting this project has ever run, phases 2a through 4c, used `tsx`. The
+compiled artifact has never been executed at all, and the production compile is exactly where
+excluding the setup command could break something source execution hides. **That run is the
+controller's to perform before merge and has not happened as of this section being written.**
+Nothing in this document should be read as claiming it has.
+
+**The production compile now excludes `src/setup`, and that is a security boundary rather than a
+size saving.** See the closed carried item above for the mechanism. The reasoning is restated
+here because it is the point of the change, not an implementation detail: the setup command
+issues per-site permission grants using a separate application holding `Sites.FullControl.All`.
+Compiling it into a deployment would widen what a compromise of that deployment reaches, from
+"can read one granted site" to "contains the machinery for granting access to others." The
+devDependency failure, `@azure/identity` pulled in by `src/setup/main.ts` under `npm ci
+--omit=dev && npm run build`, was only the symptom that surfaced the question; the fix is drawn
+at the boundary the symptom happened to expose, not at removing the symptom itself. This closes a
+carried item that had been open for the hosting phase since phase 2a.
+
+**The boundary was resting on a clean tree, which is the alternative this phase had rejected by
+name.** `tsc` does not prune its `outDir`. Excluding `src/setup` keeps setup output out of a
+compile, and it removes nothing already sitting in `dist` from the development build that almost
+always ran first: `rm -rf dist && npm run build && npm run build:prod` left `dist/setup/main.js`
+in place, verified by the whole-branch review. That is build-then-prune arrived at by accident,
+and worse, because nothing pruned. The test passed only because the test deleted `dist` itself.
+`build:prod` now clears `dist` before compiling, so the script is the boundary rather than a
+precondition of it, and the test seeds a leftover `dist/setup/main.js` and asserts the script
+removes it. The clean is inline `node -e` rather than a new dependency or a shell command, since
+`rm -rf` is not portable to the machine this project is developed on.
+
+**The shutdown now always exits, on a deadline, and says so before it does.** See the closed
+carried item above for the commit and the mechanism. The defect it replaces: the old handler
+exited only from `server.close`'s callback, so one request that never completed meant `close`
+never called back, the process never exited on its own terms, and the platform eventually sent
+SIGKILL with no log anywhere saying why. `installShutdown` now races the drain against a timer
+bounded by `IW_SHUTDOWN_DEADLINE_MS` and exits on whichever finishes first. When the deadline
+wins it logs, synchronously and before exiting, that the deadline was reached with the drain
+incomplete. It logs no number, and that is the second correction below rather than an omission.
+
+**A stale type nearly shipped a lie, and this is the third instance of the same pattern on this
+project.** The deadline log's first version read `server.connections` to report how many
+requests were still in flight. That property does not exist on a real `http.Server` at runtime;
+only `@types/node` still declares it, a stale type left over from an API Node has since removed.
+`tsc` therefore agreed with the code, and the runtime did not: every deadline-reached log in
+production would have read `undefined requests still in flight`, always taking the plural
+branch, and said nothing true. It survived the implementer's own review because
+`fakeHttpServer`, the test double every shutdown test drove, invented a `connections` field with
+no equivalent on the real API. The tests checked the code against the fake, and nothing checked
+the fake against reality. The first two instances of this pattern on this project are recorded
+elsewhere in this file: the Graph Excel API, designed and built across six tasks against an
+endpoint nobody had called, and the `graphRequests` figure in phase 4c that a shared, per-call
+counter mismatch left invisible to a suite where every test made exactly one call. The fix here
+has two halves, and the second is not optional, per the same reasoning `CLAUDE.md` already states
+for the Excel episode. The log no longer states a number it did not obtain: `getConnections` is
+the real, asynchronous API, exit does not wait on its callback, and a deadline that fires without
+a usable count logs that the drain was incomplete rather than printing a figure it never read.
+And a test now runs `installShutdown` against a real `node:http` server with a request whose
+handler deliberately never responds, which is the one case a hand-written fake cannot fail: the
+fake defines the very field the defect was in.
+
+**Then the replacement logged nothing at all, and the whole-branch review caught it by running
+it.** Moving the count onto `getConnections` fixed the invented number and introduced a worse
+failure in the same edit. `getConnections` defers its callback through `process.nextTick`, and
+`process.exit` terminates without draining that queue, so calling `exit` anywhere near the
+request starves the callback permanently. The deadline sentence lived inside that callback, so
+the deadline sentence never printed. Driven against a real `http.Server` with a genuinely open
+request and the real `process.exit`, the only output was the SIGTERM line: the spec's own
+requirement unmet, and the exact silence the change had been made to remove, since the closed
+carried item above justified the deadline on the grounds that SIGKILL left no log explaining
+itself.
+
+Three documents asserted the log happened. None of them was wrong about the code's intent and
+all three were wrong about its behavior, which is this project's message-audit defect at the
+scale of a phase rather than a sentence. The fix is an ordering, not new prose: the numberless
+sentence already existed as the error branch, and it now runs synchronously, first, before
+`finish`. `finish` then commits the exit before anything else is attempted, so no synchronous
+throw can cost the guarantee.
+
+**`getConnections` is gone entirely, rather than kept as best-effort enrichment.** The first
+version of this fix retained the call behind the exit and labelled it best effort, which was
+honest about its reachability and wrong about what to do with it. Code that production cannot
+reach, retained so that tests can exercise it, inverts what the tests are for: those tests assert
+behavior the deployed server is structurally incapable of exhibiting, which makes them tests of a
+fiction. That is the same family as the three defects this project has already spent phases on, a
+fake encoding what its author believed, a count read from a property that does not exist, a log
+documented in three places that never prints, arrived at one step earlier. The property worth
+protecting was never "report a count", it was "never state a number you did not obtain", and with
+no number produced at all that property now holds trivially and permanently. The tests that drove
+the call went with it, including the plural-branch case, which had no subject left; a test with no
+subject is not coverage. What stays in the code is the comment saying why there is no count, since
+that is the surprising part and the next reader will otherwise try to add one back.
+
+Keeping it against a future where `exit` is wired to something that returns, a graceful-exit
+wrapper say, was considered and rejected. This project does not build for futures it has not
+observed, and `exit` is injected precisely so that whoever wires it differently owns what that
+implies. If that day comes, adding a count back is smaller than the comment explaining why it was
+kept.
+
+Only the test that asserts from inside `exit` itself pins the ordering, because that is the only
+moment that can distinguish a correct ordering from the regression at all; once `exit` returns,
+nothing observable tells them apart, and an assertion made after everything settles would pass on
+either. The real-`http.Server` test asserts the same line by position but does not guard the
+ordering: it exists to prove that `close` genuinely withholds its callback while a request is
+outstanding, so the deadline is what ends the process rather than the drain.
+
+**What this episode says about the earlier fix.** The correction that replaced
+`server.connections` was reviewed, tested against a real `http.Server`, and merged, and it still
+shipped a function whose single output was unreachable. The real-server test passed because it
+injected an exit that returns. A test double for `process.exit` is as capable of hiding a defect
+as a test double for `http.Server` was, and the pattern is the same one this file has now
+recorded four times: the suite checked the code against something that was not the thing.
+
+**Health answers one question and deliberately checks nothing.** `GET /health` reports that this
+process can serve, not that the tenant, Graph, or the state store is reachable, and it must not
+call Microsoft Graph. A health check that depends on a third party turns that party's outage into
+an instance restart loop, which is strictly worse than serving one caller an error: the platform
+kills the instance, the replacement fails the same check, and one degraded dependency becomes a
+total outage of a server that could have kept answering everyone else. Configuration and profile
+problems already exit the process before the port binds, which is preserved and unchanged, so a
+process that is answering `/health` has already passed everything worth checking. A test pins the
+one dependency-reaching path that exists in `createApp` today, the injected `serverFactory`, and
+asserts the health handler never invokes it. That test cannot see a check added through a second
+`AppOptions` field or an inline import in the handler itself; the route comment says so
+explicitly, alongside the rule, so the rule holds by convention beyond the one seam the suite can
+actually enforce, and a future reader is not left believing the test guards more than it does.
+
+**The container image was moved out of this phase, held rather than dropped.** The development
+machine has no container runtime, discovered while writing the implementation plan and before any
+code was written. The Dockerfile, the `.dockerignore`, the base image choice and its reasoning,
+and the runtime user are all recorded in the design spec rather than built here, so the slice that
+takes them up does not start from nothing. The merge gate that would have been the container
+answering all five read tools against the live tenant becomes the compiled production output
+doing the same, which is the only evidence this phase carries beyond its own unit tests: nothing
+here has been run live, and the paragraph above states that plainly rather than implying it.
+
+**What this phase deliberately did not fix.** `docs/OPEN-ITEMS.md` has recorded since phase 2a
+that the MCP SDK deletes a pending stream-mapping entry on close without resolving it, so an
+aborted request can leave its handler permanently pending and retain the closure, and that this
+matches the SDK's own stateless example rather than being a local defect. Phase 5a does not fork
+SDK behavior on a hunch to work around it. What makes the item tractable is detection rather than
+repair, and detection is telemetry, which belongs to phase 5b: 5a bounds the shutdown it can
+bound, and 5b learns to observe the leak; neither should be read as having fixed the other.
+
+**Importing the server's entry point started the server, and one test did.** `src/server/main.ts`
+calls `main()` at module scope, which was harmless for as long as nothing imported it. This phase
+added the first test that did, to reach the exported `installShutdown`. The whole-branch review
+ran it rather than reasoning about it: with the deployment environment exported, importing that
+module binds a port inside the vitest worker, and with `IW_TABLE_CONNECTION_STRING` set it awaits
+`ensureTables` first and makes a real Azure Table call. The suite was green only because a worker
+with no environment threw in `loadConfig` and the top-level catch set a `process.exitCode` vitest
+ignores. The merge-gate shell is precisely the shell where that environment is exported, so
+running the gate as planned would have had `npm test` bind ports and reach Azure.
+
+The handler moved to `src/server/shutdown.ts` and `main.ts` imports it, rather than guarding
+`main()` behind an entry-point check. Both close this instance; only the extraction leaves the
+entry point with nothing importable at all, so it closes the class for every future test instead
+of for the one that found it, and it is what "modular over monolithic" already asks for. Nothing
+else in the tree imports `main.ts` for a value, checked across `src`, `tests` and `scripts`.
+
+No task owned the question. Task 2 owned exporting `installShutdown`, and exporting anything from
+a self-executing entry point is the seam between that task and the file it was exported from.
+
+**What this phase is covered by, and what it is not.** Every change is covered by unit tests: the
+production compile by a test that seeds a leftover `dist/setup/main.js` and shells out to a real
+`npm run build:prod`, asserting the server entry point exists afterward and the setup output does
+not; the shutdown by tests driving the real ordering (drain first, deadline first, the same tick,
+a second signal mid-drain) against a hand-written fake that supplies only timing and no data at
+all, plus one case against a real `node:http` server with a genuinely open request, proving that
+`close` really does withhold its callback and that the deadline really is what ends the process;
+and health by a test asserting the handler never invokes the one injected dependency seam.
+`npm test` passed at 136 files and 1982 tests, run repeatedly back to back with no changes
+between the runs, after the branch's own history of a report claiming a clean suite that turned
+out to be a lucky single run rather than a reproducible one (see the closed shutdown item above:
+the production-compile test's default 5 second timeout had no margin under full-suite worker
+contention and needed an explicit, explained 60 second allowance before it held reliably). Beyond
+those unit tests, this phase has no live evidence of its own. The compiled production output
+answering all five read tools against the live tenant, through `node dist/server/main.js` rather
+than `tsx`, is the verification the controller runs before merge, and it has not run yet.
+
+## The phase 5a merge gate, 2026-09-18
+
+The compiled production output answered all five read tools against the live tenant. This is the
+first time this project has executed its compiled artifact at all. Every live sitting before this
+one ran `tsx` against TypeScript source, so nothing had ever exercised what a deployment would
+actually run.
+
+Built with `npm run build:prod` and started as `node dist/server/main.js`. The startup line names
+the site, which is the phase 4c configuration change working through the compiled path:
+
+    listening on port 3000, site https://helloironwright.sharepoint.com/sites/IronwrightTest,
+    writes disabled, 1 profile from profiles, azure-table store
+
+`GET /health` answered `{"status":"ok"}`.
+
+**Every figure matched the phase 4b and 4c sittings exactly**, which is the result that matters:
+the compiled artifact behaves identically to the source runs, so the production compile's exclusion
+of the setup command broke nothing that source execution was hiding.
+
+- `query_repository` against an unscanned profile refused, naming both ways to populate the index.
+  It did not answer zero.
+- `inventory_tree` cold: 144 files, 122 folders, 4 Graph requests.
+- `query_repository`, all three questions: **0 Graph requests each**. `recent_reports` reported 142
+  findings, which is the phase 4c fix working: before it, that answer capped at 50 and called it the
+  complete total.
+- `validate_structure`: 12 client folders, all compliant, 3 Graph requests.
+- `describe_workbook` source mode: proposed header row 1 and the headers `Client`,
+  `Monthly Training`, `Quarterly Phishing`, `Onboarded`, which is the mapping
+  `profiles/synthetic.json` independently uses.
+- `reconcile_workbook_vs_repository`: returned its report in 2.1 seconds.
+
+### What this gate does NOT establish, and it is the part worth reading
+
+**The shutdown deadline was not exercised here.** Windows does not deliver a POSIX SIGTERM: killing
+the process terminates it without running the handler, so the one behavior this phase exists to add
+cannot be demonstrated against the running compiled server on this machine.
+
+It is covered by unit tests and by a reviewer's probe that loaded the COMPILED `dist/server/shutdown.js`
+into a real `node:http` server with a genuinely open request and the real `process.exit`, printing:
+
+    received SIGTERM, finishing in-flight requests before exit
+    shutdown deadline of 50ms reached with the drain not complete, exiting
+
+That probe carried a negative control: moving the log back after the exit call made the deadline
+line vanish, which is the defect it replaced. So the behavior is verified against compiled code, and
+it is not verified against a platform delivering a real signal. Phase 5b, which has a platform, owes
+that check.
+
+**Nothing about a container was verified**, because none was built. The image left this phase for
+want of a runtime on the development machine.
+
+**The store was Azurite, not Azure Table Storage.** The same emulator every previous sitting used.
+
+### What the branch found on the way
+
+Two Criticals, both at joins no task owned, both proven by probe rather than argument.
+
+The entry point started a server when imported. `main()` ran at module scope, and this branch added
+the first test that imported that module to reach an exported function. With the deployment
+environment set, that import bound a port; with a table connection string set, it made a real Azure
+call. The merge gate's own shell is where that environment is exported, so running this gate before
+the fix would have had `npm test` binding ports and reaching Azure. Closed by extracting the function
+into its own module; the entry point now exports nothing, and a comment says that is load bearing.
+
+The shutdown deadline logged nothing at all, while three documents said it logged a count. The
+count came from `getConnections`, which defers through `process.nextTick`, and `process.exit` does
+not drain that queue. Closed by logging one sentence synchronously before exiting, with no number.
+The enrichment was then deleted outright, because after the reordering it was unreachable in
+production and existed only for tests, which made those tests assertions about behavior the
+deployed server cannot exhibit.
+
+A third finding is worth recording because of where it was: two places claimed the tests catch an
+ordering regression "by position", and under that exact regression only one of the two tests failed.
+The branch that fixed a documented-but-never-printed log corrected a documented-but-never-run
+assertion before merging.
