@@ -4,6 +4,7 @@ import { createMemoryStateStore } from "../../src/store/memory.js";
 import type { ToolContext } from "../../src/tools/context.js";
 import type { GraphClient } from "../../src/graph/client.js";
 import type { ScanCoordinator } from "../../src/scan/coordinator.js";
+import type { InventoryRecord, ScannedDrive, StateStore } from "../../src/store/types.js";
 
 /**
  * A context whose dependencies do nothing useful, for suites that exercise the
@@ -40,4 +41,39 @@ export function createFakeToolContext(overrides: Partial<ToolContext> = {}): Too
     now: () => new Date("2026-09-14T12:00:00Z"),
     ...overrides,
   };
+}
+
+export interface FakeQueryContextOptions {
+  /** Empty means the profile has never been scanned, per `getScannedDrives`'s own contract. */
+  scannedDrives?: ScannedDrive[];
+  /** Records returned by `listInventory` for whichever drive `query_repository` chooses. */
+  inventory?: InventoryRecord[];
+}
+
+/**
+ * A context for `query_repository`'s own tests, built on `createFakeToolContext`
+ * rather than duplicating its Graph and scan fakes. `getScannedDrives` answers
+ * from a fixed list instead of the real memory store's delta-link bookkeeping,
+ * and `listInventory` records which drive it was asked for on `lastListedDrive`,
+ * so a test can prove the tool chose the drive the store reported rather than
+ * one it worked out itself.
+ */
+export function makeFakeContext(options: FakeQueryContextOptions = {}): ToolContext & { store: StateStore & { lastListedDrive?: string } } {
+  const scannedDrives = options.scannedDrives ?? [];
+  const inventory = options.inventory ?? [];
+  const base = createFakeToolContext();
+
+  const store: StateStore & { lastListedDrive?: string } = {
+    ...base.store,
+    lastListedDrive: undefined,
+    async getScannedDrives() {
+      return scannedDrives;
+    },
+    async listInventory(_profileId: string, driveId: string) {
+      store.lastListedDrive = driveId;
+      return inventory;
+    },
+  };
+
+  return { ...base, store };
 }
