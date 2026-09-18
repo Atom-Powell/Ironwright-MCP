@@ -48,6 +48,17 @@ export { isIsoEffectiveFrom } from "./expected.js";
 export { findEmptyFolders } from "./empty-folders.js";
 export { createFileParser } from "./parse.js";
 
+// A third exception, narrower still: this is data, not logic. The taxonomy
+// conformance checker (`src/domain/structure/conform.ts`) needs the same
+// English month names `render.ts` renders and `parse.ts` reads back, so it can
+// build a "{monthName}" pattern that matches exactly what the renderer can
+// produce. Re-exporting the shared list is the alternative to that checker
+// keeping its own copy, which is exactly the kind of second copy this file's
+// entry-point rule exists to prevent. A list of names computes no part of the
+// compliance answer, so exporting it lets no caller reach `deriveExpected`,
+// `matchArtifacts` or `windowBounds`.
+export { MONTH_NAMES } from "./months.js";
+
 /**
  * Ordinary code-unit comparison rather than `localeCompare`. Sort order here
  * is part of the report's contract, compared against a golden file and diffed
