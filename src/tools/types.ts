@@ -15,7 +15,20 @@ export interface ToolDefinition {
   title: string;
   description: string;
   annotations: ToolAnnotations;
-  inputSchema: z.ZodRawShape;
+  /**
+   * A full schema rather than a raw shape, because a raw shape is a bag of
+   * per-field schemas and structurally cannot express a constraint spanning
+   * two fields. `generate_move_plan` needs one: nothing otherwise enforces
+   * that `scopeValue` is present when `scope` is `client` or `deliverable`.
+   * The SDK accepts either form, so this passes straight through.
+   */
+  inputSchema: z.ZodTypeAny;
+  /**
+   * The cross-field constraint, in the words the description uses. Required
+   * when `inputSchema` carries a refinement and meaningless otherwise, because
+   * a refinement is invisible in the JSON Schema the caller receives.
+   */
+  inputConstraints?: string;
   outputSchema: z.ZodRawShape;
   /**
    * Absent means this tool is still a stub. Keeping it optional is what lets

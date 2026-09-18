@@ -13,11 +13,11 @@ export const queryRepository: ToolDefinition = {
     SAFETY_SENTENCES.read,
   ].join(" "),
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  inputSchema: {
+  inputSchema: z.object({
     profileId: z.string().min(1).describe("Configured profile to query, for example \"example\"."),
     question: z
       .enum(["empty_folders", "orphaned_files", "naming_violations", "non_compliant_clients", "recent_reports"])
       .describe("Which stored question to answer, for example \"empty_folders\"."),
-  },
+  }),
   outputSchema: STUB_OUTPUT_SCHEMA,
 };

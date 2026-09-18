@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { ALL_TOOLS } from "../../src/tools/registry.js";
 import { SAFETY_SENTENCES, requiredSentence } from "../../src/tools/kinds.js";
+import type { ToolDefinition } from "../../src/tools/types.js";
 
 describe("safety sentences", () => {
   // Pinned as literals. Every other assertion derives the expected sentence from
@@ -75,8 +77,14 @@ describe("tool contract", () => {
   it.each(ALL_TOOLS)(
     "$name describes every input field with an example",
     (tool) => {
-      for (const [field, schema] of Object.entries(tool.inputSchema)) {
-        const description = schema.description;
+      // `inputSchema` is a full schema rather than a raw shape, so a refined
+      // tool's fields live on the wrapped object's `.innerType()` rather than
+      // on the schema itself.
+      const base = tool.inputSchema instanceof z.ZodEffects ? tool.inputSchema.innerType() : tool.inputSchema;
+      if (!(base instanceof z.ZodObject)) throw new Error(`${tool.name} input schema must be an object`);
+
+      for (const [field, schema] of Object.entries(base.shape)) {
+        const description = (schema as z.ZodTypeAny).description;
         expect(description, `${tool.name}.${field} has no description`).toBeDefined();
         expect(description, `${tool.name}.${field} description gives no example`).toMatch(/for example/i);
       }
@@ -111,5 +119,46 @@ describe("tool surface completeness", () => {
     // Microsoft's guidance is at most 25 to 30 tools per agent under a 128 hard
     // cap, and this server may share an agent with other MCP servers.
     expect(ALL_TOOLS.length).toBeLessThanOrEqual(25);
+  });
+});
+
+/**
+ * A refinement does not survive conversion to JSON Schema, so a caller and the
+ * model driving it never see it. An unstated one is a rejection the caller
+ * could not have predicted, which is why the prose is mandatory rather than
+ * encouraged.
+ */
+function isRefined(schema: z.ZodTypeAny): boolean {
+  return !(schema instanceof z.ZodObject);
+}
+
+describe("input schema contract", () => {
+  it("every tool's input schema is an object, refined or plain", () => {
+    for (const tool of ALL_TOOLS) {
+      const base = tool.inputSchema instanceof z.ZodEffects ? tool.inputSchema.innerType() : tool.inputSchema;
+      expect(base, `${tool.name} input schema must be an object`).toBeInstanceOf(z.ZodObject);
+    }
+  });
+
+  it("a refined input schema states its constraint in the description", () => {
+    for (const tool of ALL_TOOLS) {
+      if (!isRefined(tool.inputSchema)) continue;
+      expect(tool.inputConstraints, `${tool.name} is refined and must set inputConstraints`).toBeTruthy();
+      expect(tool.description).toContain(tool.inputConstraints as string);
+    }
+  });
+
+  it("the refinement rule actually fails a refined tool that omits the prose", () => {
+    const bad: ToolDefinition = {
+      name: "fixture_tool",
+      kind: "read",
+      title: "Fixture",
+      description: "A fixture with no constraint prose.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      inputSchema: z.object({ a: z.string().optional(), b: z.string().optional() }).refine((v) => v.a !== undefined || v.b !== undefined),
+      outputSchema: { ok: z.boolean() },
+    };
+    expect(isRefined(bad.inputSchema)).toBe(true);
+    expect(bad.inputConstraints).toBeUndefined();
   });
 });

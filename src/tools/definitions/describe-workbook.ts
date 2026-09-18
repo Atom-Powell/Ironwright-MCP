@@ -13,7 +13,7 @@ export const describeWorkbook: ToolDefinition = {
     SAFETY_SENTENCES.read,
   ].join(" "),
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  inputSchema: {
+  inputSchema: z.object({
     siteUrl: z
       .string()
       .url()
@@ -22,6 +22,6 @@ export const describeWorkbook: ToolDefinition = {
       .string()
       .startsWith("/")
       .describe("Library-relative path to the workbook, for example \"/Trackers/Operational Tracking Workbook.xlsx\"."),
-  },
+  }),
   outputSchema: STUB_OUTPUT_SCHEMA,
 };

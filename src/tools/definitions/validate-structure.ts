@@ -13,12 +13,12 @@ export const validateStructure: ToolDefinition = {
     SAFETY_SENTENCES.read,
   ].join(" "),
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  inputSchema: {
+  inputSchema: z.object({
     profileId: z.string().min(1).describe("Configured profile to validate against, for example \"example\"."),
     clients: z
       .array(z.string().min(1))
       .optional()
       .describe("Clients to validate, for example [\"CLIENTA\"]. Omit to validate every client in the workbook."),
-  },
+  }),
   outputSchema: STUB_OUTPUT_SCHEMA,
 };

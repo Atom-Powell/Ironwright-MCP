@@ -27,7 +27,7 @@ const HANDLED: ToolDefinition = {
   title: "Handled",
   description: "A tool with a handler. Read-only: this tool makes no changes and is safe to repeat.",
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  inputSchema: { echo: z.string().describe("Text to echo back, for example \"hello\".") },
+  inputSchema: z.object({ echo: z.string().describe("Text to echo back, for example \"hello\".") }),
   outputSchema: { echoed: z.string().describe("What came in, for example \"hello\".") },
   handler: async (input) => {
     const { echo } = z.object({ echo: z.string() }).parse(input);

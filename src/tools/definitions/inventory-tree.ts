@@ -14,12 +14,12 @@ export const inventoryTree: ToolDefinition = {
     SAFETY_SENTENCES.read,
   ].join(" "),
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  inputSchema: {
+  inputSchema: z.object({
     profileId: z.string().min(1).describe("Configured profile to inventory, for example \"example\"."),
     subPath: z
       .string()
       .optional()
       .describe("Library-relative path to limit the scan, for example \"2026/CLIENTA\". Omit to scan the whole library."),
-  },
+  }),
   outputSchema: STUB_OUTPUT_SCHEMA,
 };
