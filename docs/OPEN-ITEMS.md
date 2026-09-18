@@ -1773,3 +1773,79 @@ detect the gap without changing `findTables`'s return type or its callers' contr
 difference is exactly the table parts this residual can never resolve to a name, and each can be
 reported the same way an unnamed sheet already is, by its part path rather than by a name the file
 never gave it.
+
+## The phase 4c live tenant sitting, 2026-09-18
+
+Both modes ran against the live site through the MCP transport and a per-request `McpServer`
+rather than by calling handlers directly, so the sitting exercised the same path a Copilot
+Studio connection would.
+
+**The server names its site at startup**, which is the configuration change this phase made
+working end to end: "listening on port 3000, site
+https://helloironwright.sharepoint.com/sites/IronwrightTest, writes disabled, 1 profile from
+profiles, azure-table store".
+
+**The merge gate passed: the tool rediscovered a mapping this repository independently knows
+is correct.** That was the point of choosing this check over any fixture. Inventory mode found
+one worksheet and one table, the table being `ClientRoster` on `Sheet1`, ref `A1:D14`,
+14 rows, 4 columns, declaring a header row. Source mode against that table proposed header
+row 1 and described four columns whose headers are `Client`, `Monthly Training`,
+`Quarterly Phishing` and `Onboarded`.
+
+`profiles/synthetic.json` independently names source `{kind: table, name: ClientRoster}`,
+`headerRow: 1`, and those same four header texts in its columns map. The tool was told none of
+it.
+
+**The evidence the tool reports instead of guessing works on real data.** The `Client` column
+came back with 13 distinct values across 13 non-empty cells while the other three each have a
+single distinct value. An operator reading that picks the client column immediately. This is
+the whole argument for describing richly and proposing nothing: the tool never claimed to know
+which column was the client, and the reader cannot miss it.
+
+**The refusal to propose a columns map is stated in the response**, not merely implied: "This
+tool proposes no columns map. Header text, inferred type, distinct count and sample values
+above are the evidence; deciding which field each column is and writing that into the profile
+remains yours to do."
+
+### The sitting found a defect no fixture could
+
+The tool reported `graphRequests: 4`. Every unit test pinned 3. The tool was right and the
+tests were wrong about production.
+
+`sendForBytes` in `src/graph/client.ts` increments the request counter and runs twice for one
+content download: once against Graph, which answers a 302, and once against the redirect
+target, deliberately without the bearer token because that target is pre-authenticated
+storage. A download therefore costs 2 counted requests. The shared test fake charged 1.
+
+Every download-inclusive cost assertion in the suite was one request short of what a real
+tenant pays, including the `reconcile_workbook_vs_repository` workbook-read figure added
+earlier on this same branch. No fixture could have caught it, because the fake defined the
+number the tests were checking against.
+
+Fixed in `9c70ffd` by charging the fake what the client actually costs, with each corrected
+figure derived from the client's own code rather than adjusted until the tests passed.
+
+Two fakes elsewhere carry the same modeling gap and were left alone because nothing asserts
+their request counts: the scripted clients in `tests/scan/workbook.test.ts` and
+`tests/scan/workbook.errors.test.ts`. They are latent rather than wrong today, and the first
+test in either file to assert a request count will reproduce the understatement.
+
+### One operational property, not a defect
+
+`Sheet1` reports zero rows, zero columns and no used range, because that worksheet part
+declares no `<dimension>` element. A sheet holding a 14 row table reporting zero rows reads as
+wrong and is in fact the honest answer: the tool does not guess a size the file does not state,
+and the absent `usedRange` is what says so. A customer opening the inventory on such a workbook
+will see the same thing.
+
+### What this sitting does not establish
+
+One workbook, one table, one worksheet, four columns, thirteen data rows. It says nothing
+about a workbook exceeding any of the caps, a worksheet source where the header row must be
+detected rather than read from a table declaration, a workbook whose internal wiring is broken
+in any of the ways the unresolved reporting exists for, or a `fullCalcOnLoad` workbook where
+samples are withheld. Every one of those is covered by fixtures only.
+
+In particular the header row here was determinate, read from the table's own declaration, so
+the worksheet heuristic and its refusal to decide between two equally plausible candidates have
+still never run against a real file.
