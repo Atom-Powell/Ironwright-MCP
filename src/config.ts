@@ -40,6 +40,28 @@ export function loadGraphCredentials(env: NodeJS.ProcessEnv): GraphCredentialsCo
 }
 
 /**
+ * Required rather than optional, and required for more than this tool. A
+ * server that does not know which site its Sites.Selected grant covers cannot
+ * check a profile against it, so a profile pointed at the wrong site fails as
+ * a 403 on its first Graph call, which is the misleading failure the setup
+ * command was already corrected for once.
+ *
+ * The value is echoed in its own error, unlike the credentials above: a site
+ * URL is what an operator already pasted into the setup command, not a secret.
+ */
+export function loadGrantedSiteUrl(env: NodeJS.ProcessEnv): string {
+  const value = env.IW_SITE_URL;
+  if (!present(value)) {
+    throw new Error(
+      "Missing required environment variable: IW_SITE_URL. This is the site the server's Sites.Selected " +
+        "grant covers, and npm run setup takes it as --site. The server cannot validate a profile, or " +
+        "answer which site it can reach, without it.",
+    );
+  }
+  return value;
+}
+
+/**
  * Absent selects the in-memory store rather than failing, so a local run needs
  * no cloud account. The scan's output says which store it used, because an
  * in-memory run cannot demonstrate the incremental path and an operator reading

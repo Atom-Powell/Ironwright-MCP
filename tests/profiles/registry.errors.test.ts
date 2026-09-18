@@ -10,6 +10,8 @@ import {
   UnknownProfileError,
 } from "../../src/profiles/registry.js";
 
+const GRANTED_SITE_URL = "https://contoso.sharepoint.com/sites/Example";
+
 function exampleProfile(): Record<string, unknown> {
   return JSON.parse(readFileSync("examples/profiles/example.json", "utf8")) as Record<string, unknown>;
 }
@@ -17,10 +19,13 @@ function exampleProfile(): Record<string, unknown> {
 describe("createProfileRegistry rejections", () => {
   it("names every invalid profile in one message, not the first one only", () => {
     const attempt = (): unknown =>
-      createProfileRegistry([
-        { source: "one.json", contents: { profileId: "one" } },
-        { source: "two.json", contents: { profileId: "two" } },
-      ]);
+      createProfileRegistry(
+        [
+          { source: "one.json", contents: { profileId: "one" } },
+          { source: "two.json", contents: { profileId: "two" } },
+        ],
+        GRANTED_SITE_URL,
+      );
 
     expect(attempt).toThrow(ProfileRegistryError);
     try {
@@ -34,21 +39,24 @@ describe("createProfileRegistry rejections", () => {
 
   it("refuses two files claiming one profileId, naming both files", () => {
     const attempt = (): unknown =>
-      createProfileRegistry([
-        { source: "first.json", contents: exampleProfile() },
-        { source: "second.json", contents: exampleProfile() },
-      ]);
+      createProfileRegistry(
+        [
+          { source: "first.json", contents: exampleProfile() },
+          { source: "second.json", contents: exampleProfile() },
+        ],
+        GRANTED_SITE_URL,
+      );
 
     expect(attempt).toThrow(/first\.json and second\.json|second\.json and first\.json/);
     expect(attempt).toThrow(/"example"/);
   });
 
   it("refuses an empty directory rather than starting a server that can answer nothing", () => {
-    expect(() => createProfileRegistry([])).toThrow(/no profile files/);
+    expect(() => createProfileRegistry([], GRANTED_SITE_URL)).toThrow(/no profile files/);
   });
 
   it("names the configured ids when asked for one that is not there", () => {
-    const registry = createProfileRegistry([{ source: "a.json", contents: exampleProfile() }]);
+    const registry = createProfileRegistry([{ source: "a.json", contents: exampleProfile() }], GRANTED_SITE_URL);
 
     try {
       registry.get("missing");
@@ -67,13 +75,13 @@ describe("loadProfileDirectory rejections", () => {
     const dir = await mkdtemp(join(tmpdir(), "iw-profiles-"));
     await writeFile(join(dir, "broken.json"), "{ not json", "utf8");
 
-    await expect(loadProfileDirectory(dir)).rejects.toThrow(/broken\.json/);
+    await expect(loadProfileDirectory(dir, GRANTED_SITE_URL)).rejects.toThrow(/broken\.json/);
   });
 
   it("names the directory when it does not exist", async () => {
     const missing = join(tmpdir(), "iw-profiles-does-not-exist-12345");
 
-    await expect(loadProfileDirectory(missing)).rejects.toThrow(missing);
+    await expect(loadProfileDirectory(missing, GRANTED_SITE_URL)).rejects.toThrow(missing);
   });
 
   it("ignores files that are not .json rather than failing on them", async () => {
@@ -81,7 +89,7 @@ describe("loadProfileDirectory rejections", () => {
     await writeFile(join(dir, "example.json"), JSON.stringify(exampleProfile()), "utf8");
     await writeFile(join(dir, "README.md"), "not a profile", "utf8");
 
-    const registry = await loadProfileDirectory(dir);
+    const registry = await loadProfileDirectory(dir, GRANTED_SITE_URL);
 
     expect(registry.ids()).toEqual(["example"]);
   });

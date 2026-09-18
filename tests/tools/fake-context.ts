@@ -64,12 +64,15 @@ export function createFakeToolContext(overrides: Partial<ToolContext> = {}): Too
   );
 
   return {
-    profiles: createProfileRegistry([
-      {
-        source: "example.json",
-        contents: JSON.parse(readFileSync("examples/profiles/example.json", "utf8")) as unknown,
-      },
-    ]),
+    profiles: createProfileRegistry(
+      [
+        {
+          source: "example.json",
+          contents: JSON.parse(readFileSync("examples/profiles/example.json", "utf8")) as unknown,
+        },
+      ],
+      "https://contoso.sharepoint.com/sites/Example",
+    ),
     graph,
     store: createMemoryStateStore(),
     scans,

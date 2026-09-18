@@ -47,7 +47,7 @@ function profileWithNoClientSegment(): ToolContext {
   contents.taxonomy.segments = ["{year}", "{month:02}"];
 
   return createFakeToolContext({
-    profiles: createProfileRegistry([{ source: "example.json", contents }]),
+    profiles: createProfileRegistry([{ source: "example.json", contents }], "https://contoso.sharepoint.com/sites/Example"),
   });
 }
 
