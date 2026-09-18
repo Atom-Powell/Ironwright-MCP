@@ -1309,3 +1309,214 @@ cover, and a false flag, an ordinary symbol or CJK character the range wrongly c
 variation selectors, zero-width-joiner sequences, and skin-tone modifiers are accounted for. That
 is more than a few lines to get right with confidence, so it was left open rather than shipped as
 a check nobody can vouch for.
+
+## Phase 4b: covered only by fakes, 2026-09-17
+
+Phase 4b wired `inventory_tree`, `query_repository` and `validate_structure` onto the execution
+layer phase 4a built, on branch `phase-4b-read-tools`, with the suite at 1800 tests across 126
+files when the eight tasks finished and 1821 across 127 after the whole-branch fix wave of
+2026-09-18, all gates green at both points. No call this phase's own code makes has reached a
+tenant. Every layer it composes was verified live in an earlier phase: the Graph and scan layer
+from 2a, the workbook bytes reader from 2b-2, the cross-check from 2c, and the reconciliation
+engine from phase 3. That verification does not transfer to this phase's own code, which is covered
+by fakes and fixtures only, in the same position phase 4a's own read tool was in before "The second
+live tenant sitting, 2026-09-17" above.
+
+**What is covered.** Per tool: the handler's own input validation, the run composition against a
+fake Graph transport and the in-memory `StateStore`, the shaping module's truncation and omission
+arithmetic asserted at and either side of its cap, and the text module asserted sentence by
+sentence against a shaped output chosen to contradict a naive reading. Across the registry: the
+existing contract test over all ten tool definitions, which now bans a top-level refinement on a
+tool's input schema outright rather than requiring such a tool to document its constraint, and
+separately requires a tool that sets `inputConstraints` to repeat that text in its own
+description. `query_repository`'s
+zero-request claim has its own test, asserting the fake transport issued no request for any of the
+three questions and that a profile with no stored inventory fails rather than returning an empty
+result. All of it against fakes, all of it green, none of it against Graph or Azure Table Storage.
+
+**The MCP SDK cannot advertise a refined input schema.** Measured against the installed
+`@modelcontextprotocol/sdk` **1.30.0**, confirmed from
+`node_modules/@modelcontextprotocol/sdk/package.json` rather than from the `^1.30.0` range in
+`package.json`: `registerTool` accepts a `ZodEffects`, the type `.refine()` and `.superRefine()`
+produce, without throwing, but `listTools` then advertises that tool's input as
+`{ type: "object", properties: {} }`, so every field disappears from what a caller, human or
+model, actually sees. Call-time validation still enforces the refinement; only the advertised
+schema is empty. The cause is the SDK's `normalizeObjectSchema` detecting an object schema by a
+bare `.shape` property, which a `ZodEffects` keeps on `.innerType()` instead of exposing directly.
+A top-level refinement is therefore now banned by the contract test, and a characterization test
+in `tests/mcp/build-server.test.ts` pins the observed behavior, so a future SDK version that fixes
+this will fail that test and say so, rather than the fix going unnoticed. Two routes are still
+open for phase 6, which needs a cross-field constraint on `generate_move_plan` because nothing
+enforces that `scopeValue` is present when `scope` is `client` or `deliverable`: enforce the
+constraint inside the handler's own parse rather than in the advertised schema, or advertise the
+plain object and parse call-time input with the refined one. This is recorded as a defect of the
+installed SDK version, not a permanent property of the protocol, which is why the version is
+named rather than left implicit.
+
+**A silent-versus-loud divergence still open in the state store.** `getScannedDrives` now
+validates its profile id in both implementations. `getDeltaLink`, `setDeltaLink` and
+`getLastScanAt` do not. In `src/store/memory.ts` the in-memory implementation always builds its
+key through `inventoryPartitionKey`, which throws `UnsafeKeyError` for a malformed profile id, so
+those three methods throw too. In `src/store/table.ts` the Table implementation passes the
+profile id straight through as a partition key: a read answers `undefined` for a malformed id
+exactly as it would for one simply never scanned, and `setDeltaLink` silently writes under an
+unsafe partition key rather than refusing it. `clearInventory`, `applyInventoryChanges` and
+`listInventory` are already consistent with each other on this point. This is pre-existing,
+untouched by this phase, and unreachable today only because every caller passes an id off an
+already-validated `Profile`. It is recorded here as an open item rather than fixed, because fixing
+it is outside this phase's scope and the reasoning for leaving it needs to survive alongside the
+gap itself.
+
+**`query_repository` narrowed a published contract.** Its `question` enum
+(`src/tools/query/output.ts`) went from five values to three: `empty_folders`,
+`naming_violations`, `recent_reports`. `orphaned_files` and `non_compliant_clients` were removed
+because answering either needs expected state, which means the workbook, which means a Graph
+download, which would either cost the tool its zero-request promise or give the repository a
+second tool deciding whether a client is compliant. The Decision Record makes `reconcile` the
+single public entry for exactly that reason, so both removed questions stay where the evidence
+for them already lives: both remain answerable through `reconcile_workbook_vs_repository`. This
+is a deliberate narrowing of a published contract, not an oversight discovered later.
+
+**`validate_structure` checks conformance, not completeness.** It cannot check that every folder
+a client requires exists, because that depends on which deliverables the client owes, a workbook
+field this tool deliberately never reads: a taxonomy segment can carry a `{deliverable}`
+placeholder, and rendering every deliverable in the profile against every client would report a
+client non-compliant for folders it never owed, a confidently wrong verdict of exactly the kind
+this project treats as its most expensive failure. `missing` is reachable only for a client named
+explicitly in the `clients` argument; with the argument omitted, the client list comes from the
+folders present, so a client with no folder cannot appear in the input and cannot be reported
+missing. Without a workbook there is no authority on who should exist, and inventing one from the
+repository's own folders would be the tool asserting something it cannot observe. Completeness
+stays with `reconcile`, which holds the workbook.
+
+**`describe_workbook` is deferred to phase 4c, and its stub carries a defect.** Its input schema,
+`src/tools/definitions/describe-workbook.ts`, takes a `siteUrl`, but this server holds
+`Sites.Selected` on one named site and cannot read any other, so the schema promises reach the
+permission model forbids. The schema was written in phase 1, before the identity decision
+hardened, and nothing in phase 4b touches it. 4c owns the correction, most likely replacing
+`siteUrl` with a `profileId` or dropping it and taking the granted site from configuration.
+
+**`query_repository` could read a torn inventory, and the residual window it leaves. Fixed
+2026-09-18 by the whole-branch fix wave.** `loadSnapshot` read `getScannedDrives` and
+`listInventory` directly, the only tool in this codebase reading the inventory without going
+through `ScanCoordinator`, which exists for exactly that window. `runScan` answers a delta resync
+by clearing the inventory and re-enumerating and persists the new `lastScanAt` only at the end,
+and `ToolContext` is per process, so a concurrent `inventory_tree`, `validate_structure` or
+`reconcile` resyncing while this tool read would have had it answer from a cleared or half-rebuilt
+inventory and stamp the answer with the previous scan's timestamp. That is the substitution
+`NeverScannedError` refuses, arriving from the side it does not guard.
+
+The coordinator gained two methods. `settle` awaits a scan already in flight for the profile and
+reports whether it failed, and `scansStarted` is a monotonic per-profile count of scans started.
+`loadSnapshot` reads the baseline count before calling `settle` at all, not after: `settle`'s own
+`await` is itself a microtask checkpoint, and a scan can start inside it, either while this call is
+waiting on one already in flight or in the gap after that scan clears from the coordinator's map
+but before `settle`'s continuation resumes. A baseline taken after that await would already count
+such a scan, and the guard would then compare the counter to itself. `loadSnapshot` settles next,
+refuses outright when the scan it waited for failed, since a scan that fails after its resync has
+cleared the inventory leaves a store that looks exactly like a smaller library, and then takes a
+second reading after its two store reads. A count that changed between the baseline and that second
+reading means a scan began somewhere in between, whether during `settle` itself or during the reads
+that follow it, and that too is a refusal rather than an answer. Neither method calls Graph, so the
+tool's zero-request property is intact.
+
+What that leaves open is worth stating plainly, because "fixed" here means fixed within one
+replica. The counter now closes the in-replica window completely: a scan that starts and finishes
+anywhere between the baseline read and the second reading, including entirely inside `settle`
+itself, still increments the monotonic counter and gets caught. It cannot see a scan run by another
+replica against the same Table Storage, nor one run by the `scan` CLI, which calls `runScan`
+directly and is outside any coordinator. Both are the same one-replica constraint this file already
+carries for the coordinator itself, and neither is detectable from inside this process. A second
+replica makes `query_repository` silently racy again, so the minimum-one-replica constraint is load
+bearing for correctness and not only for the delta link.
+
+The interleaving is exercised rather than asserted. `tests/tools/query/concurrency.test.ts` drives
+the real coordinator and the real in-memory store against the real handler, with a scan fake that
+clears and rebuilds in the order `runScan` does, and records what the store actually held at the
+moment the handler reached it, so a pass means the race was live. Three of its first four cases
+fail against code with no settle-and-counter mechanism at all; the fourth is the control that must
+keep passing regardless. A fifth case drives the interleaving those four cannot reach: a scan that
+starts inside `settle`'s own microtask checkpoint, after the underlying wait has already resolved
+but before `loadSnapshot` resumes. It fails against a coordinator that has the counter mechanism
+but reads the baseline after `settle` rather than before, and passes once the baseline read moves
+ahead of that `await`.
+
+**The live sitting this phase still owes.** This phase is covered by fakes until it has run
+against a tenant, and the branch does not merge until it has. Against the existing seeded
+library: call `inventory_tree` with and without a `subPath` and confirm the totals match the
+seeder's own counts; call `query_repository` three times and confirm zero Graph requests on each
+and a failure before any scan has run; call `validate_structure` with and without `clients` and
+confirm the verdicts match what the seeded tree actually contains, including a named client that
+does not exist. **All three checks ran on 2026-09-18; the dated record follows below.**
+
+## The phase 4b live tenant sitting, 2026-09-18
+
+All three checks ran against the live site, through the MCP transport and a per-request
+`McpServer` rather than by calling handlers directly, so the sitting exercised the same path a
+Copilot Studio connection would. The store was emptied first, which is what let the
+never-scanned check be genuine rather than arranged.
+
+**`query_repository` refuses before any scan has run.** Against a profile with no stored
+inventory it returned `isError` with "Profile "synthetic" has no stored inventory to query yet.
+Run inventory_tree or reconcile_workbook_vs_repository first, either of which populates the
+index this tool reads from." It did not return zero findings. That distinction is the reason
+the failure exists: zero findings and no evidence are different answers.
+
+**`inventory_tree` reproduced phase 2a's measurement through the tool.** A cold call returned
+144 files and 122 folders in **4 Graph requests**; every later call cost **3**. Those are the
+numbers the CLI produced on 2026-09-16, now measured through the tool layer.
+
+**The sub-path filter holds on live data, including the trap.** `2026` returned 142 files and
+121 folders, `2026/Client01` returned 11 files and 10 folders, and `2026/Client0` returned
+**nothing at all**. The last one is the check that mattered: a prefix comparison would have
+matched every client from Client01 to Client13 and returned almost the whole library. This
+repository has shipped that defect twice under other names, and the segment-boundary test is
+now confirmed against a real tree rather than against fixtures that agree with it by
+construction.
+
+**`query_repository` costs nothing, measured rather than claimed.** All three questions
+returned `graphRequests: 0` against a populated index. This is the phase's headline claim and
+the thing evaluation question 8 exists to measure.
+
+**`validate_structure` matched the tree.** With no `clients` argument it evaluated the 12 client
+folders present and found all 12 compliant, in 3 Graph requests. With
+`["Client01","Client02","NoSuchClient"]` it returned 2 compliant and 1 missing, naming
+`NoSuchClient`. `missing` appeared only for the client the caller named, which is the rule the
+tool is built on.
+
+**The counts cross-check.** 144 files in the library, 142 under `2026/`, and exactly 2 naming
+violations. The two violations are the two files outside any client folder, which is why every
+client folder is compliant while the violations are real. Three tools agreeing on the same tree
+from three different directions is worth more than any one of them agreeing with a fixture.
+
+### The sitting found a defect the suite could not
+
+`recent_reports` applied `RECENT_REPORTS_LIMIT` inside its own answerer, before the shaping layer
+computed totals. Against this library it reported:
+
+    Found 50 findings for this question.
+    Listing every finding counted above, 50 in all.
+    listing: {"returned":50,"omitted":0,"cap":200,"truncated":false}
+
+Roughly 92 parsing files had been dropped by a cap the response never mentioned, and the listing
+declared nothing omitted. That is this phase's own binding rule broken, the one requiring totals
+over the complete set before truncation and an omission always stated, and it is the project's
+named defect: a message correct on its own and wrong about what the program did.
+
+No fixture could have caught it. Every test fixture in the suite has fewer parsing files than the
+cap, so the cap never engaged in a test. It took a library with 142 of them.
+
+Fixed before merge. The same call now reports 142 findings, lists 50, states that 92 were left
+out, names the cap that actually applied as 50 rather than the 200 that did not, and says plainly
+that this tool takes no argument that would return the rest. The two other questions were checked
+and were already honest, because neither slices.
+
+### What this sitting does not establish
+
+One site, one library, one profile, 144 files. It says nothing about a library large enough to
+exceed `MAX_INVENTORY_ITEMS`, about a client with more non-conforming files than
+`MAX_CLIENT_DETAIL`, about a taxonomy other than this one, or about behavior under concurrency
+against real storage. The concurrency guard added for the branch review's Critical is covered by
+a deterministic test against the real coordinator and the real in-memory store; it has not been
+exercised against Azure Table Storage with two callers racing, and the cross-replica window
+remains open by design and is recorded above.

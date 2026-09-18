@@ -16,7 +16,7 @@ function compareStrings(a: string, b: string): number {
  * also matches `2026/CLIENTAB`, which would silently fold one client's files into
  * another client's scan.
  */
-function withinSubPath(path: string, subPath: string): boolean {
+export function withinSubPath(path: string, subPath: string): boolean {
   return path === subPath || path.startsWith(`${subPath}/`);
 }
 

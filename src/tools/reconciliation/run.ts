@@ -52,7 +52,7 @@ export async function runReconcile(
   readWorkbook: ReadWorkbook = readWorkbookSnapshot,
 ): Promise<CallToolResult> {
   const args = InputObject.parse(input);
-  const subject: FailureSubject = { profileId: args.profileId };
+  const subject: FailureSubject = { tool: "reconcile_workbook_vs_repository", profileId: args.profileId };
 
   try {
     const profile = context.profiles.get(args.profileId);

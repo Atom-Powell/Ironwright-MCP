@@ -7,7 +7,7 @@ import {
   MAX_TRANSACTION_SIZE,
   planInventoryChanges,
 } from "./keys.js";
-import type { ApplyResult, InventoryRecord, StateStore } from "./types.js";
+import type { ApplyResult, InventoryRecord, ScannedDrive, StateStore } from "./types.js";
 
 export interface TableEntityLike {
   partitionKey: string;
@@ -186,6 +186,31 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
         records.push(toRecord(entity));
       }
       return records;
+    },
+
+    async getScannedDrives(profileId): Promise<ScannedDrive[]> {
+      // Neither this table's partition key nor its sibling deltaLinks methods
+      // (getDeltaLink, setDeltaLink, getLastScanAt) validate profileId, since
+      // Table Storage keeps partition and row key separate and none of them
+      // needs inventoryPartitionKey's join. This call is deliberately out of
+      // step with those siblings anyway: a StateStore caller must not be able
+      // to tell which implementation answered, and the memory implementation
+      // now rejects a malformed profile id before it looks anywhere, so this
+      // one must refuse the same input before it queries, not answer with an
+      // empty result a caller cannot distinguish from "never scanned". The
+      // key this builds is thrown away: the call is made for the throw alone,
+      // which is why the drive id it also takes is passed empty.
+      inventoryPartitionKey(profileId, "");
+      const drives: ScannedDrive[] = [];
+      for await (const entity of clients.deltaLinks.listEntities({
+        queryOptions: { filter: partitionFilter(profileId) },
+      })) {
+        // Skips a row an older build wrote without these fields, rather than
+        // crashing the read, because this table survives a deployment.
+        if (typeof entity.driveId !== "string" || typeof entity.lastScanAt !== "string") continue;
+        drives.push({ driveId: entity.driveId, lastScanAt: entity.lastScanAt });
+      }
+      return drives;
     },
   };
 }

@@ -3,7 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod";
 import { buildServer } from "../../../src/mcp/build-server.js";
-import { createFakeToolContext } from "../../tools/fake-context.js";
+import { createFakeToolContext, scanCoordinatorStub } from "../../tools/fake-context.js";
 import { RECONCILE_OUTPUT_SCHEMA } from "../../../src/tools/reconciliation/output.js";
 import { reconcileWorkbookVsRepository } from "../../../src/tools/definitions/reconcile.js";
 import { runReconcile } from "../../../src/tools/reconciliation/run.js";
@@ -65,8 +65,7 @@ describe("reconcile_workbook_vs_repository over the wire", () => {
 
     // `scans.run` resolves instead of the fake context's default rejection, so
     // the tool's composition root has a snapshot to reconcile against.
-    const scans: ScanCoordinator = {
-      run: () =>
+    const scans: ScanCoordinator = scanCoordinatorStub(() =>
         Promise.resolve({
           result: {
             snapshot: repository,
@@ -81,8 +80,7 @@ describe("reconcile_workbook_vs_repository over the wire", () => {
             unfilteredFolderCount: repository.folderPaths.length,
           },
           joined: false,
-        }),
-    };
+        }));
 
     const context = createFakeToolContext({
       profiles: createProfileRegistry([{ source: "fixture-profile.json", contents: profile }]),

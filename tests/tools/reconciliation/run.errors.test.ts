@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { runReconcile } from "../../../src/tools/reconciliation/run.js";
-import { createFakeToolContext } from "../../tools/fake-context.js";
+import { createFakeToolContext, scanCoordinatorStub } from "../../tools/fake-context.js";
 import { WorkbookMappingError } from "../../../src/workbook/errors.js";
 import { GraphRequestError } from "../../../src/graph/errors.js";
 
@@ -21,12 +21,10 @@ describe("runReconcile failures", () => {
   it("does not scan when the workbook read fails", async () => {
     let scanned = false;
     const context = createFakeToolContext({
-      scans: {
-        run: async () => {
+      scans: scanCoordinatorStub(async () => {
           scanned = true;
           throw new Error("unreachable");
-        },
-      },
+        }),
     });
 
     const result = await runReconcile({ profileId: "example" }, context, async () => {
@@ -40,16 +38,14 @@ describe("runReconcile failures", () => {
 
   it("reports a Graph failure by status and code without the response body", async () => {
     const context = createFakeToolContext({
-      scans: {
-        run: async () => {
+      scans: scanCoordinatorStub(async () => {
           throw new GraphRequestError({
             method: "GET",
             path: "/drives/drive-1/root/delta",
             status: 429,
             body: JSON.stringify({ error: { code: "activityLimitReached", message: "DO-NOT-LEAK" } }),
           });
-        },
-      },
+        }),
     });
 
     const result = await runReconcile({ profileId: "example" }, context, async () => ({
@@ -80,11 +76,9 @@ describe("runReconcile failures", () => {
         body: JSON.stringify({ error: { code: "activityLimitReached", message: "irrelevant to this test" } }),
       });
       const context = createFakeToolContext({
-        scans: {
-          run: async () => {
+        scans: scanCoordinatorStub(async () => {
             throw graphError;
-          },
-        },
+          }),
       });
 
       const result = await runReconcile({ profileId: "example" }, context, async () => ({

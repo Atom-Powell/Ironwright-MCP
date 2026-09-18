@@ -236,14 +236,24 @@ The spec carries the full phase descriptions. Status as of 2026-09-17:
    and a client who owes nothing. The engine enforces two input contracts phase 2 must satisfy:
    one workbook row per client, and repository files collapsed by path. This is the MVP
    checkpoint.
-4. **Read tools**, sliced. **4a: the tool execution layer and the first wired tool.** Complete,
-   covered by fakes only. The handler contract and the per-process `ToolContext`, the profile
-   registry loaded and validated at startup from `IW_PROFILE_DIR`, the in-process single-flight
-   scan coordinator, and `reconcile_workbook_vs_repository` wired end to end with a real output
-   schema. The other four read tools are still honest stubs and inherit the layer with no
-   retrofit. Graph, Azure Table Storage and the workbook bytes reader have all been exercised
-   live, and `reconcile_workbook_vs_repository` returned a report against a real library on
-   2026-09-17 once phase 2b-2 supplied the workbook snapshot. Then
+4. **Read tools**, sliced. **4a: the tool execution layer and the first wired tool.** Complete.
+   The handler contract and the per-process `ToolContext`, the profile registry loaded and
+   validated at startup from `IW_PROFILE_DIR`, the in-process single-flight scan coordinator, and
+   `reconcile_workbook_vs_repository` wired end to end with a real output schema. Graph, Azure
+   Table Storage and the workbook bytes reader have all been exercised live, and
+   `reconcile_workbook_vs_repository` returned a report against a real library on 2026-09-17 once
+   phase 2b-2 supplied the workbook snapshot.
+   **4b: the three index-served read tools.** Complete, covered by fakes only; see
+   `docs/OPEN-ITEMS.md` for what the unit tests cover and what the live sitting still owes.
+   `inventory_tree`, `query_repository` and `validate_structure` are wired onto the 4a execution
+   layer. The tool contract widened so `inputSchema` can be a full Zod schema rather than a raw
+   shape, which is what lets a future refinement be expressed; `StateStore` gained one read
+   method, `getScannedDrives`; and a pure taxonomy conformance matcher was added at
+   `src/domain/structure/conform.ts`. No call this phase's own code makes has run against a tenant.
+   **4c: `describe_workbook`** is the one read tool still unwired. It is deferred because it needs
+   worksheet, table, header-row and column-type inference that exists nowhere in this codebase
+   yet, and because its current stub's `siteUrl` input promises reach the `Sites.Selected`
+   permission model forbids; 4c owns the correction. Then
    **hosting**, then
    **write tools**, then **Copilot Studio integration and governance**, then the **evaluation
    suite**, whose questions are already written in `docs/EVALUATION-QUESTIONS.md`. They exist

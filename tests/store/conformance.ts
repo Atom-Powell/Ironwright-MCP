@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { UnsafeKeyError } from "../../src/store/keys.js";
 import type { InventoryRecord, StateStore } from "../../src/store/types.js";
 
 export function record(overrides: Partial<InventoryRecord> = {}): InventoryRecord {
@@ -154,5 +155,56 @@ export function stateStoreConformance(create: () => StateStore): void {
       changesApplied: 0,
       batches: 0,
     });
+  });
+
+  it("returns nothing for a profile that has never been scanned", async () => {
+    const store = create();
+    await expect(store.getScannedDrives("never-scanned")).resolves.toEqual([]);
+  });
+
+  it("returns each scanned drive with the time it was last scanned", async () => {
+    const store = create();
+    await store.setDeltaLink("example", "drive-1", "link-1", "2026-09-17T10:00:00.000Z");
+    await store.setDeltaLink("example", "drive-2", "link-2", "2026-09-17T11:00:00.000Z");
+
+    const drives = await store.getScannedDrives("example");
+
+    expect(drives).toHaveLength(2);
+    expect(drives).toContainEqual({ driveId: "drive-1", lastScanAt: "2026-09-17T10:00:00.000Z" });
+    expect(drives).toContainEqual({ driveId: "drive-2", lastScanAt: "2026-09-17T11:00:00.000Z" });
+  });
+
+  it("does not leak one profile's drives into another's", async () => {
+    const store = create();
+    await store.setDeltaLink("example", "drive-1", "link-1", "2026-09-17T10:00:00.000Z");
+    await store.setDeltaLink("other", "drive-9", "link-9", "2026-09-17T10:00:00.000Z");
+
+    await expect(store.getScannedDrives("example")).resolves.toEqual([
+      { driveId: "drive-1", lastScanAt: "2026-09-17T10:00:00.000Z" },
+    ]);
+  });
+
+  it("does not match a profile id that is a prefix of another profile id", async () => {
+    // "clienta" is a literal prefix of "clientab", so a prefix match with no
+    // delimiter, or one that drops the trailing separator, would let clientab's
+    // drive leak into clienta's answer. This is what a bare prefix check on
+    // "example" and "other" can never catch, since neither is a prefix of the
+    // other.
+    const store = create();
+    await store.setDeltaLink("clienta", "drive-1", "link-1", "2026-09-17T10:00:00.000Z");
+    await store.setDeltaLink("clientab", "drive-9", "link-9", "2026-09-17T10:00:00.000Z");
+
+    await expect(store.getScannedDrives("clienta")).resolves.toEqual([
+      { driveId: "drive-1", lastScanAt: "2026-09-17T10:00:00.000Z" },
+    ]);
+  });
+
+  it("refuses a malformed profile id before answering, the same for every implementation", async () => {
+    // A StateStore caller cannot tell which implementation is behind it, so an
+    // id every other store method rejects must not be the one input where one
+    // implementation throws and the other quietly resolves to an empty
+    // result, since an empty result is indistinguishable from "never scanned".
+    const store = create();
+    await expect(store.getScannedDrives("bad/id")).rejects.toThrow(UnsafeKeyError);
   });
 }

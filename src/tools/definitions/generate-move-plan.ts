@@ -13,7 +13,7 @@ export const generateMovePlan: ToolDefinition = {
     SAFETY_SENTENCES.plan,
   ].join(" "),
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  inputSchema: {
+  inputSchema: z.object({
     profileId: z.string().min(1).describe("Configured profile to plan against, for example \"example\"."),
     scope: z
       .enum(["all", "client", "deliverable"])
@@ -24,6 +24,6 @@ export const generateMovePlan: ToolDefinition = {
       .min(1)
       .optional()
       .describe("Value for the chosen scope, for example \"CLIENTA\" when scope is \"client\". Omit when scope is \"all\"."),
-  },
+  }),
   outputSchema: STUB_OUTPUT_SCHEMA,
 };

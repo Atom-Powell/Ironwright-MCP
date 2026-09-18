@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { SAFETY_SENTENCES } from "../kinds.js";
 import type { ToolDefinition } from "../types.js";
 import { RECONCILE_OUTPUT_SCHEMA } from "../reconciliation/output.js";
@@ -14,7 +15,7 @@ export const reconcileWorkbookVsRepository: ToolDefinition = {
     SAFETY_SENTENCES.read,
   ].join(" "),
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  inputSchema: RECONCILE_INPUT_SCHEMA,
+  inputSchema: z.object(RECONCILE_INPUT_SCHEMA),
   outputSchema: RECONCILE_OUTPUT_SCHEMA,
   handler: runReconcile,
 };

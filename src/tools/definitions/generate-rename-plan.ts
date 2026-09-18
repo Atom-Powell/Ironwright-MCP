@@ -13,12 +13,12 @@ export const generateRenamePlan: ToolDefinition = {
     SAFETY_SENTENCES.plan,
   ].join(" "),
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  inputSchema: {
+  inputSchema: z.object({
     profileId: z.string().min(1).describe("Configured profile to plan against, for example \"example\"."),
     clients: z
       .array(z.string().min(1))
       .optional()
       .describe("Limit the plan to these clients, for example [\"CLIENTA\"]. Omit to cover every client in the workbook."),
-  },
+  }),
   outputSchema: STUB_OUTPUT_SCHEMA,
 };

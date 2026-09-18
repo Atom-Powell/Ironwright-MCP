@@ -13,7 +13,7 @@ export const replicateTemplate: ToolDefinition = {
     SAFETY_SENTENCES.additiveWrite,
   ].join(" "),
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  inputSchema: {
+  inputSchema: z.object({
     profileId: z.string().min(1).describe("Configured profile to operate on, for example \"example\"."),
     sourceClient: z
       .string()
@@ -27,6 +27,6 @@ export const replicateTemplate: ToolDefinition = {
       .boolean()
       .default(false)
       .describe("Set true to create folders for real, for example true. Leave false or omit for a dry run."),
-  },
+  }),
   outputSchema: STUB_OUTPUT_SCHEMA,
 };

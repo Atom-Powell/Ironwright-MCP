@@ -10,6 +10,13 @@ import { UnknownProfileError } from "../profiles/registry.js";
  * because at that point this server does not know them.
  */
 export interface FailureSubject {
+  /**
+   * The failing tool's own registered name. Required rather than optional
+   * because this mapper is shared, and a message that names the wrong
+   * operation is the defect class this project produced nine times in phase 1:
+   * correct on its own, wrong about what the program actually did.
+   */
+  tool: string;
   profileId: string;
   siteUrl?: string;
   library?: string;
@@ -83,7 +90,8 @@ export function describeToolFailure(error: unknown, subject: FailureSubject): st
   if (error instanceof GraphRequestError) {
     return (
       `Microsoft Graph refused ${error.method} ${error.path} with ${error.status}` +
-      `${error.code === undefined ? "" : ` (${error.code})`}, while reconciling profile "${subject.profileId}". ` +
+      `${error.code === undefined ? "" : ` (${error.code})`}, while serving ${subject.tool} for profile ` +
+      `"${subject.profileId}". ` +
       "The full Graph response was written to the server log. This server does not infer a cause from the status."
     );
   }

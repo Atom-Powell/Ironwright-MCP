@@ -13,7 +13,7 @@ const FAILING: ToolDefinition = {
   title: "Failing",
   description: "Always fails. Read-only: this tool makes no changes and is safe to repeat.",
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  inputSchema: { any: z.string().describe("Ignored, for example \"x\".") },
+  inputSchema: z.object({ any: z.string().describe("Ignored, for example \"x\".") }),
   outputSchema: { required: z.string().describe("Never produced on the error path, for example \"x\".") },
   handler: async () => ({
     isError: true,
@@ -46,7 +46,7 @@ const WRITE_TOOL: ToolDefinition = {
   title: "Writing",
   description: `Would change the repository. ${SAFETY_SENTENCES.destructiveWrite}`,
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
-  inputSchema: { any: z.string().describe("Ignored, for example \"x\".") },
+  inputSchema: z.object({ any: z.string().describe("Ignored, for example \"x\".") }),
   outputSchema: { done: z.boolean().describe("Always true, for example true.") },
 };
 
@@ -56,7 +56,7 @@ const READ_TOOL: ToolDefinition = {
   title: "Reading",
   description: "Reads the repository. Read-only: this tool makes no changes and is safe to repeat.",
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  inputSchema: { any: z.string().describe("Ignored, for example \"x\".") },
+  inputSchema: z.object({ any: z.string().describe("Ignored, for example \"x\".") }),
   outputSchema: { done: z.boolean().describe("Always true, for example true.") },
 };
 

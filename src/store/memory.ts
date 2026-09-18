@@ -1,5 +1,5 @@
 import { inventoryPartitionKey, MAX_TRANSACTION_SIZE, planInventoryChanges } from "./keys.js";
-import type { ApplyResult, InventoryRecord, StateStore } from "./types.js";
+import type { ApplyResult, InventoryRecord, ScannedDrive, StateStore } from "./types.js";
 
 /**
  * For tests and for a local run with no storage account. It counts batches the
@@ -61,6 +61,25 @@ export function createMemoryStateStore(): StateStore {
 
     async listInventory(profileId, driveId) {
       return [...inventoryFor(profileId, driveId).values()];
+    },
+
+    async getScannedDrives(profileId): Promise<ScannedDrive[]> {
+      // The prefix is built by the same inventoryPartitionKey every sibling
+      // method uses, with an empty drive id, rather than a second literal "|"
+      // written here. That keeps the delimiter's definition in one place, and
+      // an unsafe profile id now throws the same UnsafeKeyError this store
+      // raises everywhere else instead of quietly answering with no results.
+      // The delimiter is what makes startsWith an exact boundary: it is the
+      // character immediately after the profile id in every key this store
+      // writes, so no other profile id's key can share this prefix, whatever
+      // characters a drive id itself contains.
+      const prefix = inventoryPartitionKey(profileId, "");
+      const drives: ScannedDrive[] = [];
+      for (const [key, value] of deltaLinks) {
+        if (!key.startsWith(prefix)) continue;
+        drives.push({ driveId: key.slice(prefix.length), lastScanAt: value.lastScanAt });
+      }
+      return drives;
     },
   };
 }

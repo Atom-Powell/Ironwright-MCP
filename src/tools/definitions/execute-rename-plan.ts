@@ -14,12 +14,12 @@ export const executeRenamePlan: ToolDefinition = {
     SAFETY_SENTENCES.destructiveWrite,
   ].join(" "),
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
-  inputSchema: {
+  inputSchema: z.object({
     planId: z.string().min(1).describe("Plan id returned by generate_rename_plan, for example \"rnm-2026-09-11-a3f2\"."),
     confirm: z
       .boolean()
       .default(false)
       .describe("Set true to apply the plan for real, for example true. Leave false or omit for a dry run."),
-  },
+  }),
   outputSchema: STUB_OUTPUT_SCHEMA,
 };
