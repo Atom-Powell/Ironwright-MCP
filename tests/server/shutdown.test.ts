@@ -4,11 +4,8 @@ import { describe, expect, it } from "vitest";
 import { installShutdown, type ShutdownServer } from "../../src/server/shutdown.js";
 
 interface FakeServerOptions {
-  connections: number;
   closeNeverCompletes?: boolean;
   closeCompletesAfterMs?: number;
-  getConnectionsFails?: boolean;
-  getConnectionsNeverCompletes?: boolean;
 }
 
 interface FakeServer extends ShutdownServer {
@@ -18,12 +15,12 @@ interface FakeServer extends ShutdownServer {
 /**
  * The shape installShutdown needs from http.Server, faked so the race
  * orderings can be observed without a real socket or a real signal to this
- * process. This fake must not invent anything installShutdown reads back as
- * data (a `connections` count with no runtime equivalent is exactly how the
- * previous version of this file hid the `server.connections` defect): every
- * field here mirrors a real method on `http.Server`, and the one case that
- * actually proves the reported number is real runs against a live
- * `http.createServer()` below, not this fake.
+ * process. The fake hands installShutdown no data at all, only timing, which
+ * is deliberate: the one thing a fake cannot be trusted with is a value the
+ * code under test reads back and reports, and that is exactly how an earlier
+ * version of this file hid a count read from a `server.connections` property
+ * that does not exist at runtime. Nothing here answers a question; each method
+ * only decides when, or whether, a callback fires.
  */
 function fakeHttpServer(options: FakeServerOptions): FakeServer {
   return {
@@ -35,19 +32,6 @@ function fakeHttpServer(options: FakeServerOptions): FakeServer {
     closeIdleConnections(): void {
       this.idleConnectionsClosed = true;
     },
-    getConnections(callback: (error: Error | null, count: number) => void): void {
-      // Real getConnections defers its callback rather than calling back
-      // inline; mirrored here so a test cannot pass only because the fake
-      // happened to resolve synchronously where the real server does not.
-      if (options.getConnectionsNeverCompletes) return;
-      setTimeout(() => {
-        if (options.getConnectionsFails) {
-          callback(new Error("boom"), 0);
-          return;
-        }
-        callback(null, options.connections);
-      }, 0);
-    },
   };
 }
 
@@ -57,7 +41,7 @@ function delay(ms: number): Promise<void> {
 
 describe("installShutdown", () => {
   it("exits after the deadline when a request never completes", async () => {
-    const server = fakeHttpServer({ closeNeverCompletes: true, connections: 1 });
+    const server = fakeHttpServer({ closeNeverCompletes: true });
     const exits: number[] = [];
     const logs: string[] = [];
 
@@ -67,31 +51,46 @@ describe("installShutdown", () => {
 
     expect(exits).toEqual([0]);
     expect(logs.join("\n")).toContain("shutdown deadline of 20ms reached with the drain not complete");
-    expect(logs.join("\n")).toContain("1 connection was still open");
   });
 
-  it("names the count in the plural when more than one connection is open", async () => {
-    const server = fakeHttpServer({ closeNeverCompletes: true, connections: 3 });
+  it("has already logged the deadline line by the moment it calls exit", async () => {
+    // In production `exit` is process.exit, which discards the event queue, so
+    // a deadline line logged after it, or from any callback scheduled by this
+    // handler, is never printed. A previous version was, and printed nothing.
+    // Nothing observable distinguishes the two orderings once the dust has
+    // settled, so this asserts at the only moment that can tell them apart:
+    // inside exit itself, where the log either already carries the line or the
+    // operator was never going to see it.
+    const server = fakeHttpServer({ closeNeverCompletes: true });
+    const logs: string[] = [];
+    let logsAtExit: string[] = [];
+
+    installShutdown({
+      server,
+      deadlineMs: 5,
+      exit: () => {
+        logsAtExit = [...logs];
+      },
+      log: (l) => logs.push(l),
+    })();
+    await delay(30);
+
+    expect(logsAtExit[1]).toContain("shutdown deadline of 5ms reached with the drain not complete");
+  });
+
+  it("states no figure for what it abandoned", async () => {
+    // Node offers no synchronous count of open sockets, so there is no number
+    // this line could have read. It must therefore not carry one, and the
+    // deadline value it does print is the only digits allowed through.
+    const server = fakeHttpServer({ closeNeverCompletes: true });
     const logs: string[] = [];
 
     installShutdown({ server, deadlineMs: 20, exit: () => {}, log: (l) => logs.push(l) })();
     await delay(60);
 
-    expect(logs.join("\n")).toContain("3 connections were still open");
-  });
-
-  it("logs the deadline line synchronously, before the count is even requested", async () => {
-    // The production exit terminates the process inside the timer callback, so
-    // a deadline line that waits on anything asynchronous is never printed at
-    // all. This pins the ordering that makes the line survive: it is already on
-    // the log when the callback has yielded nothing else.
-    const server = fakeHttpServer({ closeNeverCompletes: true, connections: 1, getConnectionsNeverCompletes: true });
-    const logs: string[] = [];
-
-    installShutdown({ server, deadlineMs: 5, exit: () => {}, log: (l) => logs.push(l) })();
-    await delay(30);
-
-    expect(logs[1]).toContain("shutdown deadline of 5ms reached with the drain not complete");
+    const deadlineLog = logs[1] ?? "";
+    expect(deadlineLog).toContain("drain not complete");
+    expect(deadlineLog.replace("20ms", "")).not.toMatch(/\d/);
   });
 
   it("ignores a second SIGTERM arriving during the drain", async () => {
@@ -99,7 +98,7 @@ describe("installShutdown", () => {
     // called back at once with ERR_SERVER_NOT_RUNNING, exiting immediately and
     // abandoning the drain with no deadline line. This asserts the first
     // shutdown still owns the outcome.
-    const server = fakeHttpServer({ closeNeverCompletes: true, connections: 1 });
+    const server = fakeHttpServer({ closeNeverCompletes: true });
     const exits: number[] = [];
     const logs: string[] = [];
 
@@ -115,7 +114,7 @@ describe("installShutdown", () => {
   });
 
   it("exits as soon as the drain finishes, without waiting for the deadline", async () => {
-    const server = fakeHttpServer({ closeCompletesAfterMs: 5, connections: 0 });
+    const server = fakeHttpServer({ closeCompletesAfterMs: 5 });
     const exits: number[] = [];
 
     installShutdown({ server, deadlineMs: 5_000, exit: (c) => exits.push(c), log: () => {} })();
@@ -125,7 +124,7 @@ describe("installShutdown", () => {
   });
 
   it("exits once when the drain finishes just after the deadline", async () => {
-    const server = fakeHttpServer({ closeCompletesAfterMs: 30, connections: 1 });
+    const server = fakeHttpServer({ closeCompletesAfterMs: 30 });
     const exits: number[] = [];
 
     installShutdown({ server, deadlineMs: 10, exit: (c) => exits.push(c), log: () => {} })();
@@ -135,14 +134,14 @@ describe("installShutdown", () => {
   });
 
   it("closes idle connections so keep-alive sockets do not hold the drain open", () => {
-    const server = fakeHttpServer({ closeCompletesAfterMs: 1, connections: 0 });
+    const server = fakeHttpServer({ closeCompletesAfterMs: 1 });
     installShutdown({ server, deadlineMs: 1_000, exit: () => {}, log: () => {} })();
 
     expect(server.idleConnectionsClosed).toBe(true);
   });
 
   it("logs that shutdown began before draining", () => {
-    const server = fakeHttpServer({ closeCompletesAfterMs: 1, connections: 0 });
+    const server = fakeHttpServer({ closeCompletesAfterMs: 1 });
     const logs: string[] = [];
 
     installShutdown({ server, deadlineMs: 1_000, exit: () => {}, log: (l) => logs.push(l) })();
@@ -150,41 +149,18 @@ describe("installShutdown", () => {
     expect(logs[0]).toContain("SIGTERM");
   });
 
-  it("reports no figure, rather than a wrong one, when the connection count cannot be read", async () => {
-    const server = fakeHttpServer({ closeNeverCompletes: true, connections: 1, getConnectionsFails: true });
-    const logs: string[] = [];
-
-    installShutdown({ server, deadlineMs: 20, exit: () => {}, log: (l) => logs.push(l) })();
-    await delay(60);
-
-    const deadlineLog = logs.join("\n");
-    expect(deadlineLog).toContain("drain not complete");
-    expect(deadlineLog).not.toMatch(/\d+ connections?/);
-  });
-
-  it("exits exactly once even when getConnections never calls back", async () => {
-    const server = fakeHttpServer({ closeNeverCompletes: true, connections: 1, getConnectionsNeverCompletes: true });
-    const exits: number[] = [];
-
-    installShutdown({ server, deadlineMs: 20, exit: (c) => exits.push(c), log: () => {} })();
-    await delay(60);
-
-    // The count that never arrived must not have held exit open: a shutdown
-    // path that waits on this callback before exiting has reintroduced the
-    // hang the deadline exists to remove.
-    expect(exits).toEqual([0]);
-  });
-
-  it("reports a real connection count from an actual http.Server", async () => {
-    // The defect this guards against only exists on a real server: a fake
-    // that invents its own connection count cannot fail the way
-    // `server.connections` failed, which read `undefined` at runtime while
-    // `@types/node` still typed it as a number. Only a live `http.Server`
-    // can prove the number installShutdown reports was actually obtained
-    // from the server rather than echoed from a double, so this handler
-    // never responds, and a real request is left open against it, the same
-    // shape as "a request that never completes" in the fake-backed test
-    // above.
+  it("reaches the deadline and logs it against an actual http.Server", async () => {
+    // Everything above this line runs against a hand-written double, and a
+    // double is written by someone with a belief about how http.Server
+    // behaves. That is not a hypothetical worry here: this function has
+    // shipped two defects, and the double hid both, first by inventing a
+    // `connections` field the real API does not have and then by supplying an
+    // `exit` that returns where the real one does not. So one case runs
+    // against a live server with a genuinely open request, and it is the case
+    // that matters: that `close` really does withhold its callback while a
+    // request is outstanding, that the deadline therefore really is what ends
+    // the process, and that the operator really is told so. This handler never
+    // responds, which is what keeps the request open.
     const httpServer = createServer(() => {
       // No response: the request, and the connection carrying it, stay open
       // until the test destroys it below.
@@ -213,13 +189,9 @@ describe("installShutdown", () => {
       await delay(80);
 
       expect(exits).toEqual([0]);
-      // Both halves of the deadline output. The first sentence is the one that
-      // must survive a real process.exit and is logged synchronously for that
-      // reason; the count only ever reaches an exit that returns, which is what
-      // this test supplies, and it is here to prove the number was read from a
-      // real server rather than invented by a double.
+      // By position, so an ordering regression fails here rather than passing
+      // on a line that a real process.exit would never have printed.
       expect(logs[1]).toContain("shutdown deadline of 20ms reached with the drain not complete");
-      expect(logs.join("\n")).toContain("1 connection was still open");
     } finally {
       request.destroy();
       await new Promise<void>((resolve) => httpServer.close(() => resolve()));

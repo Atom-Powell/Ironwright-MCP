@@ -13,23 +13,14 @@
  */
 
 /**
- * The surface `installShutdown` needs from `http.Server`: draining, closing
- * idle sockets, and the connection count read at the deadline. Kept narrow
- * rather than importing `http.Server` itself, so a test can supply a fake
- * without standing up a real socket.
- *
- * `getConnections`, not a `connections` property. A real `net.Server` has no
- * `connections` property at runtime; only `@types/node` still declares one,
- * a stale type left over from an API Node has since removed. Reading
- * `server.connections` in production therefore returned `undefined` while
- * `tsc` agreed it was a `number`, which is exactly how that defect shipped
- * once already: the compiler cannot be trusted here, only the runtime can.
- * Measured directly against `http.createServer()` before writing this.
+ * The whole surface `installShutdown` needs from `http.Server`: draining, and
+ * closing idle sockets. Kept narrow rather than importing `http.Server`
+ * itself, so a test can supply a fake without standing up a real socket, and
+ * narrow enough that a fake has almost nothing it could get wrong.
  */
 export interface ShutdownServer {
   close(callback: (error?: Error) => void): void;
   closeIdleConnections(): void;
-  getConnections(callback: (error: Error | null, count: number) => void): void;
 }
 
 export interface ShutdownDependencies {
@@ -81,42 +72,27 @@ export function installShutdown({ server, deadlineMs, exit, log }: ShutdownDepen
     log("received SIGTERM, finishing in-flight requests before exit");
 
     const timer = setTimeout(() => {
-      // The deadline line is logged first, synchronously, because it is the
-      // only part of this callback that is guaranteed to reach the operator.
-      // The whole reason the deadline exists is that SIGKILL used to end the
-      // process with nothing said about why, and a line that depends on an
-      // asynchronous callback to be printed reproduces that silence exactly.
-      // Measured against a real http.Server, a genuinely open request and the
-      // real process.exit: the only output was the SIGTERM line above. No
-      // deadline line at all.
+      // Logged synchronously and before exit, because that is the only way it
+      // reaches the operator at all: this callback ends in process.exit, which
+      // discards the event queue rather than draining it, so anything deferred
+      // from here is never printed. The whole reason the deadline exists is
+      // that SIGKILL used to end the process with nothing said about why, and
+      // a line that waits on a callback reproduces that silence exactly. It
+      // did: measured against a real http.Server, a genuinely open request and
+      // the real process.exit, the only output was the SIGTERM line above.
       log(`shutdown deadline of ${deadlineMs}ms reached with the drain not complete, exiting`);
 
-      // Exit is committed before anything else is attempted, so the deadline
-      // guarantee cannot be lost to a synchronous throw from the call below.
-      // A real net.Server cannot throw there, but this ordering removes the
-      // class rather than relying on that.
+      // No count of what was abandoned, which is the surprising part, so:
+      // Node's only runtime source for the number of open sockets is
+      // getConnections, and it answers on a deferred callback that the exit
+      // below discards. The number is not obtainable here, by any ordering,
+      // and this project does not state a figure it could not read. Reaching
+      // for one is what produced both of this function's shipped defects: a
+      // `server.connections` property that does not exist at runtime, and then
+      // a deadline line buried inside getConnections' callback that never
+      // printed. Do not add a count back without a synchronous API to read it
+      // from.
       finish(0);
-
-      // Best-effort enrichment, and honestly labelled as such: under the real
-      // process.exit, finish above terminates the process and this line is
-      // never reached. getConnections defers its callback through
-      // process.nextTick and process.exit does not drain that queue, so the
-      // count could never have been printed in production under any ordering.
-      // It is kept because an injected exit that returns, which is what every
-      // test supplies, still gets the count, and that is what pins the one
-      // property that broke before: if a number is printed, it was read from
-      // the server rather than invented, defaulted, or left over from a stale
-      // count.
-      //
-      // Connections, not requests. A keep-alive connection can be carrying no
-      // request at all or several in sequence, so this is an upper bound on
-      // sockets rather than a count of work abandoned, and it says so.
-      server.getConnections((error, count) => {
-        if (error) return;
-        log(
-          `at the shutdown deadline ${count} ${count === 1 ? "connection was" : "connections were"} still open`,
-        );
-      });
     }, deadlineMs);
 
     server.close(() => {

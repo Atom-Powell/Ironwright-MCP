@@ -146,9 +146,12 @@ So the requirement is what the last sentence above always meant rather than what
 asked for. **The deadline logs a sentence, synchronously, before exit, saying that the deadline was
 reached with the drain incomplete.** No number, because a number is not obtainable and the
 project's standing rule is that a function which cannot observe an outcome must not assert it. The
-`getConnections` attempt is kept as best-effort enrichment and is documented in the code as
-unreachable under the real exit, so nobody restores it as the only line. A count would have been
-useful; a line that prints is the requirement.
+`getConnections` call is gone entirely rather than kept as best-effort enrichment, because
+retaining code that production cannot reach so that tests can drive it inverts what the tests are
+for: they would assert behavior the deployed server is structurally incapable of exhibiting. What
+survives in the code is a comment explaining why there is no count, which is the surprising part
+and the thing the next reader will otherwise try to add. A count would have been useful; a line
+that prints is the requirement.
 
 ## One carried item this phase deliberately does not fix
 

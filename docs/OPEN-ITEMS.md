@@ -1974,10 +1974,31 @@ all three were wrong about its behavior, which is this project's message-audit d
 scale of a phase rather than a sentence. The fix is an ordering, not new prose: the numberless
 sentence already existed as the error branch, and it now runs synchronously, first, before
 `finish`. `finish` then commits the exit before anything else is attempted, so no synchronous
-throw can cost the guarantee. The `getConnections` attempt stays behind it as best-effort
-enrichment, and the code says plainly that under the real `process.exit` it is not reached at
-all, so nobody restores it as the only line. The tests assert the synchronous sentence as well
-as the count, including the real-server test, which is the one that can tell the difference.
+throw can cost the guarantee.
+
+**`getConnections` is gone entirely, rather than kept as best-effort enrichment.** The first
+version of this fix retained the call behind the exit and labelled it best effort, which was
+honest about its reachability and wrong about what to do with it. Code that production cannot
+reach, retained so that tests can exercise it, inverts what the tests are for: those tests assert
+behavior the deployed server is structurally incapable of exhibiting, which makes them tests of a
+fiction. That is the same family as the three defects this project has already spent phases on, a
+fake encoding what its author believed, a count read from a property that does not exist, a log
+documented in three places that never prints, arrived at one step earlier. The property worth
+protecting was never "report a count", it was "never state a number you did not obtain", and with
+no number produced at all that property now holds trivially and permanently. The tests that drove
+the call went with it, including the plural-branch case, which had no subject left; a test with no
+subject is not coverage. What stays in the code is the comment saying why there is no count, since
+that is the surprising part and the next reader will otherwise try to add one back.
+
+Keeping it against a future where `exit` is wired to something that returns, a graceful-exit
+wrapper say, was considered and rejected. This project does not build for futures it has not
+observed, and `exit` is injected precisely so that whoever wires it differently owns what that
+implies. If that day comes, adding a count back is smaller than the comment explaining why it was
+kept.
+
+The tests assert the deadline sentence by position, so an ordering regression fails rather than
+passing on a line a real `process.exit` would never have printed, and one of them asserts from
+inside `exit` itself, which is the only moment that can distinguish the two orderings at all.
 
 **What this episode says about the earlier fix.** The correction that replaced
 `server.connections` was reviewed, tested against a real `http.Server`, and merged, and it still
@@ -2040,10 +2061,12 @@ a self-executing entry point is the seam between that task and the file it was e
 production compile by a test that seeds a leftover `dist/setup/main.js` and shells out to a real
 `npm run build:prod`, asserting the server entry point exists afterward and the setup output does
 not; the shutdown by tests driving the real ordering (drain first, deadline first, the same tick,
-a second signal mid-drain) against both a hand-written fake and, for the connection count and the
-synchronous deadline line, a real `node:http` server with a genuinely open request; and health by
-a test asserting the handler never invokes the one injected dependency seam. `npm test` passed at
-136 files and 1984 tests, run repeatedly back to back with no changes between the runs, after the branch's own history of a report claiming a clean suite that turned
+a second signal mid-drain) against a hand-written fake that supplies only timing and no data at
+all, plus one case against a real `node:http` server with a genuinely open request, proving that
+`close` really does withhold its callback and that the deadline really is what ends the process;
+and health by a test asserting the handler never invokes the one injected dependency seam.
+`npm test` passed at 136 files and 1982 tests, run repeatedly back to back with no changes
+between the runs, after the branch's own history of a report claiming a clean suite that turned
 out to be a lucky single run rather than a reproducible one (see the closed shutdown item above:
 the production-compile test's default 5 second timeout had no margin under full-suite worker
 contention and needed an explicit, explained 60 second allowance before it held reliably). Beyond
