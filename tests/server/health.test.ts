@@ -35,8 +35,10 @@ describe("GET /health", () => {
     expect(response.status).toBe(200);
     // A health check that depends on a third party turns that party's outage
     // into a restart loop, which is strictly worse than serving one caller an
-    // error. This pins the route to reaching nothing, so the next attempt to
-    // make it "more useful" with a Graph or state store check fails here.
+    // error. This pins one seam, serverFactory, the only dependency-reaching
+    // path createApp has today: it catches a Graph or state store check routed
+    // through the factory, but not one added via a new AppOptions field or an
+    // inline import in the handler, which is what the route comment says.
     expect(serverFactoryCalls).toBe(0);
   });
 });
