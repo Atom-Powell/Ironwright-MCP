@@ -4,6 +4,7 @@ import { GraphRequestError } from "../../../src/graph/errors.js";
 import type { GraphClient } from "../../../src/graph/client.js";
 import type { ScanResult } from "../../../src/scan/run.js";
 import type { ToolContext } from "../../../src/tools/context.js";
+import type { StoredPlan } from "../../../src/store/types.js";
 import { createFakeToolContext, scanCoordinatorStub } from "../fake-context.js";
 
 /**
@@ -204,6 +205,104 @@ export function etagGraphClient(etagsByPath: Record<string, string | null | numb
     getBytes: () => {
       requestCount += 2;
       return Promise.reject(new Error("the fake etag client does not implement getBytes"));
+    },
+    requests: () => requestCount,
+  };
+}
+
+export const ITEM_A = {
+  path: "2026/ACME/01-January/wrong-a.xlsx",
+  currentName: "wrong-a.xlsx",
+  targetName: "2026-01_ACME_MonthlyTraining.xlsx",
+  targetPath: "2026/ACME/01-January/2026-01_ACME_MonthlyTraining.xlsx",
+  etag: '"{GUID},1"',
+  client: "ACME",
+};
+
+export const ITEM_B = {
+  path: "2026/BETACO/01-January/wrong-b.xlsx",
+  currentName: "wrong-b.xlsx",
+  targetName: "2026-01_BETACO_MonthlyTraining.xlsx",
+  targetPath: "2026/BETACO/01-January/2026-01_BETACO_MonthlyTraining.xlsx",
+  etag: '"{GUID},2"',
+  client: "BETACO",
+};
+
+export function planWith(items: StoredPlan["items"], excluded: StoredPlan["excluded"] = []): StoredPlan {
+  return {
+    planId: "rnm-2026-09-18-a1b2c3d4",
+    profileId: "example",
+    kind: "rename",
+    driveId: "drive-1",
+    createdAt: "2026-09-18T12:00:00Z",
+    items,
+    excluded,
+  };
+}
+
+export interface RenameCall {
+  path: string;
+  name: string;
+  ifMatch: string | undefined;
+}
+
+export interface RenamingClientOptions {
+  /** Library-relative path to the Graph status its PATCH answers with. Absent means success. */
+  patchStatuses?: Record<string, number>;
+  /** False makes the PATCH response carry no etag, forcing the follow-up read. */
+  etagOnPatchResponse?: boolean;
+  /** A Graph status for the follow-up etag read, so the unrefreshable case can be exercised. */
+  etagLookupStatus?: number;
+}
+
+/**
+ * Applies renames into nothing at all: it records the calls and answers with a
+ * fresh etag each time. That is enough, because what these tests assert is what
+ * this server sent and what it recorded, never what SharePoint then held.
+ * Proving the latter is the live sitting's job and no fake can stand in for it.
+ *
+ * Every method moves the same counter `requests()` reports, the way the real
+ * client does.
+ */
+export function renamingGraphClient(options: RenamingClientOptions = {}): GraphClient & { calls: RenameCall[] } {
+  const patchStatuses = options.patchStatuses ?? {};
+  const etagOnPatchResponse = options.etagOnPatchResponse ?? true;
+  const calls: RenameCall[] = [];
+  let requestCount = 0;
+  let version = 100;
+
+  function encoded(path: string): string {
+    return path.split("/").map(encodeURIComponent).join("/");
+  }
+
+  return {
+    calls,
+    async get<T>(pathOrUrl: string): Promise<T> {
+      requestCount += 1;
+      if (options.etagLookupStatus !== undefined) {
+        throw new GraphRequestError({ method: "GET", path: pathOrUrl, status: options.etagLookupStatus, body: "{}" });
+      }
+      version += 1;
+      return { eTag: `"{GUID},${String(version)}"` } as unknown as T;
+    },
+    post: () => {
+      requestCount += 1;
+      return Promise.reject(new Error("the fake renaming client does not implement post"));
+    },
+    async patch<T>(pathOrUrl: string, body: unknown, headers?: Record<string, string>): Promise<T> {
+      requestCount += 1;
+      calls.push({ path: pathOrUrl, name: (body as { name: string }).name, ifMatch: headers?.["if-match"] });
+
+      const failing = Object.entries(patchStatuses).find(([path]) => pathOrUrl.includes(encoded(path)));
+      if (failing !== undefined) {
+        throw new GraphRequestError({ method: "PATCH", path: pathOrUrl, status: failing[1], body: "{}" });
+      }
+      version += 1;
+      return (etagOnPatchResponse ? { eTag: `"{GUID},${String(version)}"` } : {}) as unknown as T;
+    },
+    getBytes: () => {
+      requestCount += 2;
+      return Promise.reject(new Error("the fake renaming client does not implement getBytes"));
     },
     requests: () => requestCount,
   };

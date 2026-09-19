@@ -125,3 +125,117 @@ export const GENERATE_RENAME_PLAN_OUTPUT_SCHEMA = {
     .boolean()
     .describe("True when this call awaited a scan another call had already started, which is the only reason the scan cost can be zero."),
 } satisfies z.ZodRawShape;
+
+export const RENAME_ITEM_OUTCOMES = [
+  "renamed",
+  "would_rename",
+  "changed_since_plan",
+  "not_found",
+  "failed",
+] as const;
+
+export type RenameItemOutcome = (typeof RENAME_ITEM_OUTCOMES)[number];
+
+export interface RenameItemResult {
+  path: string;
+  currentName: string;
+  targetName: string;
+  targetPath: string;
+  client: string;
+  outcome: RenameItemOutcome;
+}
+
+export interface ExecuteRenamePlanOutput {
+  planId: string;
+  profileId: string;
+  library: string;
+  dryRun: boolean;
+  results: RenameItemResult[];
+  resultCount: number;
+  resultsOmitted: number;
+  counts: { renamed: number; wouldRename: number; changedSincePlan: number; notFound: number; failed: number };
+  excluded: Array<{ path: string; currentName: string; targetName: string; client: string; reason: PlanExclusionReason }>;
+  excludedCount: number;
+  excludedOmitted: number;
+  /** Absent on a dry run, which changes nothing and therefore writes no reversal log. */
+  reversalPlanId?: string;
+  reversalEntriesNotRefreshed: number;
+  graphRequests: number;
+}
+
+export const EXECUTE_RENAME_PLAN_OUTPUT_SCHEMA = {
+  planId: z.string().describe("The plan this call applied or previewed."),
+  profileId: z.string().describe("The profile the plan belongs to."),
+  library: z.string().describe("The document library named by the profile's identity."),
+  dryRun: z
+    .boolean()
+    .describe(
+      "True when nothing was changed. A dry run contacts Graph not at all, so it cannot tell whether a file has " +
+        "changed since the plan was generated: outcomes of changed_since_plan and not_found can only appear in a " +
+        "confirmed run.",
+    ),
+  results: z
+    .array(
+      z.object({
+        path: z.string(),
+        currentName: z.string(),
+        targetName: z.string(),
+        targetPath: z.string(),
+        client: z.string(),
+        outcome: z.enum(RENAME_ITEM_OUTCOMES),
+      }),
+    )
+    .describe(
+      "One entry per item in the plan, sorted by path. renamed means the file was renamed; would_rename means a " +
+        "dry run reached it and stopped; changed_since_plan means its ETag precondition was refused and the file " +
+        "was left untouched; not_found means nothing is at that path any more; failed means Graph answered with " +
+        "something other than those two, and the server log carries it. May be a prefix; see resultCount.",
+    ),
+  resultCount: z.number().int().describe("Items in the plan. Computed before the listing above is cut."),
+  resultsOmitted: z.number().int().describe("Items the listing above left out."),
+  counts: z
+    .object({
+      renamed: z.number().int(),
+      wouldRename: z.number().int(),
+      changedSincePlan: z.number().int(),
+      notFound: z.number().int(),
+      failed: z.number().int(),
+    })
+    .describe("Computed over every item in the plan, before the listing above is cut. Never abridged."),
+  excluded: z
+    .array(
+      z.object({
+        path: z.string(),
+        currentName: z.string(),
+        targetName: z.string(),
+        client: z.string(),
+        reason: z.enum(PLAN_EXCLUSION_REASONS),
+      }),
+    )
+    .describe(
+      "Items the plan recorded at generation time as ones it would not attempt, carried here so an operator " +
+        "reading this report does not have to hold the plan open beside it to learn why a file they expected to " +
+        "be renamed was not.",
+    ),
+  excludedCount: z.number().int().describe("Excluded items in the plan. Computed before the listing above is cut."),
+  excludedOmitted: z.number().int().describe("Excluded items the listing above left out."),
+  reversalPlanId: z
+    .string()
+    .optional()
+    .describe(
+      "The plan id that undoes this run, written before the first rename. Absent on a dry run, which changes " +
+        "nothing to reverse. Apply it with this same tool to roll back.",
+    ),
+  reversalEntriesNotRefreshed: z
+    .number()
+    .int()
+    .describe(
+      "Renames that succeeded but whose reversal entry could not be given the file's new ETag. Replaying the " +
+        "reversal will refuse those items on their own precondition rather than undo them, so they need a fresh " +
+        "plan. Zero is the normal result.",
+    ),
+  graphRequests: z
+    .number()
+    .int()
+    .describe("What this call itself paid. Zero on a dry run, which contacts Graph not at all."),
+} satisfies z.ZodRawShape;

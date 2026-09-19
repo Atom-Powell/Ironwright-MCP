@@ -1,4 +1,4 @@
-import type { GenerateRenamePlanOutput } from "./output.js";
+import type { ExecuteRenamePlanOutput, GenerateRenamePlanOutput } from "./output.js";
 
 /**
  * Every line states something the output actually carries. Nothing here infers
@@ -36,6 +36,56 @@ export function generatePlanText(output: GenerateRenamePlanOutput): string[] {
       "lookup can spend more than one.",
   );
   lines.push(`Review this plan, then apply it with execute_rename_plan. It runs as a dry run unless confirm is true.`);
+
+  return lines;
+}
+
+/**
+ * Says what happened and nothing more. In particular the dry-run line states
+ * that no precondition was checked, because a dry run contacts Graph not at
+ * all: a reader who took a clean preview as a guarantee that every rename will
+ * apply would be reading an assertion this code never made.
+ */
+export function executePlanText(output: ExecuteRenamePlanOutput): string[] {
+  const lines = output.dryRun
+    ? [
+        `Dry run of plan ${output.planId} against library "${output.library}". Nothing was changed.`,
+        `${String(output.counts.wouldRename)} ${output.counts.wouldRename === 1 ? "rename" : "renames"} would be attempted.`,
+        "This preview contacted Graph not at all, so it did not check whether any file has changed since the plan " +
+          "was generated. Those refusals can only appear in a confirmed run.",
+      ]
+    : [
+        `Applied plan ${output.planId} against library "${output.library}".`,
+        `${String(output.counts.renamed)} renamed, ${String(output.counts.changedSincePlan)} refused because the ` +
+          `file changed since the plan, ${String(output.counts.notFound)} no longer at the planned path, ` +
+          `${String(output.counts.failed)} failed.`,
+      ];
+
+  for (const result of output.results) {
+    lines.push(`  ${result.path} -> ${result.targetName} (${result.outcome})`);
+  }
+  if (output.resultsOmitted > 0) {
+    lines.push(`  ...and ${String(output.resultsOmitted)} more, all of them counted above.`);
+  }
+
+  for (const item of output.excluded) {
+    lines.push(`  excluded at plan time: ${item.path} (${item.reason})`);
+  }
+  if (output.excludedOmitted > 0) {
+    lines.push(`  ...and ${String(output.excludedOmitted)} more exclusions, all of them counted above.`);
+  }
+
+  if (output.reversalPlanId !== undefined) {
+    lines.push(`Reversal plan ${output.reversalPlanId}. Apply it with this same tool to roll this run back.`);
+  }
+  if (output.reversalEntriesNotRefreshed > 0) {
+    lines.push(
+      `${String(output.reversalEntriesNotRefreshed)} reversal ${output.reversalEntriesNotRefreshed === 1 ? "entry" : "entries"} ` +
+        "could not be given the file's new ETag, so replaying the reversal will refuse those items rather than " +
+        "undo them. Generate a fresh plan for those files.",
+    );
+  }
+  lines.push(`Graph requests: ${String(output.graphRequests)}.`);
 
   return lines;
 }
