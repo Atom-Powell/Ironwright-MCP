@@ -321,7 +321,7 @@ The spec carries the full phase descriptions. Status as of 2026-09-18:
 6. **Write tools**, sliced vertically rather than horizontally, per
    `docs/superpowers/specs/2026-09-18-rename-write-path-design.md`: a write layer built ahead of any
    caller is precisely the shape this project already rejected once.
-   - **6a: the rename write path. Built and covered by fakes only; the live sitting has not run.**
+   - **6a: the rename write path. Complete and verified live on 2026-09-19.**
      `generate_rename_plan` and `execute_rename_plan`, the first write this server has ever made,
      plus only the substrate those two tools need: a `GraphClient` PATCH verb carrying `If-Match`
      and distinguishing success, a 412 precondition failure, and a 404 not-found; `StateStore` plan
@@ -337,10 +337,18 @@ The spec carries the full phase descriptions. Status as of 2026-09-18:
      slice, and left for 6b and 6c: `generate_move_plan` and `execute_move_plan`, including async
      cross-library polling; `replicate_template`; the `$batch` builder; and `conflictBehavior`.
      Every one of them arrives with the caller that exercises it, the same rule that moved `$batch`
-     out of phase 2. **No rename has been applied to a real SharePoint library, no reversal log has
-     been replayed, and no real 412 has been observed.** `docs/OPEN-ITEMS.md` carries the dated
-     record of exactly what is and is not covered; the merge gate is the full loop against the
-     sandbox tenant described in the design spec's own verification section, and it has not run.
+     out of phase 2. **The full loop ran against the sandbox tenant on 2026-09-19 and passed**: a
+     plan generated, dry run, applied for real, the renames confirmed by a fresh delta scan, rolled
+     back through the reversal log, the library confirmed back where it started, and then one file
+     edited between generating and executing so that item alone was refused on its own precondition
+     while the other still applied. Two facts about Graph that this project had only assumed are now
+     measured. A `driveItem` PATCH does return the updated item carrying its new `eTag`, so the
+     reversal entries were refreshed from the response and the rollback was not refused. And Graph
+     evaluates `If-Match` BEFORE existence: a stale precondition against a path holding nothing
+     answers 412 `resourceModified`, not 404. Since this server always sends `If-Match`, its
+     `not_found` outcome is unreachable in practice and `changed_since_plan` is reported for a file
+     that is merely absent, which is a message saying more than the code observed.
+     `docs/OPEN-ITEMS.md` carries the dated record, including what the sitting did not establish.
    - **6b and 6c.** Held rather than started: the move tools, `replicate_template`, `$batch`, and
      `conflictBehavior`, in the order 6a's own design spec lays out.
    Then **Copilot Studio integration and governance**, then the **evaluation suite**, whose

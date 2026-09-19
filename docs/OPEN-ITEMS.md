@@ -2153,6 +2153,83 @@ ordering regression "by position", and under that exact regression only one of t
 The branch that fixed a documented-but-never-printed log corrected a documented-but-never-run
 assertion before merging.
 
+## The phase 6a live sitting, 2026-09-19: the first write this server has made
+
+The full loop in the design spec's verification section ran against the sandbox tenant and passed.
+Everything below is measured, not predicted.
+
+**The grant.** The server application's `Sites.Selected` role on the site was widened from `read` to
+`write` in place for the sitting and restored to `read` immediately afterward. It was NOT widened by
+re-running `npm run setup --write`: `runSetup` always creates a NEW application and prints its
+secret to stdout, which would have orphaned the current registration and put a client secret in a
+terminal scrollback, the incident that already cost this project an application on 2026-09-13.
+`.superpowers/live-sitting/set-site-role.ts` patches the one existing permission, matches on
+application id so it cannot widen another application's grant, and prints no secret.
+
+**generate_rename_plan, live.** 2.2 to 4.3 seconds per call. Four Graph requests for the workbook,
+three or four for the scan, and one etag lookup per candidate. The plan persisted through the real
+`@azure/data-tables` client against Azurite and was read back by the executor in a separate call.
+
+**The duplicates exclusion fired on real data, which no fixture had ever reached.** Re-seeding left
+a compliant file from the previous seed sitting at `Client08`'s canonical path alongside the newly
+planted misnamed one. The engine collapsed them into one slot, the compliant file won it, and the
+misnamed file arrived as a `DuplicateFinding`. The plan excluded it as
+`target_path_already_occupied`, which is the correct one of the three reasons, and issued only ONE
+etag lookup for two misnamed files, so an exclusion genuinely costs no Graph request. This is the
+code path the phase 6a spec originally described as unreachable-through-artifacts and that the
+branch's second correction created.
+
+**The first write.** Two renames, two Graph operations, zero failures, reversal log written before
+the first PATCH.
+
+**Graph's PATCH response carries the new `eTag`.** Previously assumed. Two renames cost exactly two
+operations and `reversalEntriesNotRefreshed` was zero, so no fallback metadata read was needed and
+every reversal entry was refreshed from the response body.
+
+**The rollback worked and was not refused.** Two renamed back, zero refused. Had the reversal
+entries carried their stale pre-rename etags, every one would have been refused; that they were not
+is the live proof of the refresh chain the spec calls easy to get wrong and silently useless. A
+fresh delta scan then found the library exactly where it started.
+
+**Per-item preconditions hold against real Graph.** One file was edited between generating and
+executing. That item alone came back `changed_since_plan` and the untouched file still renamed.
+
+### The finding: Graph evaluates If-Match before existence
+
+A reversal entry for a file that had never been renamed, and whose source path therefore held
+nothing, came back `changed_since_plan` rather than `not_found`. A direct probe
+(`.superpowers/live-sitting/probe-precondition.ts`) settles why:
+
+    absent path, no If-Match     : 400 invalidRequest
+    absent path, stale If-Match  : 412 resourceModified
+    present path, stale If-Match : 412 resourceModified
+
+Graph checks the precondition first. This server always sends `If-Match`, so:
+
+- `renameDriveItem`'s `not_found` outcome is unreachable in practice, and the executor's
+  `not_found` count will always be zero.
+- `changed_since_plan` is reported for a file that is merely absent, and its operator-facing line
+  says "refused because the file changed since the plan", which is false in that case. A function
+  that cannot observe an outcome must not assert it, and here it asserts a cause it did not check.
+
+Not a safety defect: the write is correctly refused either way and nothing is lost. It is a
+reporting defect on a write tool, which this project grades highly. The cheap honest fix is to stop
+naming the cause, since 412 alone does not distinguish "changed" from "absent"; distinguishing them
+would cost a GET per refusal.
+
+### What this sitting did NOT establish
+
+- **The empty-body PATCH case never occurred.** Every PATCH returned a body carrying an `eTag`, so
+  the guard added for a 204 or null response, which was the branch's last Critical, is still
+  unexercised against a real tenant. It is a guard against a shape Graph did not produce here.
+- **The store was Azurite, not Azure Table Storage.** The `Plans` table's
+  `as unknown as TableClientLike` cast now has an emulator behind it rather than a fake, but not a
+  real storage account, and `MAX_PLAN_JSON_CHARS` was never approached.
+- **Scale and concurrency.** Two items in a plan, one caller at a time. Nothing about batching,
+  throttling, a retried operation spending more than one request, or two callers executing at once.
+- **`cTag` versus `eTag`.** The code uses `eTag` throughout and it worked; nothing here shows
+  `cTag` would not also have worked, or what either does across a content change.
+
 ## Phase 6a: covered only by fakes, 2026-09-18
 
 Phase 6a is the first write path this server has. As of this commit it is covered by fakes only. No
