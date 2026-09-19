@@ -230,6 +230,21 @@ npm run setup -- --tenant=<tenant-id> --site=https://<tenant>.sharepoint.com/sit
 Omit `--write` to grant read-only site access, which is the right choice for a deployment that
 will never run remediation.
 
+**`--write` is decided when the application is created, and no mode of this command widens an
+existing grant.** `--write` only shapes the per-site permission that a full `runSetup` issues for
+the application it is creating in that same run. Re-running setup with `--write` against a
+deployment that was granted read is therefore the wrong move: it creates a SECOND application,
+prints a new client secret to stdout, and leaves the live registration in place and unchanged, so
+the deployment is now orphaned from the grant you just widened, and a secret is in a terminal
+scrollback. Widening today means patching the existing site permission entry directly, with the
+grant issuer's app-only token: list `GET /sites/{site-id}/permissions`, find the entry whose
+`grantedToIdentitiesV2[0].application.id` is the server application's client id, matching on that
+id rather than on position so another application's grant on the same site cannot be widened by
+accident, and `PATCH` that one entry with `{"roles": ["write"]}`. Restore it to `read` the same way
+when the write work is finished. The 2026-09-19 rename sitting did exactly this, in both
+directions, rather than re-running setup. A first-class command for this is not built; when one is,
+it belongs here.
+
 Before this command does anything else, it checks that `IW_BOOTSTRAP_CLIENT_ID` and
 `IW_BOOTSTRAP_CLIENT_SECRET` are set and that the token they produce carries
 `Sites.FullControl.All`. If either check fails, it refuses to create anything and says which
@@ -587,10 +602,11 @@ npx azurite
 IW_TABLE_CONNECTION_STRING=UseDevelopmentStorage=true npm run scan -- --profile profiles/acme.json
 ```
 
-The scan's own output says which store it used, states the Graph request count and the delta
-page count, and always states that the Microsoft Search cross-check did not run, since phase 2a
-never runs it and a file stored outside the expected taxonomy is invisible to this snapshot as a
-result. It also names how many of the scanned files carry no ETag at all, since Graph does not
+The scan's own output says which store it used, and states the Graph request count and the delta
+page count. It then says one of two things about the Microsoft Search cross-check, which phase 2c
+made part of every scan: that the cross-check completed, or which of four reasons it did not,
+each with what that leaves unseen. A completed cross-check is the normal case and not a defect to
+investigate. It also names how many of the scanned files carry no ETag at all, since Graph does not
 always report one and this phase's snapshot stores that absence as an empty string rather than
 marking it explicitly, which a later rename or move plan will need to know before trusting an
 ETag as a precondition.
@@ -650,5 +666,12 @@ every other failure propagate. File creation still uses `replace`: a file has no
 `replace` to take with it, and every file this script writes is the same placeholder content, so
 overwriting an existing synthetic file with identical content loses nothing.
 
-This has not been run against a tenant as of this writing. The first real run is how the
-project's own founding performance claim gets checked for the first time.
+Both of this section's open questions have since been answered, and the numbers are in
+`docs/OPEN-ITEMS.md` rather than restated here in full. The seeder first ran against a tenant on
+2026-09-17, processing 121 folders and 143 files in 266 Graph requests and replacing the tracking
+workbook in 2 more; see "The second live tenant sitting, 2026-09-17". The founding performance
+claim was checked a day earlier, on 2026-09-16, against a tree this seeder built: a cold scan
+enumerated 144 files and 122 folders in 4 Graph requests and an immediate re-scan in 3, where a
+recursive walk of the same tree would have cost at least one request per folder, so at least 122.
+See "The first live tenant sitting, 2026-09-16". Those figures are one tree of that size on one
+tenant, not a general benchmark.
