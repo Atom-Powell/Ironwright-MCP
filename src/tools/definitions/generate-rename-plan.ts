@@ -10,7 +10,7 @@ export const generateRenamePlan: ToolDefinition = {
   title: "Generate a rename plan",
   description: [
     "Produce a reviewable plan that renames files violating the profile's filename standard, one entry per file, each recording the current name, the proposed name, and the file's ETag fetched at plan time.",
-    "Files whose canonical name is already taken, or that two files would both claim, are recorded as excluded rather than attempted.",
+    "A file this server cannot rename safely is recorded as excluded, with the reason, rather than attempted: either its canonical name is already spoken for, by a file sitting there or by another file that would also claim it or has already satisfied the slot, or the file had no usable ETag precondition when the plan was generated, because Graph returned none for it or it was no longer at its path.",
     "Returns a plan id that execute_rename_plan consumes. Review the plan before executing it.",
     SAFETY_SENTENCES.plan,
   ].join(" "),

@@ -108,11 +108,22 @@ export interface RenamePlanItem {
   /** Library-relative path this item occupies once renamed. Always the same folder as `path`. */
   targetPath: string;
   /**
-   * The `If-Match` precondition, fetched from Graph when the plan was
-   * generated rather than read out of the inventory. The inventory is a delta
-   * snapshot that may be hours old, so a precondition built on it would refuse
-   * any change since the last scan rather than any change since the plan a
-   * human actually read.
+   * The `If-Match` precondition, and where it came from depends on which kind
+   * of plan holds it. Both kinds are this same entity, so a reader of a stored
+   * plan needs both answers here.
+   *
+   * On a forward plan it was fetched from Graph when the plan was generated,
+   * rather than read out of the inventory. The inventory is a delta snapshot
+   * that may be hours old, so a precondition built on it would refuse any
+   * change since the last scan rather than any change since the plan a human
+   * actually read.
+   *
+   * On a reversal plan it starts as the forward item's PRE-rename etag, which
+   * is stale for the inverse operation by construction, and the executor
+   * replaces it with the etag the rename's own PATCH response carried as each
+   * rename lands. An entry that never gets replaced keeps the stale value and
+   * is refused on replay, which is the safe direction. `reversalItemsFor` in
+   * `src/tools/rename/execute.ts` carries the full reasoning.
    */
   etag: string;
   client: string;
