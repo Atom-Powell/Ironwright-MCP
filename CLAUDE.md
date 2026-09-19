@@ -346,8 +346,10 @@ The spec carries the full phase descriptions. Status as of 2026-09-18:
      reversal entries were refreshed from the response and the rollback was not refused. And Graph
      evaluates `If-Match` BEFORE existence: a stale precondition against a path holding nothing
      answers 412 `resourceModified`, not 404. Since this server always sends `If-Match`, its
-     `not_found` outcome is unreachable in practice and `changed_since_plan` is reported for a file
-     that is merely absent, which is a message saying more than the code observed.
+     `not_found` outcome is unreachable in practice; `execute_rename_plan` reports that refusal as
+     `precondition_refused` and says only that the item at that path is not the one the plan
+     recorded, without naming which of "changed" or "absent" caused it, since 412 alone cannot
+     tell the two apart and telling them apart would cost a GET per refusal.
      `docs/OPEN-ITEMS.md` carries the dated record, including what the sitting did not establish.
    - **6b and 6c.** Held rather than started: the move tools, `replicate_template`, `$batch`, and
      `conflictBehavior`, in the order 6a's own design spec lays out.

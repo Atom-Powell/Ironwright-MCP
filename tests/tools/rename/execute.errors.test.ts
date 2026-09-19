@@ -27,13 +27,13 @@ describe("per-item refusals", () => {
       await runExecuteRenamePlan({ profileId: "example", planId: PLAN_ID, confirm: true }, context, () => REVERSAL_ID),
     );
 
-    expect(output.counts.changedSincePlan).toBe(1);
+    expect(output.counts.preconditionRefused).toBe(1);
     expect(output.counts.renamed).toBe(1);
-    expect(output.results.find((entry) => entry.path === ITEM_A.path)?.outcome).toBe("changed_since_plan");
+    expect(output.results.find((entry) => entry.path === ITEM_A.path)?.outcome).toBe("precondition_refused");
     expect(output.results.find((entry) => entry.path === ITEM_B.path)?.outcome).toBe("renamed");
   });
 
-  it("reports an item that is no longer there as not_found and keeps going", async () => {
+  it("reports an item that is no longer there as not_found and keeps going, a case the fake can drive even though live Graph cannot reach it once If-Match is always sent", async () => {
     const graph = renamingGraphClient({ patchStatuses: { [ITEM_A.path]: 404 } });
     const context = createFakeToolContext({ graph });
     await context.store.savePlan("example", planWith([ITEM_A, ITEM_B]));

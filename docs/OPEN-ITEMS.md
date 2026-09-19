@@ -2208,14 +2208,19 @@ Graph checks the precondition first. This server always sends `If-Match`, so:
 
 - `renameDriveItem`'s `not_found` outcome is unreachable in practice, and the executor's
   `not_found` count will always be zero.
-- `changed_since_plan` is reported for a file that is merely absent, and its operator-facing line
-  says "refused because the file changed since the plan", which is false in that case. A function
-  that cannot observe an outcome must not assert it, and here it asserts a cause it did not check.
+- `changed_since_plan` was reported for a file that is merely absent, and its operator-facing line
+  said "refused because the file changed since the plan", which is false in that case. A function
+  that cannot observe an outcome must not assert it, and here it asserted a cause it did not check.
 
-Not a safety defect: the write is correctly refused either way and nothing is lost. It is a
-reporting defect on a write tool, which this project grades highly. The cheap honest fix is to stop
-naming the cause, since 412 alone does not distinguish "changed" from "absent"; distinguishing them
-would cost a GET per refusal.
+Not a safety defect: the write is correctly refused either way and nothing is lost. It was a
+reporting defect on a write tool, which this project grades highly, and it is now corrected. The
+outcome is renamed `precondition_refused`, and every rendered line and schema description says only
+what the code observed: Graph refused the write because the item at that path is not the one the
+plan recorded, without guessing which of "changed" or "absent" caused it, since 412 alone does not
+distinguish the two and distinguishing them would cost a GET per refusal this project deliberately
+does not pay. The `not_found` outcome stays in the schema, labelled as expected to be zero for the
+reason above, rather than being removed: nothing proves a negative, and removing a branch on a
+write path is the worse risk.
 
 ### What this sitting did NOT establish
 

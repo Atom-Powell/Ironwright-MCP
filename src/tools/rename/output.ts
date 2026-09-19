@@ -129,7 +129,7 @@ export const GENERATE_RENAME_PLAN_OUTPUT_SCHEMA = {
 export const RENAME_ITEM_OUTCOMES = [
   "renamed",
   "would_rename",
-  "changed_since_plan",
+  "precondition_refused",
   "not_found",
   "failed",
 ] as const;
@@ -163,7 +163,7 @@ export interface ExecuteRenamePlanOutput {
   results: RenameItemResult[];
   resultCount: number;
   resultsOmitted: number;
-  counts: { renamed: number; wouldRename: number; changedSincePlan: number; notFound: number; failed: number };
+  counts: { renamed: number; wouldRename: number; preconditionRefused: number; notFound: number; failed: number };
   excluded: Array<{ path: string; currentName: string; targetName: string; client: string; reason: PlanExclusionReason }>;
   excludedCount: number;
   excludedOmitted: number;
@@ -194,9 +194,9 @@ export const EXECUTE_RENAME_PLAN_OUTPUT_SCHEMA = {
   dryRun: z
     .boolean()
     .describe(
-      "True when nothing was changed. A dry run contacts Graph not at all, so it cannot tell whether a file has " +
-        "changed since the plan was generated: outcomes of changed_since_plan and not_found can only appear in a " +
-        "confirmed run.",
+      "True when nothing was changed. A dry run contacts Graph not at all, so it cannot tell whether the item at " +
+        "a path is still the one the plan recorded: outcomes of precondition_refused and not_found can only " +
+        "appear in a confirmed run.",
     ),
   results: z
     .array(
@@ -211,9 +211,15 @@ export const EXECUTE_RENAME_PLAN_OUTPUT_SCHEMA = {
     )
     .describe(
       "One entry per item in the plan, sorted by path. renamed means the file was renamed; would_rename means a " +
-        "dry run reached it and stopped; changed_since_plan means its ETag precondition was refused and the file " +
-        "was left untouched; not_found means nothing is at that path any more; failed means Graph answered with " +
-        "something other than those two, and the server log carries it. May be a prefix; see resultCount.",
+        "dry run reached it and stopped; precondition_refused means Graph refused the write because the item at " +
+        "that path is not the one the plan recorded. Graph checks If-Match before existence, so this single " +
+        "outcome covers both a file that changed and a file that is no longer there, and this server deliberately " +
+        "does not pay the cost of a GET per refusal to tell the two apart. not_found is expected to stay zero: " +
+        "this executor always sends If-Match, and a stale precondition against an absent path answers 412 before " +
+        "Graph ever reports the path missing, so a 404 cannot reach this outcome today. It is kept as a label " +
+        "rather than removed, since a branch on a write path is not removed on the strength of a negative nobody " +
+        "can prove. failed means Graph answered with something other than those, and the server log carries it. " +
+        "May be a prefix; see resultCount.",
     ),
   resultCount: z.number().int().describe("Items in the plan. Computed before the listing above is cut."),
   resultsOmitted: z.number().int().describe("Items the listing above left out."),
@@ -221,8 +227,22 @@ export const EXECUTE_RENAME_PLAN_OUTPUT_SCHEMA = {
     .object({
       renamed: z.number().int(),
       wouldRename: z.number().int(),
-      changedSincePlan: z.number().int(),
-      notFound: z.number().int(),
+      preconditionRefused: z
+        .number()
+        .int()
+        .describe(
+          "Items Graph refused because the item at that path was not the one the plan recorded. Covers both a " +
+            "changed file and an absent one: Graph checks If-Match before existence, and telling the two apart " +
+            "would cost a GET per refusal this project deliberately does not pay.",
+        ),
+      notFound: z
+        .number()
+        .int()
+        .describe(
+          "Expected to be zero. This executor always sends If-Match, and Graph evaluates that precondition before " +
+            "existence, so a 404 cannot reach this executor today. The outcome is kept rather than removed, since " +
+            "a branch on a write path is not removed on the strength of a negative nobody can prove.",
+        ),
       failed: z.number().int(),
     })
     .describe("Computed over every item in the plan, before the listing above is cut. Never abridged."),
