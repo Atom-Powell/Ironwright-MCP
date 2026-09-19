@@ -171,7 +171,7 @@ export async function runExecuteRenamePlan(
         // evaluating If-Match before existence: a stale precondition against a
         // path holding nothing answers 412, never 404. Kept rather than
         // removed, the same way src/domain/rename/plan.ts keeps its own
-        // unreachable collision branches labelled instead of deleted: nothing
+        // unreachable collision branches labeled instead of deleted: nothing
         // proves a negative, and removing a branch on a write path is the
         // worse risk. readDriveItemEtag's own 404 mapping is not affected by
         // this: that call is a GET carrying no precondition at all, so its 404

@@ -1977,7 +1977,7 @@ sentence already existed as the error branch, and it now runs synchronously, fir
 throw can cost the guarantee.
 
 **`getConnections` is gone entirely, rather than kept as best-effort enrichment.** The first
-version of this fix retained the call behind the exit and labelled it best effort, which was
+version of this fix retained the call behind the exit and labeled it best effort, which was
 honest about its reachability and wrong about what to do with it. Code that production cannot
 reach, retained so that tests can exercise it, inverts what the tests are for: those tests assert
 behavior the deployed server is structurally incapable of exhibiting, which makes them tests of a
@@ -2218,7 +2218,7 @@ outcome is renamed `precondition_refused`, and every rendered line and schema de
 what the code observed: Graph refused the write because the item at that path is not the one the
 plan recorded, without guessing which of "changed" or "absent" caused it, since 412 alone does not
 distinguish the two and distinguishing them would cost a GET per refusal this project deliberately
-does not pay. The `not_found` outcome stays in the schema, labelled as expected to be zero for the
+does not pay. The `not_found` outcome stays in the schema, labeled as expected to be zero for the
 reason above, rather than being removed: nothing proves a negative, and removing a branch on a
 write path is the worse risk.
 
