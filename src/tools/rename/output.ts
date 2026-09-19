@@ -160,7 +160,7 @@ export interface ExecuteRenamePlanOutput {
   /** Absent on a dry run, which changes nothing and therefore writes no reversal log. */
   reversalPlanId?: string;
   reversalEntriesNotRefreshed: number;
-  graphRequests: number;
+  graphOperationsIssued: number;
 }
 
 export const EXECUTE_RENAME_PLAN_OUTPUT_SCHEMA = {
@@ -234,8 +234,14 @@ export const EXECUTE_RENAME_PLAN_OUTPUT_SCHEMA = {
         "reversal will refuse those items on their own precondition rather than undo them, so they need a fresh " +
         "plan. Zero is the normal result.",
     ),
-  graphRequests: z
+  graphOperationsIssued: z
     .number()
     .int()
-    .describe("What this call itself paid. Zero on a dry run, which contacts Graph not at all."),
+    .describe(
+      "Graph operations this call issued: one per rename attempt, plus one for each follow-up ETag read a missing " +
+        "PATCH response forced. Counted directly rather than measured against the shared Graph request counter, " +
+        "which a concurrent call also moves and which a retried operation can move more than once. Not a request " +
+        "count: a throttled PATCH retries and spends more than one request while counting as one operation here. " +
+        "Zero on a dry run, which contacts Graph not at all.",
+    ),
 } satisfies z.ZodRawShape;

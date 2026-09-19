@@ -85,7 +85,7 @@ export function executePlanText(output: ExecuteRenamePlanOutput): string[] {
         "undo them. Generate a fresh plan for those files.",
     );
   }
-  lines.push(`Graph requests: ${String(output.graphRequests)}.`);
+  lines.push(`Graph operations issued: ${String(output.graphOperationsIssued)}.`);
 
   return lines;
 }

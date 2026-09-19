@@ -4,7 +4,7 @@ import { GraphRequestError } from "../../../src/graph/errors.js";
 import type { GraphClient } from "../../../src/graph/client.js";
 import type { ScanResult } from "../../../src/scan/run.js";
 import type { ToolContext } from "../../../src/tools/context.js";
-import type { StoredPlan } from "../../../src/store/types.js";
+import type { StateStore, StoredPlan } from "../../../src/store/types.js";
 import { createFakeToolContext, scanCoordinatorStub } from "../fake-context.js";
 
 /**
@@ -237,6 +237,52 @@ export function planWith(items: StoredPlan["items"], excluded: StoredPlan["exclu
     createdAt: "2026-09-18T12:00:00Z",
     items,
     excluded,
+  };
+}
+
+/**
+ * `count` distinct rename items, one client each, well under the store's
+ * character cap for a count in the tens. Exists so a test can put more items
+ * in a plan than `MAX_PLAN_ITEMS_LISTED` shows without tripping
+ * `MAX_PLAN_JSON_CHARS`, to prove a count is computed over the whole set
+ * before the listing is cut rather than over the cut listing itself.
+ */
+export function manyRenameItems(count: number): StoredPlan["items"] {
+  return Array.from({ length: count }, (_value, index) => {
+    const client = `CLIENT${String(index).padStart(4, "0")}`;
+    return {
+      path: `2026/${client}/01-January/wrong.xlsx`,
+      currentName: "wrong.xlsx",
+      targetName: `2026-01_${client}_MonthlyTraining.xlsx`,
+      targetPath: `2026/${client}/01-January/2026-01_${client}_MonthlyTraining.xlsx`,
+      etag: `"{GUID},${String(index)}"`,
+      client,
+    };
+  });
+}
+
+/**
+ * Wraps a real `StateStore` so its `savePlan` throws on one specific call
+ * number, counted from 1 across every call this store instance receives, and
+ * behaves exactly like the wrapped store on every other call. Everything but
+ * `savePlan` is passed straight through.
+ *
+ * Wrapping a real store rather than faking every method is what lets a test
+ * exercise a persistence failure that happens after a rename has already
+ * landed, while `getPlan` afterward still answers with whatever the last
+ * successful `savePlan` actually persisted, `structuredClone` and all.
+ */
+export function storeWithFailingSavePlan(store: StateStore, failOnCall: number): StateStore {
+  let calls = 0;
+  return {
+    ...store,
+    async savePlan(profileId, plan) {
+      calls += 1;
+      if (calls === failOnCall) {
+        throw new Error(`simulated failure: savePlan call ${String(calls)} was made to fail on purpose`);
+      }
+      return store.savePlan(profileId, plan);
+    },
   };
 }
 

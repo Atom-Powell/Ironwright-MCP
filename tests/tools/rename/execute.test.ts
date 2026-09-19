@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { runExecuteRenamePlan } from "../../../src/tools/rename/execute.js";
 import { createFakeToolContext } from "../fake-context.js";
-import type { ExecuteRenamePlanOutput } from "../../../src/tools/rename/output.js";
-import { ITEM_A, ITEM_B, planWith, renamingGraphClient } from "./fixtures.js";
+import { MAX_PLAN_ITEMS_LISTED, type ExecuteRenamePlanOutput } from "../../../src/tools/rename/output.js";
+import { ITEM_A, ITEM_B, manyRenameItems, planWith, renamingGraphClient } from "./fixtures.js";
 
 const PLAN_ID = "rnm-2026-09-18-a1b2c3d4";
 const REVERSAL_ID = "rev-2026-09-18-ffffffff";
@@ -22,7 +22,7 @@ describe("execute_rename_plan dry run", () => {
     expect(output.dryRun).toBe(true);
     expect(output.counts.wouldRename).toBe(2);
     expect(output.counts.renamed).toBe(0);
-    expect(output.graphRequests).toBe(0);
+    expect(output.graphOperationsIssued).toBe(0);
     expect(graph.calls).toEqual([]);
   });
 
@@ -68,6 +68,22 @@ describe("execute_rename_plan dry run", () => {
     expect(output.excludedCount).toBe(1);
     expect(output.excluded[0]?.reason).toBe("target_path_already_occupied");
   });
+
+  it("computes counts over the complete set before the listing is truncated", async () => {
+    // A plan far larger than MAX_PLAN_ITEMS_LISTED, kept well under the store's
+    // character cap, so this proves counts.wouldRename reflects the whole plan
+    // rather than only the sliced results the listing shows.
+    const itemCount = MAX_PLAN_ITEMS_LISTED + 5;
+    const context = createFakeToolContext({ graph: renamingGraphClient() });
+    await context.store.savePlan("example", planWith(manyRenameItems(itemCount)));
+
+    const output = outputOf(await runExecuteRenamePlan({ profileId: "example", planId: PLAN_ID }, context));
+
+    expect(output.resultCount).toBe(itemCount);
+    expect(output.results).toHaveLength(MAX_PLAN_ITEMS_LISTED);
+    expect(output.resultsOmitted).toBe(itemCount - MAX_PLAN_ITEMS_LISTED);
+    expect(output.counts.wouldRename).toBe(itemCount);
+  });
 });
 
 describe("execute_rename_plan confirmed run", () => {
@@ -84,7 +100,7 @@ describe("execute_rename_plan confirmed run", () => {
     expect(output.counts.renamed).toBe(2);
     expect(graph.calls.map((call) => call.name)).toEqual([ITEM_A.targetName, ITEM_B.targetName]);
     expect(graph.calls.map((call) => call.ifMatch)).toEqual([ITEM_A.etag, ITEM_B.etag]);
-    expect(output.graphRequests).toBe(2);
+    expect(output.graphOperationsIssued).toBe(2);
   });
 
   it("writes a reversal log that is a valid plan with the pairs inverted", async () => {
@@ -143,7 +159,7 @@ describe("execute_rename_plan confirmed run", () => {
       await runExecuteRenamePlan({ profileId: "example", planId: PLAN_ID, confirm: true }, context, () => REVERSAL_ID),
     );
 
-    expect(output.graphRequests).toBe(2);
+    expect(output.graphOperationsIssued).toBe(2);
     expect(output.reversalEntriesNotRefreshed).toBe(0);
     const reversal = await context.store.getPlan("example", REVERSAL_ID);
     expect(reversal?.items[0]?.etag).not.toBe(ITEM_A.etag);

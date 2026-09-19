@@ -56,10 +56,11 @@ function reversalItemsFor(items: readonly RenamePlanItem[]): RenamePlanItem[] {
 /**
  * Applies a rename plan, or previews it.
  *
- * There is one loop, not two. A dry run walks the same items in the same order
- * and makes the same per-item decision about what to send; the PATCH is the
- * only thing it does not do. A separately implemented preview would be a second
- * executor, and the two would disagree exactly when it mattered.
+ * One loop walks every item, whether this is a dry run or a confirmed run. Its
+ * first statement is the dry-run branch, so a decision added to the confirmed
+ * path later is added inside the same loop body a reviewer is already reading,
+ * rather than inside a second, separately maintained preview implementation
+ * that could omit it without anything failing.
  */
 export async function runExecuteRenamePlan(
   input: unknown,
@@ -95,14 +96,20 @@ export async function runExecuteRenamePlan(
 
     const sorted = [...plan.items].sort(comparePaths);
     const results: RenameItemResult[] = [];
-    let graphRequests = 0;
+    let graphOperationsIssued = 0;
     let reversalEntriesNotRefreshed = 0;
     let reversalPlanId: string | undefined;
 
-    if (!args.confirm) {
-      for (const item of sorted) results.push(resultFor(item, "would_rename"));
-    } else {
-      const reversal: StoredPlan = {
+    // Created and saved before the loop, but only when there is a run to
+    // reverse: a dry run changes nothing, so it has nothing to roll back.
+    // Written before the first rename, so a crash mid-apply still leaves
+    // something to roll back with. It necessarily over-covers at this point,
+    // listing inverses for renames that have not happened; replaying one of
+    // those finds nothing at the source path and reports it, which is how the
+    // over-coverage corrects itself through the same machinery.
+    let reversal: StoredPlan | undefined;
+    if (args.confirm) {
+      reversal = {
         planId: makeReversalPlanId(),
         profileId: args.profileId,
         kind: "rename",
@@ -112,66 +119,99 @@ export async function runExecuteRenamePlan(
         excluded: [],
         reverses: plan.planId,
       };
-      // Written before the first rename, so a crash mid-apply still leaves
-      // something to roll back with. It necessarily over-covers at this point,
-      // listing inverses for renames that have not happened; replaying one of
-      // those finds nothing at the source path and reports it, which is how the
-      // over-coverage corrects itself through the same machinery.
       await context.store.savePlan(args.profileId, reversal);
       reversalPlanId = reversal.planId;
+    }
 
-      for (const [index, item] of sorted.entries()) {
-        let outcome: RenameItemOutcome;
+    for (const [index, item] of sorted.entries()) {
+      if (!args.confirm) {
+        results.push(resultFor(item, "would_rename"));
+        continue;
+      }
+      if (reversal === undefined) {
+        // Cannot happen: reversal is created above whenever args.confirm is
+        // true, and this branch runs only when args.confirm is true too. The
+        // check exists so the compiler agrees with that, not only this
+        // comment.
+        continue;
+      }
+
+      // The PATCH gets its own error boundary. Once it answers, the outcome is
+      // settled: nothing past this point may overwrite it. A prior version of
+      // this function shared one try/catch for the PATCH and the bookkeeping
+      // that follows a success, so a failure refreshing the reversal entry or
+      // saving it overwrote an already-observed "renamed" with "failed", the
+      // report contradicting what the function itself had just seen happen.
+      let renameResult: Awaited<ReturnType<typeof renameDriveItem>> | "failed";
+      try {
+        graphOperationsIssued += 1;
+        renameResult = await renameDriveItem(context.graph, {
+          driveId: plan.driveId,
+          path: item.path,
+          newName: item.targetName,
+          etag: item.etag,
+        });
+      } catch (error) {
+        // Recorded and continued rather than rethrown. Rethrowing would
+        // discard the report, which is the operator's only account of which
+        // renames already applied; the reversal log alone does not say which
+        // of its entries are live.
+        console.error(`execute_rename_plan could not rename "${item.path}" under plan "${plan.planId}"`, error);
+        renameResult = "failed";
+      }
+
+      let outcome: RenameItemOutcome;
+      if (renameResult === "failed") {
+        outcome = "failed";
+      } else if (renameResult.kind === "precondition_failed") {
+        outcome = "changed_since_plan";
+      } else if (renameResult.kind === "not_found") {
+        outcome = "not_found";
+      } else {
+        // The rename is done. This outcome is final; the bookkeeping below has
+        // its own error boundary specifically so it cannot change it.
+        outcome = "renamed";
         try {
-          const renamed = await renameDriveItem(context.graph, {
-            driveId: plan.driveId,
-            path: item.path,
-            newName: item.targetName,
-            etag: item.etag,
-          });
-          graphRequests += 1;
-
-          if (renamed.kind === "precondition_failed") {
-            outcome = "changed_since_plan";
-          } else if (renamed.kind === "not_found") {
-            outcome = "not_found";
+          let fresh = renameResult.etag;
+          if (fresh === undefined) {
+            // Graph's documented PATCH response is the updated item, so this
+            // branch should not run. It exists because "should" is not
+            // "does", and this project has paid once for designing against
+            // an API surface nobody had called.
+            graphOperationsIssued += 1;
+            const lookup = await readDriveItemEtag(context.graph, {
+              driveId: plan.driveId,
+              path: item.targetPath,
+            });
+            fresh = lookup.kind === "found" ? lookup.etag : undefined;
+          }
+          if (fresh === undefined) {
+            reversalEntriesNotRefreshed += 1;
           } else {
-            outcome = "renamed";
-            let fresh = renamed.etag;
-            if (fresh === undefined) {
-              // Graph's documented PATCH response is the updated item, so this
-              // branch should not run. It exists because "should" is not
-              // "does", and this project has paid once for designing against
-              // an API surface nobody had called.
-              const lookup = await readDriveItemEtag(context.graph, {
-                driveId: plan.driveId,
-                path: item.targetPath,
-              });
-              graphRequests += 1;
-              fresh = lookup.kind === "found" ? lookup.etag : undefined;
-            }
-            if (fresh === undefined) {
-              reversalEntriesNotRefreshed += 1;
-            } else {
-              const entry = reversal.items[index];
-              if (entry !== undefined) reversal.items[index] = { ...entry, etag: fresh };
-              // Saved per item rather than once at the end. A single save at
-              // the end would lose every correction to a crash, which is the
-              // failure the early write exists to survive.
-              await context.store.savePlan(args.profileId, reversal);
-            }
+            const entry = reversal.items[index];
+            if (entry !== undefined) reversal.items[index] = { ...entry, etag: fresh };
+            // Saved per item rather than once at the end. A single save at
+            // the end would lose every correction to a crash, which is the
+            // failure the early write exists to survive.
+            await context.store.savePlan(args.profileId, reversal);
           }
         } catch (error) {
-          // Recorded and continued rather than rethrown. Rethrowing would
-          // discard the report, which is the operator's only account of which
-          // renames already applied; the reversal log alone does not say which
-          // of its entries are live.
-          console.error(`execute_rename_plan could not rename "${item.path}" under plan "${plan.planId}"`, error);
-          graphRequests += 1;
-          outcome = "failed";
+          // The rename already happened, so this failure is about the
+          // reversal entry, not about whether the file was renamed. Reported
+          // as an unrefreshed entry rather than rethrown or turned into
+          // "failed", for the same reason the PATCH's own catch above does
+          // not touch a settled outcome: a rollback that cannot undo this
+          // item is a defect in the reversal log, not evidence the forward
+          // rename did not happen.
+          console.error(
+            `execute_rename_plan renamed "${item.path}" under plan "${plan.planId}" but could not refresh its ` +
+              "reversal entry",
+            error,
+          );
+          reversalEntriesNotRefreshed += 1;
         }
-        results.push(resultFor(item, outcome));
       }
+      results.push(resultFor(item, outcome));
     }
 
     const excluded = [...plan.excluded].sort(comparePaths);
@@ -195,7 +235,7 @@ export async function runExecuteRenamePlan(
       excludedOmitted: Math.max(0, excluded.length - MAX_PLAN_ITEMS_LISTED),
       ...(reversalPlanId === undefined ? {} : { reversalPlanId }),
       reversalEntriesNotRefreshed,
-      graphRequests,
+      graphOperationsIssued,
     };
 
     return {
