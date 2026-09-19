@@ -8,8 +8,14 @@ Built by Ironwright (Adam Powell). Licensed under the Elastic License 2.0; see `
 
 ## Status
 
-Phase 1. The server is connectable and every tool is registered with its real schema and
-annotations, returning a placeholder response until the Graph layer lands.
+Phase 6a. The five read tools are wired and have each answered against a live tenant:
+`inventory_tree`, `describe_workbook`, `reconcile_workbook_vs_repository`, `query_repository` and
+`validate_structure`. So is the rename pair: `generate_rename_plan` produces a reviewable persisted
+plan, and `execute_rename_plan` applies it, which means it really renames files in a SharePoint
+library. It is published only when `IW_ALLOW_WRITES=true`, and even then a call without
+`confirm: true` is a dry run that writes nothing. The remaining three tools, `generate_move_plan`,
+`execute_move_plan` and `replicate_template`, are still registered stubs returning a placeholder
+response.
 
 ## Documentation
 
@@ -26,13 +32,21 @@ npm install
 npm run dev        # start with hot reload
 ```
 
+The server will not start without its configuration. `IW_PROFILE_DIR`, `IW_SITE_URL`,
+`IW_TENANT_ID`, `IW_CLIENT_ID` and `IW_CLIENT_SECRET` are all required, and it refuses at startup
+naming the one it is missing. `docs/SETUP.md` carries the full deployment configuration contract,
+including the optional variables and where the identity values come from.
+
 The server listens on port 3000 unless `PORT` says otherwise. MCP clients connect to `POST /mcp`,
 which speaks Streamable HTTP in stateless mode, so there is no session to establish and no SSE
 stream to open. `GET /health` is a separate route for container probes and answers
 `{"status":"ok"}`. A client running on the same machine connects to `http://localhost:3000/mcp`.
 
 Running from a build takes two commands rather than one, because `npm start` runs the compiled
-output and does not compile it. Run `npm run build` first, then `npm start`.
+output and does not compile it. Run `npm run build:prod` first, then `npm start`. Use `build:prod`
+rather than `build` for anything you keep or deploy: `npm run build` also emits `dist/setup/`, the
+grant-issuing command that acts through a separate application holding `Sites.FullControl.All`,
+which has no business in a deployed image. `docs/SETUP.md` explains that boundary.
 
 ## Development
 
