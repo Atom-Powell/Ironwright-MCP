@@ -1,7 +1,11 @@
 # Design: Repository Reconciliation MCP Server
 
 Date: 2026-09-11
-Status: Approved (design only; no implementation plan yet)
+Status: Approved and substantially implemented. Phases 1 through 6a are built, each under its own
+implementation plan in `docs/superpowers/plans/`. This document remains binding for anything it
+still settles; where a later phase overturned something, the change is recorded as a dated
+amendment in place rather than by rewriting the original. `CLAUDE.md` carries the current build
+sequence and `docs/OPEN-ITEMS.md` the evidence for what has been run live.
 Author: Adam Powell (Ironwright), with Claude Code
 
 ## Problem
@@ -63,8 +67,12 @@ all declarative profile data. The shape covers phishing-simulation and security-
 reporting, and also vulnerability scan reports, patch reports, backup verification, and QBRs.
 
 **Workbook layout is described by a declarative mapping authored by an introspection tool.**
-A read-only `describe_workbook` reads the real workbook, detects tables and headers, infers
-types, and proposes a candidate mapping for human review. Requiring customers to restructure
+A read-only `describe_workbook` reads the real workbook, detects tables and headers, and infers
+column types, so a human can author the mapping from what the tool reports. Amended 2026-09-18 by
+phase 4c: it proposes no candidate `columns` mapping at all and says so in its own response. The
+profile's `columns` keys are the profile author's own vocabulary, tied to deliverables this tool
+has never seen, so a mapping it invented would be a plausible artifact that is harder to audit
+than no artifact. Requiring customers to restructure
 the workbook that is their live operational authority was rejected; that artifact is the one
 they are least willing to change.
 
@@ -127,6 +135,18 @@ statelessly, so there is nothing to serialize. A `Retry-After`-aware backoff wra
 every call. A `conflictBehavior` helper. Every call goes through plain `fetch`; see
 `2026-09-13-graph-repository-snapshot-design.md` for why the Graph JS SDK was declined.
 Auth arrives through a token-provider interface so tests inject a fake.
+
+> **Amended 2026-09-19. Three things in the paragraph above are not what `graph-lib` is.** The
+> Excel session manager is void for the reason the Decisions banner gives, and the module was
+> deleted on 2026-09-16; the workbook is read by downloading the `.xlsx` through `/content` and
+> parsing the bytes in process. The `$batch` builder has never been built: it moved to phase 6 to
+> arrive with its first caller, and phase 6a deferred it again and issues renames sequentially, so
+> there is no `$batch` in `src/` at all. ID addressing as a cached fallback is likewise unbuilt;
+> every call in the codebase is path-addressed. What the paragraph describes accurately is ETag
+> capture and `If-Match` application, the delta client with persisted `deltaLink`s, the
+> `Retry-After`-aware backoff, plain `fetch`, and the token-provider seam. `conflictBehavior` is
+> deferred with the move tools. This note is here because a reader arriving at Architecture
+> directly does not pass the banner under Decisions.
 
 **`store`** is the state index behind a `StateStore` interface, with an Azure Table Storage
 implementation for real use and an in-memory implementation for tests.
@@ -256,8 +276,8 @@ Ten tools, inside the recommended 25 to 30 ceiling for a single agent.
 
 | Tool | Kind | Notes |
 |---|---|---|
-| `inventory_tree` | read | Full tree via delta and `$batch`; reports its own Graph call count |
-| `describe_workbook` | read | Proposes a workbook mapping for human review |
+| `inventory_tree` | read | Full tree via delta; reports its own Graph call count |
+| `describe_workbook` | read | No source: lists sheets and tables. One source: its header row and columns, no mapping proposed |
 | `reconcile_workbook_vs_repository` | read | Centerpiece; expected versus actual, structured gap report |
 | `query_repository` | read | Operational questions answered from the state index |
 | `validate_structure` | read | Per-client compliance against the profile taxonomy |
@@ -294,9 +314,15 @@ because its granularity is per-server rather than per-tool.
 2. **Plan and execute split.** `generate_*` performs no repository writes and persists a plan
    with an ID, a content hash, and per-item before and after state including each item's ETag.
 3. **Dry run default.** `execute_*` requires an explicit `confirm: true` for a live pass.
-4. **ETag precondition.** Each item applies with `If-Match`. An item changed since planning
-   fails with 412, is reported as skipped, and the rest of the batch proceeds. Per-item
-   outcome reporting is the honest shape, since SharePoint offers no cross-item atomicity.
+4. **ETag precondition.** Each item applies with `If-Match`. An item whose precondition Graph
+   refuses fails with 412, is reported as skipped, and every other item in the same plan still
+   applies. Per-item outcome reporting is the honest shape, since SharePoint offers no cross-item
+   atomicity. Amended 2026-09-19 by phase 6a, which measured both halves of this: per-item
+   continuation is confirmed live, and a 412 does NOT mean the item changed, because Graph
+   evaluates `If-Match` before existence and answers 412 for an absent path too, so the executor
+   reports only that the item at that path is not the one the plan recorded. There is also no
+   batch here; renames are issued one at a time. See
+   `2026-09-18-rename-write-path-design.md` for both findings.
 5. **Reversal log.** Written before anything applies. A reversal log is itself a valid plan,
    so rollback runs through `execute_*_plan` like any other plan. There is no separate
    rollback code path to get wrong at the moment it is needed.
@@ -318,8 +344,22 @@ collections are stored one entity per member rather than as a single serialized 
 |---|---|---|---|
 | `DeltaLinks` | profileId | driveId | `deltaLink`, last scan timestamp |
 | `Inventory` | profileId + driveId | driveItem id | path, name, type, size, modified, ETag |
-| `Plans` | profileId | planId | kind, created timestamp, content hash, status |
-| `PlanItems` | planId | item index | before state, after state, ETag, per-item outcome |
+| `Plans` | profileId | planId | kind, driveId, created timestamp, the plan's items and exclusions as JSON, and `reverses` when it is a reversal log |
+
+**Amended 2026-09-19 by phase 6a, which built this and verified it live.** There are three tables,
+not four. The `PlanItems` row above is gone: a plan's items and its plan-time exclusions are
+serialized into two String properties of the one `Plans` entity, `items` and `excluded`, and
+`savePlan` refuses with `PlanTooLargeError` when the two together exceed `MAX_PLAN_JSON_CHARS`,
+32000, a margin under Azure Table's 32768-character limit on a single String property. The
+per-member rationale at the head of this section does not apply to a plan. It exists so a
+collection that grows without bound is not squeezed into one property, which is why `Inventory`
+is one entity per file; a plan is generated, reviewed and executed as a single reviewed artifact,
+is never partially updated, and is refused rather than truncated when it will not fit, so one
+entity is the shape that matches how it is used. A reversal log is stored as a plan in this same
+table with `reverses` naming the plan it reverses, per the Decision Record's own words that a
+reversal log is a plan. `docs/SETUP.md` describes the shipped shape; phase 6b and 6c inherit plan
+persistence from the code and from that description, not from the row this amendment replaces. The
+cap has never been approached against the real service; `docs/OPEN-ITEMS.md` carries that as open.
 
 The inventory is keyed by item id rather than by a path hash because delta cannot maintain a
 path-keyed table: a deleted item arrives as an id and a `deleted` facet carrying no path at all,
@@ -336,6 +376,14 @@ session 404 and recreation, 429 with `Retry-After`, batch auto-split past 20 req
 item-level failure inside an otherwise successful batch, async move polling to both success
 and failure, ETag mismatch producing 412, and the documented `conflictBehavior` replace
 inconsistency between folders and files verified empirically rather than trusted from docs.
+
+**Amended 2026-09-19. Two of those gates have nothing to gate.** The Excel session was deleted on
+2026-09-16 and batch auto-split was never built, so neither has code behind it and neither is a CI
+gate; they return only if the capability does. Async move polling and `conflictBehavior` are
+deferred with the move tools and are gates for 6b, not open holes today. What is gated now is 429
+with `Retry-After`, ETag mismatch producing 412, and item-level failure inside an otherwise
+successful run, which for phase 6a means a per-item failure in a sequential loop rather than inside
+a batch.
 
 Two contract tests guard the tool layer. One asserts every registered tool has an output
 schema, annotations, and a description stating its safety status, and that the prose and the
@@ -419,11 +467,14 @@ while self-hosted remote MCP there remains in preview.
 
 ## Follow-up work this design implies
 
-`CLAUDE.md` needs a rewrite. It references a Statement of Work package that has been removed,
-numbers its phases against it, frames the project as employer-owned, lists open decisions this
-document settles, and omits `describe_workbook` from its tool table.
+**Done. Kept as the record of what this design implied rather than as outstanding work.**
 
-`README.md` should state the license and the Ironwright product framing.
+`CLAUDE.md` needed a rewrite. It referenced a Statement of Work package that has been removed,
+numbered its phases against it, framed the project as employer-owned, listed open decisions this
+document settles, and omitted `describe_workbook` from its tool table. All of that was corrected;
+the current `CLAUDE.md` is the Decision Record this project works from.
+
+`README.md` states the license and the Ironwright product framing.
 
 ## A practice this project learned the hard way
 
