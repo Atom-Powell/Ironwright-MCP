@@ -61,4 +61,99 @@ export interface StateStore {
    * description makes.
    */
   getScannedDrives(profileId: string): Promise<ScannedDrive[]>;
+
+  /**
+   * Writes a plan, replacing any plan already stored under that id. Replacing
+   * rather than appending is what lets an executor correct a reversal entry's
+   * etag as each rename lands: a rename changes the item's etag, so a reversal
+   * log written before the first write and never touched again would have every
+   * one of its items refused on its own stale precondition, and a rollback
+   * would report a clean run having changed nothing.
+   */
+  savePlan(profileId: string, plan: StoredPlan): Promise<void>;
+  getPlan(profileId: string, planId: string): Promise<StoredPlan | undefined>;
+}
+
+/**
+ * Why a misnamed file the engine found is recorded in the plan as something
+ * that will not be attempted.
+ *
+ * The first two are name collisions, neither resolvable without
+ * `conflictBehavior`, which this phase deliberately does not build. The last
+ * two come from the plan-time etag fetch: a file with no etag has no usable
+ * precondition, and silently sending no `If-Match` for it would turn the item
+ * carrying the least information into the only unguarded write in the batch.
+ */
+export type PlanExclusionReason =
+  | "target_path_already_occupied"
+  | "two_files_share_one_target_name"
+  | "no_etag_available"
+  | "file_not_found_at_plan_time";
+
+export interface RenamePlanItem {
+  /** Library-relative, no leading slash. The file as it stands now. */
+  path: string;
+  currentName: string;
+  targetName: string;
+  /** Library-relative path this item occupies once renamed. Always the same folder as `path`. */
+  targetPath: string;
+  /**
+   * The `If-Match` precondition, fetched from Graph when the plan was
+   * generated rather than read out of the inventory. The inventory is a delta
+   * snapshot that may be hours old, so a precondition built on it would refuse
+   * any change since the last scan rather than any change since the plan a
+   * human actually read.
+   */
+  etag: string;
+  client: string;
+}
+
+export interface ExcludedPlanItem {
+  path: string;
+  currentName: string;
+  targetName: string;
+  client: string;
+  reason: PlanExclusionReason;
+}
+
+/**
+ * A persisted plan. There is one entity type rather than two, because a
+ * reversal log is a plan by the Decision Record's own words. Storing it as a
+ * separate shape would let the reversal path drift from the forward path, and
+ * rollback running through the same code is the whole point of the rule.
+ */
+export interface StoredPlan {
+  planId: string;
+  profileId: string;
+  kind: "rename";
+  driveId: string;
+  createdAt: string;
+  items: RenamePlanItem[];
+  excluded: ExcludedPlanItem[];
+  /** The plan id this one reverses. Absent on a forward plan. */
+  reverses?: string;
+}
+
+/**
+ * Azure Table caps a String property at 32768 characters. The margin below
+ * that covers the rest of the entity, and the refusal is raised in this
+ * codebase rather than left to the service, whose own error names neither the
+ * plan nor a remedy.
+ */
+export const MAX_PLAN_JSON_CHARS = 32000;
+
+export class PlanTooLargeError extends Error {
+  readonly planId: string;
+  readonly chars: number;
+
+  constructor(planId: string, chars: number) {
+    super(
+      `Plan "${planId}" serializes to ${String(chars)} characters, more than the ` +
+        `${String(MAX_PLAN_JSON_CHARS)} a single stored plan holds. Generate a narrower plan by naming fewer ` +
+        "clients. Refused rather than truncated, because a plan missing items a reviewer saw is worse than no plan at all.",
+    );
+    this.name = "PlanTooLargeError";
+    this.planId = planId;
+    this.chars = chars;
+  }
 }

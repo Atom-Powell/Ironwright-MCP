@@ -7,7 +7,15 @@ import {
   MAX_TRANSACTION_SIZE,
   planInventoryChanges,
 } from "./keys.js";
-import type { ApplyResult, InventoryRecord, ScannedDrive, StateStore } from "./types.js";
+import { MAX_PLAN_JSON_CHARS, PlanTooLargeError } from "./types.js";
+import type {
+  ApplyResult,
+  ExcludedPlanItem,
+  InventoryRecord,
+  RenamePlanItem,
+  ScannedDrive,
+  StateStore,
+} from "./types.js";
 
 export interface TableEntityLike {
   partitionKey: string;
@@ -34,6 +42,7 @@ export interface TableClientLike {
 export interface TableStateStoreClients {
   deltaLinks: TableClientLike;
   inventory: TableClientLike;
+  plans: TableClientLike;
 }
 
 function statusCodeOf(error: unknown): number | undefined {
@@ -212,6 +221,52 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
       }
       return drives;
     },
+
+    async savePlan(profileId, plan) {
+      const items = JSON.stringify(plan.items);
+      const excluded = JSON.stringify(plan.excluded);
+      const total = items.length + excluded.length;
+      if (total > MAX_PLAN_JSON_CHARS) throw new PlanTooLargeError(plan.planId, total);
+
+      await clients.plans.upsertEntity(
+        {
+          partitionKey: profileId,
+          rowKey: encodeRowKey(plan.planId),
+          planId: plan.planId,
+          profileId: plan.profileId,
+          kind: plan.kind,
+          driveId: plan.driveId,
+          createdAt: plan.createdAt,
+          items,
+          excluded,
+          // Written only when present, so a forward plan's entity carries no
+          // reverses key at all and the read below can use its absence. An
+          // empty string would be indistinguishable from a reversal of a plan
+          // whose id is the empty string.
+          ...(plan.reverses === undefined ? {} : { reverses: plan.reverses }),
+        },
+        "Replace",
+      );
+    },
+
+    async getPlan(profileId, planId) {
+      try {
+        const entity = await clients.plans.getEntity(profileId, encodeRowKey(planId));
+        return {
+          planId: String(entity.planId ?? planId),
+          profileId: String(entity.profileId ?? profileId),
+          kind: "rename",
+          driveId: String(entity.driveId ?? ""),
+          createdAt: String(entity.createdAt ?? ""),
+          items: JSON.parse(String(entity.items ?? "[]")) as RenamePlanItem[],
+          excluded: JSON.parse(String(entity.excluded ?? "[]")) as ExcludedPlanItem[],
+          ...(typeof entity.reverses === "string" ? { reverses: entity.reverses } : {}),
+        };
+      } catch (error) {
+        if (statusCodeOf(error) === 404) return undefined;
+        throw error;
+      }
+    },
   };
 }
 
@@ -222,7 +277,7 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
  * experience.
  */
 export async function ensureTables(clients: TableStateStoreClients): Promise<void> {
-  for (const client of [clients.deltaLinks, clients.inventory]) {
+  for (const client of [clients.deltaLinks, clients.inventory, clients.plans]) {
     try {
       await client.createTable();
     } catch (error) {
@@ -244,6 +299,7 @@ export function tableStateStoreFromConnectionString(
   const clients: TableStateStoreClients = {
     deltaLinks: TableClient.fromConnectionString(connectionString, "DeltaLinks") as unknown as TableClientLike,
     inventory: TableClient.fromConnectionString(connectionString, "Inventory") as unknown as TableClientLike,
+    plans: TableClient.fromConnectionString(connectionString, "Plans") as unknown as TableClientLike,
   };
   return { store: createTableStateStore(clients), clients };
 }

@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { UnsafeKeyError } from "../../src/store/keys.js";
-import type { InventoryRecord, StateStore } from "../../src/store/types.js";
+import type { InventoryRecord, StateStore, StoredPlan } from "../../src/store/types.js";
 
 export function record(overrides: Partial<InventoryRecord> = {}): InventoryRecord {
   return {
@@ -206,5 +206,120 @@ export function stateStoreConformance(create: () => StateStore): void {
     // result, since an empty result is indistinguishable from "never scanned".
     const store = create();
     await expect(store.getScannedDrives("bad/id")).rejects.toThrow(UnsafeKeyError);
+  });
+
+  it("returns no plan before one is stored", async () => {
+    await expect(create().getPlan("example", "rnm-2026-09-18-a1b2")).resolves.toBeUndefined();
+  });
+
+  it("round-trips a plan with all of its items and exclusions", async () => {
+    const store = create();
+    const plan: StoredPlan = {
+      planId: "rnm-2026-09-18-a1b2",
+      profileId: "example",
+      kind: "rename",
+      driveId: "d1",
+      createdAt: "2026-09-18T12:00:00Z",
+      items: [
+        {
+          path: "2026/CLIENTA/01-January/wrong.xlsx",
+          currentName: "wrong.xlsx",
+          targetName: "2026-01_CLIENTA_MonthlyTraining.xlsx",
+          targetPath: "2026/CLIENTA/01-January/2026-01_CLIENTA_MonthlyTraining.xlsx",
+          etag: '"{GUID},1"',
+          client: "CLIENTA",
+        },
+      ],
+      excluded: [
+        {
+          path: "2026/CLIENTB/01-January/other.xlsx",
+          currentName: "other.xlsx",
+          targetName: "2026-01_CLIENTB_MonthlyTraining.xlsx",
+          client: "CLIENTB",
+          reason: "target_path_already_occupied",
+        },
+      ],
+    };
+
+    await store.savePlan("example", plan);
+
+    await expect(store.getPlan("example", plan.planId)).resolves.toEqual(plan);
+  });
+
+  it("keeps one profile's plans out of another profile's reach", async () => {
+    const store = create();
+    const plan: StoredPlan = {
+      planId: "rnm-2026-09-18-a1b2",
+      profileId: "example",
+      kind: "rename",
+      driveId: "d1",
+      createdAt: "2026-09-18T12:00:00Z",
+      items: [],
+      excluded: [],
+    };
+
+    await store.savePlan("example", plan);
+
+    await expect(store.getPlan("other", plan.planId)).resolves.toBeUndefined();
+  });
+
+  it("replaces a plan saved under the same id, which is how a reversal entry's etag is corrected", async () => {
+    const store = create();
+    const item = {
+      path: "a.xlsx",
+      currentName: "a.xlsx",
+      targetName: "b.xlsx",
+      targetPath: "b.xlsx",
+      etag: "stale",
+      client: "CLIENTA",
+    };
+    const plan: StoredPlan = {
+      planId: "rev-2026-09-18-c3d4",
+      profileId: "example",
+      kind: "rename",
+      driveId: "d1",
+      createdAt: "2026-09-18T12:00:00Z",
+      items: [item],
+      excluded: [],
+      reverses: "rnm-2026-09-18-a1b2",
+    };
+
+    await store.savePlan("example", plan);
+    await store.savePlan("example", { ...plan, items: [{ ...item, etag: "fresh" }] });
+
+    const stored = await store.getPlan("example", plan.planId);
+    expect(stored?.items[0]?.etag).toBe("fresh");
+    expect(stored?.reverses).toBe("rnm-2026-09-18-a1b2");
+  });
+
+  it("does not let a caller mutate a stored plan through the object it saved", async () => {
+    // The Table implementation cannot be mutated this way, and a StateStore
+    // caller must not be able to tell which implementation answered.
+    const store = create();
+    const plan: StoredPlan = {
+      planId: "rnm-2026-09-18-a1b2",
+      profileId: "example",
+      kind: "rename",
+      driveId: "d1",
+      createdAt: "2026-09-18T12:00:00Z",
+      items: [
+        {
+          path: "a.xlsx",
+          currentName: "a.xlsx",
+          targetName: "b.xlsx",
+          targetPath: "b.xlsx",
+          etag: "e1",
+          client: "CLIENTA",
+        },
+      ],
+      excluded: [],
+    };
+
+    await store.savePlan("example", plan);
+    const firstItem = plan.items[0];
+    if (firstItem !== undefined) firstItem.etag = "tampered";
+
+    const stored = await store.getPlan("example", plan.planId);
+    expect(stored?.items[0]?.etag).toBe("e1");
   });
 }
