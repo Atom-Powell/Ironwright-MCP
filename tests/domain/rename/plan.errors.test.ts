@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MisnamedArtifactShapeError, pairMisnamedArtifacts } from "../../../src/domain/rename/plan.js";
 import type { ArtifactFinding } from "../../../src/domain/reconcile/index.js";
-import { misnamed, report } from "./plan.test.js";
+import { misnamed, report } from "./fixtures.js";
 
 describe("collisions", () => {
   it("excludes both files when two in one folder would take the same canonical name", () => {

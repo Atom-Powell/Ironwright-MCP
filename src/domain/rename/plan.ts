@@ -37,6 +37,12 @@ export interface RenamePairing {
  * Thrown rather than skipped. A skip would hide a change in the engine's own
  * contract behind a plan that merely looked short, and `misnamed` versus
  * `misnamed_and_misplaced` is exactly the distinction this function depends on.
+ *
+ * The throw aborts `pairMisnamedArtifacts` for the whole report, across every
+ * client, not only for the one malformed finding. That is deliberate: a report
+ * whose findings contradict the engine's own contract is not a report this
+ * function can safely build a partial rename plan from, and a plan feeds
+ * straight into renaming real files.
  */
 export class MisnamedArtifactShapeError extends Error {
   constructor(detail: string) {
