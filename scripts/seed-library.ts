@@ -376,7 +376,14 @@ export function buildSeedTree(profile: SeedProfileInput, options: SeedOptions): 
  */
 export const ABSENT_CLIENT = "Client13";
 export const MISSING_FILE_CLIENT = "Client04";
-export const MISNAMED_FILE_CLIENT = "Client09";
+
+/**
+ * More than one, deliberately. A single misnamed file cannot demonstrate the
+ * property the write path most needs shown: one item refused on its own ETag
+ * precondition while every other item in the same batch still applies. With one
+ * file there is no "every other item".
+ */
+export const MISNAMED_FILE_CLIENTS: readonly string[] = ["Client08", "Client09"] as const;
 
 // Both planted months are January, not a later, more illustrative month.
 // throughMonth caps the tree at the current month when the seeded year is
@@ -391,33 +398,34 @@ export const MISSING_FILE_MONTH = 1;
 export const MISNAMED_FILE_MONTH = 1;
 
 /**
- * The misnamed file uses the example profile's vendor-token recognizer, not
+ * The misnamed files use the example profile's vendor-token recognizer, not
  * its legacy-spaced one. legacy-spaced anchors its client capture on
- * [A-Z0-9]+, which cannot match "Client09", so a file in that shape would
- * land as an unrecognized orphan and exercise the recognizer path not at all.
+ * [A-Z0-9]+, which cannot match "Client08" or "Client09", so a file in that
+ * shape would land as an unrecognized orphan and exercise the recognizer path
+ * not at all.
  */
 const MISNAMED_DELIVERABLE_TOKEN = "VendorTraining";
 
 function clientIndexFromPlantedName(name: string): number {
   const match = /^Client(\d+)$/.exec(name);
   if (match === null) {
-    // Unreachable today: both planted client constants above are written by
-    // hand in the same Client<NN> shape clientName produces below. Checked
-    // anyway so a future edit to either constant fails here, with a clear
-    // reason, rather than silently computing a floor of NaN.
+    // Unreachable today: every planted client name above is written by hand
+    // in the same Client<NN> shape clientName produces below. Checked anyway
+    // so a future edit to any of them fails here, with a clear reason, rather
+    // than silently computing a floor of NaN.
     throw new Error(`Internal error: "${name}" is not in the Client<NN> shape clientName produces.`);
   }
   return Number.parseInt(match[1] as string, 10);
 }
 
 // The lowest clientCount that can carry the fixed planted set. Below it,
-// buildSeedTree never creates a folder for one of the two clients the plant
+// buildSeedTree never creates a folder for one of the clients the plant
 // names, so planting would fail for a reason that has nothing to do with the
 // naming template. Derived from the constants above, not hardcoded, so a
-// future edit to either one cannot leave this floor behind.
+// future edit to any of them cannot leave this floor behind.
 const MINIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT = Math.max(
   clientIndexFromPlantedName(MISSING_FILE_CLIENT),
-  clientIndexFromPlantedName(MISNAMED_FILE_CLIENT),
+  ...MISNAMED_FILE_CLIENTS.map(clientIndexFromPlantedName),
 );
 
 // The highest clientCount that leaves ABSENT_CLIENT out of the tree. At or
@@ -446,7 +454,7 @@ export function buildSeedPlan(profile: SeedProfileInput, options: SeedOptions): 
     // would make the expectation a later task prints against this tree false.
     throw new Error(
       `clientCount must be at least ${MINIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT} to plant this seed's fixed ` +
-        `discrepancy set, which names ${MISSING_FILE_CLIENT} and ${MISNAMED_FILE_CLIENT}. Got ` +
+        `discrepancy set, which names ${MISSING_FILE_CLIENT} and ${MISNAMED_FILE_CLIENTS.join(", ")}. Got ` +
         `${options.clientCount}.`,
     );
   }
@@ -482,30 +490,38 @@ export function buildSeedPlan(profile: SeedProfileInput, options: SeedOptions): 
   }
 
   const omitted = plantedPath(profile, year, MISSING_FILE_CLIENT, MISSING_FILE_MONTH, monthlyToken);
-  const replacedFrom = plantedPath(profile, year, MISNAMED_FILE_CLIENT, MISNAMED_FILE_MONTH, monthlyToken);
-  const replacedTo = plantedPath(profile, year, MISNAMED_FILE_CLIENT, MISNAMED_FILE_MONTH, MISNAMED_DELIVERABLE_TOKEN);
 
-  // Checked individually, by path presence, and before the filter/map below
-  // runs: a `.map` silently no-ops when its own target is absent, so a single
-  // check on the resulting array's length cannot see a failed rename the way
-  // it can see a failed removal (removing nothing changes the length; a
-  // no-op rename does not). Each message leads with the fact this function
-  // actually observed: the path is not in the tree buildSeedTree produced.
-  // Only then does it name a likely cause. That inference is sound here,
-  // where it would not have been for a bare length check: clientCount is
-  // guarded on both sides above (MINIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT and
+  // One entry per planted client rather than a single pair, so a re-run over
+  // MISNAMED_FILE_CLIENTS renames every one of them, not just the first. Built
+  // as a map from source path to target path, checked individually and by
+  // path presence, for the same reason the single-pair version was: a map
+  // lookup that finds nothing is a silent no-op, and a length check on the
+  // result cannot see a rename that did not happen the way it can see a
+  // failed removal (removing nothing changes the length; a no-op rename does
+  // not). Each message leads with the fact this function actually observed,
+  // the path is not in the tree buildSeedTree produced, and only then names a
+  // likely cause. That inference is sound here, where it would not have been
+  // for a bare length check: clientCount is guarded on both sides above
+  // (MINIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT and
   // MAXIMUM_CLIENT_COUNT_FOR_PLANTED_DRIFT), and both planted months are
   // fixed at 1, always within throughMonth's 1..12 range, so neither plant's
   // client nor its month can be why its path is missing. What is left is a
   // disagreement between the profile's naming template and this seed's
   // planted set.
-  if (!base.filePaths.includes(replacedFrom)) {
-    throw new Error(
-      `${replacedFrom} is not in the tree buildSeedTree produced, so the misnamed-file plant for ` +
-        `${MISNAMED_FILE_CLIENT} cannot rename it to ${replacedTo}. clientCount and month are both guaranteed in ` +
-        "range here, so the profile's naming template and this seed's planted set must have diverged.",
-    );
+  const renames = new Map<string, string>();
+  for (const client of MISNAMED_FILE_CLIENTS) {
+    const from = plantedPath(profile, year, client, MISNAMED_FILE_MONTH, monthlyToken);
+    const to = plantedPath(profile, year, client, MISNAMED_FILE_MONTH, MISNAMED_DELIVERABLE_TOKEN);
+    if (!base.filePaths.includes(from)) {
+      throw new Error(
+        `${from} is not in the tree buildSeedTree produced, so the misnamed-file plant for ${client} cannot ` +
+          `rename it to ${to}. clientCount and month are both guaranteed in range here, so the profile's naming ` +
+          "template and this seed's planted set must have diverged.",
+      );
+    }
+    renames.set(from, to);
   }
+
   if (!base.filePaths.includes(omitted)) {
     throw new Error(
       `${omitted} is not in the tree buildSeedTree produced, so the missing-file plant for ${MISSING_FILE_CLIENT} ` +
@@ -516,7 +532,7 @@ export function buildSeedPlan(profile: SeedProfileInput, options: SeedOptions): 
 
   const filePaths = base.filePaths
     .filter((path) => path !== omitted)
-    .map((path) => (path === replacedFrom ? replacedTo : path));
+    .map((path) => renames.get(path) ?? path);
 
   return {
     clients,

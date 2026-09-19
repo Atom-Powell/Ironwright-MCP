@@ -147,4 +147,41 @@ describe("createGraphClient", () => {
 
     expect(seen[0]?.headers.get("content-type")).toBeNull();
   });
+
+  it("sends a PATCH with a JSON body and the caller's if-match header", async () => {
+    const seen: Request[] = [];
+    const client = createGraphClient({
+      tokenProvider: TOKEN,
+      fetchImpl: (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+        seen.push(new Request(input as string, init));
+        return new Response(JSON.stringify({ id: "i1", eTag: '"{GUID},2"' }), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    const result = await client.patch<{ eTag: string }>(
+      "/drives/d1/root:/a.xlsx:",
+      { name: "b.xlsx" },
+      { "if-match": '"{GUID},1"' },
+    );
+
+    expect(result.eTag).toBe('"{GUID},2"');
+    expect(seen[0]?.method).toBe("PATCH");
+    await expect(seen[0]?.text()).resolves.toBe(JSON.stringify({ name: "b.xlsx" }));
+    expect(seen[0]?.headers.get("if-match")).toBe('"{GUID},1"');
+    expect(seen[0]?.headers.get("content-type")).toBe("application/json");
+  });
+
+  it("does not replay a PATCH that rejected at the transport, since the mutation may already have applied", async () => {
+    let attempts = 0;
+    const client = createGraphClient({
+      tokenProvider: TOKEN,
+      fetchImpl: (async () => {
+        attempts += 1;
+        throw new TypeError("network down");
+      }) as unknown as typeof fetch,
+    });
+
+    await expect(client.patch("/drives/d1/root:/a.xlsx:", { name: "b.xlsx" })).rejects.toThrow("network down");
+    expect(attempts).toBe(1);
+  });
 });

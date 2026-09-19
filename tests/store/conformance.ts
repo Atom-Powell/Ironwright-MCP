@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import { UnsafeKeyError } from "../../src/store/keys.js";
-import type { InventoryRecord, StateStore } from "../../src/store/types.js";
+import { MAX_PLAN_JSON_CHARS, PlanTooLargeError } from "../../src/store/types.js";
+import type { InventoryRecord, RenamePlanItem, StateStore, StoredPlan } from "../../src/store/types.js";
 
 export function record(overrides: Partial<InventoryRecord> = {}): InventoryRecord {
   return {
@@ -206,5 +207,197 @@ export function stateStoreConformance(create: () => StateStore): void {
     // result, since an empty result is indistinguishable from "never scanned".
     const store = create();
     await expect(store.getScannedDrives("bad/id")).rejects.toThrow(UnsafeKeyError);
+  });
+
+  it("returns no plan before one is stored", async () => {
+    await expect(create().getPlan("example", "rnm-2026-09-18-a1b2")).resolves.toBeUndefined();
+  });
+
+  it("round-trips a plan with all of its items and exclusions", async () => {
+    const store = create();
+    const plan: StoredPlan = {
+      planId: "rnm-2026-09-18-a1b2",
+      profileId: "example",
+      kind: "rename",
+      driveId: "d1",
+      createdAt: "2026-09-18T12:00:00Z",
+      items: [
+        {
+          path: "2026/CLIENTA/01-January/wrong.xlsx",
+          currentName: "wrong.xlsx",
+          targetName: "2026-01_CLIENTA_MonthlyTraining.xlsx",
+          targetPath: "2026/CLIENTA/01-January/2026-01_CLIENTA_MonthlyTraining.xlsx",
+          etag: '"{GUID},1"',
+          client: "CLIENTA",
+        },
+      ],
+      excluded: [
+        {
+          path: "2026/CLIENTB/01-January/other.xlsx",
+          currentName: "other.xlsx",
+          targetName: "2026-01_CLIENTB_MonthlyTraining.xlsx",
+          client: "CLIENTB",
+          reason: "target_path_already_occupied",
+        },
+      ],
+    };
+
+    await store.savePlan("example", plan);
+
+    await expect(store.getPlan("example", plan.planId)).resolves.toEqual(plan);
+  });
+
+  it("keeps one profile's plans out of another profile's reach", async () => {
+    const store = create();
+    const plan: StoredPlan = {
+      planId: "rnm-2026-09-18-a1b2",
+      profileId: "example",
+      kind: "rename",
+      driveId: "d1",
+      createdAt: "2026-09-18T12:00:00Z",
+      items: [],
+      excluded: [],
+    };
+
+    await store.savePlan("example", plan);
+
+    await expect(store.getPlan("other", plan.planId)).resolves.toBeUndefined();
+  });
+
+  it("replaces a plan saved under the same id, which is how a reversal entry's etag is corrected", async () => {
+    const store = create();
+    const item = {
+      path: "a.xlsx",
+      currentName: "a.xlsx",
+      targetName: "b.xlsx",
+      targetPath: "b.xlsx",
+      etag: "stale",
+      client: "CLIENTA",
+    };
+    const plan: StoredPlan = {
+      planId: "rev-2026-09-18-c3d4",
+      profileId: "example",
+      kind: "rename",
+      driveId: "d1",
+      createdAt: "2026-09-18T12:00:00Z",
+      items: [item],
+      excluded: [],
+      reverses: "rnm-2026-09-18-a1b2",
+    };
+
+    await store.savePlan("example", plan);
+    await store.savePlan("example", { ...plan, items: [{ ...item, etag: "fresh" }] });
+
+    const stored = await store.getPlan("example", plan.planId);
+    expect(stored?.items[0]?.etag).toBe("fresh");
+    expect(stored?.reverses).toBe("rnm-2026-09-18-a1b2");
+  });
+
+  it("does not let a caller mutate a stored plan through the object it saved", async () => {
+    // The Table implementation cannot be mutated this way, and a StateStore
+    // caller must not be able to tell which implementation answered.
+    const store = create();
+    const plan: StoredPlan = {
+      planId: "rnm-2026-09-18-a1b2",
+      profileId: "example",
+      kind: "rename",
+      driveId: "d1",
+      createdAt: "2026-09-18T12:00:00Z",
+      items: [
+        {
+          path: "a.xlsx",
+          currentName: "a.xlsx",
+          targetName: "b.xlsx",
+          targetPath: "b.xlsx",
+          etag: "e1",
+          client: "CLIENTA",
+        },
+      ],
+      excluded: [],
+    };
+
+    await store.savePlan("example", plan);
+    const firstItem = plan.items[0];
+    if (firstItem !== undefined) firstItem.etag = "tampered";
+
+    const stored = await store.getPlan("example", plan.planId);
+    expect(stored?.items[0]?.etag).toBe("e1");
+  });
+
+  it("refuses to save a plan whose items serialize past MAX_PLAN_JSON_CHARS, the same for every implementation", async () => {
+    // Both StateStore implementations must enforce the same character cap:
+    // a caller cannot tell which one is behind it, and a plan the memory
+    // store would silently accept while the Table store refused it is
+    // exactly the drift that promise exists to rule out. This is also the
+    // band a generator's own coarser item-count pre-check cannot see, since a
+    // count well under that pre-check's limit can still serialize past this
+    // cap.
+    const store = create();
+    const items: RenamePlanItem[] = Array.from({ length: 150 }, (_, index) => {
+      const client = `CLIENT${String(index).padStart(4, "0")}`;
+      return {
+        path: `2026/${client}/01-January/wrong-name-for-this-client.xlsx`,
+        currentName: "wrong-name-for-this-client.xlsx",
+        targetName: `2026-01_${client}_MonthlyTraining.xlsx`,
+        targetPath: `2026/${client}/01-January/2026-01_${client}_MonthlyTraining.xlsx`,
+        etag: '"{11111111-1111-1111-1111-111111111111},1"',
+        client,
+      };
+    });
+    const plan: StoredPlan = {
+      planId: "rnm-2026-09-18-oversize",
+      profileId: "example",
+      kind: "rename",
+      driveId: "d1",
+      createdAt: "2026-09-18T12:00:00Z",
+      items,
+      excluded: [],
+    };
+
+    // The fixture must actually cross the cap for this test to mean anything.
+    // Asserted rather than assumed, so a future change to the item shape that
+    // shrinks it below the cap fails loudly here instead of quietly no longer
+    // testing the refusal at all.
+    expect(JSON.stringify(items).length).toBeGreaterThan(MAX_PLAN_JSON_CHARS);
+
+    await expect(store.savePlan("example", plan)).rejects.toThrow(PlanTooLargeError);
+    await expect(store.getPlan("example", plan.planId)).resolves.toBeUndefined();
+  });
+
+  it("does not let a caller mutate a stored plan through the object the store handed back", async () => {
+    // The mirror of the inbound case above. The Table implementation passes
+    // this for a different reason than the memory implementation: it
+    // reparses the stored JSON into a fresh object on every read, where the
+    // memory implementation needs its own outbound clone to get the same
+    // answer. A StateStore caller must not be able to tell which one is
+    // behind it, so both directions belong in the shared suite, not only the
+    // inbound one.
+    const store = create();
+    const plan: StoredPlan = {
+      planId: "rnm-2026-09-18-a1b2",
+      profileId: "example",
+      kind: "rename",
+      driveId: "d1",
+      createdAt: "2026-09-18T12:00:00Z",
+      items: [
+        {
+          path: "a.xlsx",
+          currentName: "a.xlsx",
+          targetName: "b.xlsx",
+          targetPath: "b.xlsx",
+          etag: "e1",
+          client: "CLIENTA",
+        },
+      ],
+      excluded: [],
+    };
+
+    await store.savePlan("example", plan);
+    const firstRead = await store.getPlan("example", plan.planId);
+    const firstReadItem = firstRead?.items[0];
+    if (firstReadItem !== undefined) firstReadItem.etag = "tampered";
+
+    const secondRead = await store.getPlan("example", plan.planId);
+    expect(secondRead?.items[0]?.etag).toBe("e1");
   });
 }

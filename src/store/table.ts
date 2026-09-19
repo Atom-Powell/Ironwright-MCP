@@ -7,7 +7,15 @@ import {
   MAX_TRANSACTION_SIZE,
   planInventoryChanges,
 } from "./keys.js";
-import type { ApplyResult, InventoryRecord, ScannedDrive, StateStore } from "./types.js";
+import { MalformedPlanEntityError, MAX_PLAN_JSON_CHARS, PlanTooLargeError } from "./types.js";
+import type {
+  ApplyResult,
+  ExcludedPlanItem,
+  InventoryRecord,
+  RenamePlanItem,
+  ScannedDrive,
+  StateStore,
+} from "./types.js";
 
 export interface TableEntityLike {
   partitionKey: string;
@@ -34,6 +42,7 @@ export interface TableClientLike {
 export interface TableStateStoreClients {
   deltaLinks: TableClientLike;
   inventory: TableClientLike;
+  plans: TableClientLike;
 }
 
 function statusCodeOf(error: unknown): number | undefined {
@@ -49,6 +58,45 @@ function statusCodeOf(error: unknown): number | undefined {
  */
 function partitionFilter(partitionKey: string): string {
   return `PartitionKey eq '${partitionKey.replace(/'/g, "''")}'`;
+}
+
+/**
+ * A required, non-empty string field on a stored plan entity. Used for every
+ * plan field except `items` and `excluded`, which are JSON rather than plain
+ * strings. Throws rather than substituting a default: see
+ * `MalformedPlanEntityError`'s own comment for why a plan cannot tolerate a
+ * missing field the way `getScannedDrives` tolerates one.
+ */
+function requiredPlanString(entity: TableEntityLike, field: string, planId: string): string {
+  const value = entity[field];
+  if (typeof value !== "string" || value.length === 0) {
+    throw new MalformedPlanEntityError(planId, field, "is missing");
+  }
+  return value;
+}
+
+/**
+ * A required JSON array field on a stored plan entity, `items` or `excluded`.
+ * Azure Table has no array property type, so these are stored as JSON
+ * strings; this is the read-side half of that encoding, and it distinguishes
+ * the three ways the encoding can be broken so the message names which one
+ * happened.
+ */
+function requiredPlanJsonArray<T>(entity: TableEntityLike, field: string, planId: string): T[] {
+  const value = entity[field];
+  if (typeof value !== "string") {
+    throw new MalformedPlanEntityError(planId, field, "is missing");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new MalformedPlanEntityError(planId, field, "is not valid JSON");
+  }
+  if (!Array.isArray(parsed)) {
+    throw new MalformedPlanEntityError(planId, field, "does not parse to an array");
+  }
+  return parsed as T[];
 }
 
 function toRecord(entity: TableEntityLike): InventoryRecord {
@@ -212,6 +260,65 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
       }
       return drives;
     },
+
+    async savePlan(profileId, plan) {
+      const items = JSON.stringify(plan.items);
+      const excluded = JSON.stringify(plan.excluded);
+      const total = items.length + excluded.length;
+      if (total > MAX_PLAN_JSON_CHARS) throw new PlanTooLargeError(plan.planId, total);
+
+      await clients.plans.upsertEntity(
+        {
+          partitionKey: profileId,
+          rowKey: encodeRowKey(plan.planId),
+          planId: plan.planId,
+          profileId: plan.profileId,
+          kind: plan.kind,
+          driveId: plan.driveId,
+          createdAt: plan.createdAt,
+          items,
+          excluded,
+          // Written only when present, so a forward plan's entity carries no
+          // reverses key at all and the read below can use its absence. An
+          // empty string would be indistinguishable from a reversal of a plan
+          // whose id is the empty string.
+          ...(plan.reverses === undefined ? {} : { reverses: plan.reverses }),
+        },
+        "Replace",
+      );
+    },
+
+    async getPlan(profileId, planId) {
+      try {
+        const entity = await clients.plans.getEntity(profileId, encodeRowKey(planId));
+
+        // Deliberately unlike getScannedDrives, which skips a row an older
+        // build wrote without every current field: a listing that tolerates a
+        // partial row loses one answer, but a plan that tolerates one loses
+        // files, so every field here is a required read rather than a
+        // fallback, and a row that exists but cannot be reconstructed
+        // faithfully throws instead of coming back as a valid-looking plan
+        // with nothing to do.
+        const kind = requiredPlanString(entity, "kind", planId);
+        if (kind !== "rename") {
+          throw new MalformedPlanEntityError(planId, "kind", `is "${kind}", not "rename"`);
+        }
+
+        return {
+          planId: requiredPlanString(entity, "planId", planId),
+          profileId: requiredPlanString(entity, "profileId", planId),
+          kind,
+          driveId: requiredPlanString(entity, "driveId", planId),
+          createdAt: requiredPlanString(entity, "createdAt", planId),
+          items: requiredPlanJsonArray<RenamePlanItem>(entity, "items", planId),
+          excluded: requiredPlanJsonArray<ExcludedPlanItem>(entity, "excluded", planId),
+          ...(typeof entity.reverses === "string" ? { reverses: entity.reverses } : {}),
+        };
+      } catch (error) {
+        if (statusCodeOf(error) === 404) return undefined;
+        throw error;
+      }
+    },
   };
 }
 
@@ -222,7 +329,7 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
  * experience.
  */
 export async function ensureTables(clients: TableStateStoreClients): Promise<void> {
-  for (const client of [clients.deltaLinks, clients.inventory]) {
+  for (const client of [clients.deltaLinks, clients.inventory, clients.plans]) {
     try {
       await client.createTable();
     } catch (error) {
@@ -244,6 +351,7 @@ export function tableStateStoreFromConnectionString(
   const clients: TableStateStoreClients = {
     deltaLinks: TableClient.fromConnectionString(connectionString, "DeltaLinks") as unknown as TableClientLike,
     inventory: TableClient.fromConnectionString(connectionString, "Inventory") as unknown as TableClientLike,
+    plans: TableClient.fromConnectionString(connectionString, "Plans") as unknown as TableClientLike,
   };
   return { store: createTableStateStore(clients), clients };
 }

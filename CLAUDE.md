@@ -317,11 +317,35 @@ The spec carries the full phase descriptions. Status as of 2026-09-18:
      `docs/OPEN-ITEMS.md`; CI/CD; and telemetry, which carries two jobs, the Graph call volume
      evidence this project was started to produce and detection for the pending stream-mapping
      leak phase 5a deliberately left unfixed, since the tractable half of that item is detection
-     rather than repair. Then
-   **write tools**, then **Copilot Studio integration and governance**, then the **evaluation
-   suite**, whose questions are already written in `docs/EVALUATION-QUESTIONS.md`. They exist
-   early on purpose, so phase 3 has a concrete target rather than inventing its own test
-   afterward.
+     rather than repair.
+6. **Write tools**, sliced vertically rather than horizontally, per
+   `docs/superpowers/specs/2026-09-18-rename-write-path-design.md`: a write layer built ahead of any
+   caller is precisely the shape this project already rejected once.
+   - **6a: the rename write path. Built and covered by fakes only; the live sitting has not run.**
+     `generate_rename_plan` and `execute_rename_plan`, the first write this server has ever made,
+     plus only the substrate those two tools need: a `GraphClient` PATCH verb carrying `If-Match`
+     and distinguishing success, a 412 precondition failure, and a 404 not-found; `StateStore` plan
+     persistence, one entity shape shared by a forward plan and the reversal log that reverses it,
+     since a reversal log is a plan by the Decision Record's own words; and a pure domain module,
+     `src/domain/rename/plan.ts`, that pairs each `misnamed` artifact with its canonical name and
+     excludes what it cannot resolve without `conflictBehavior`. The plan stores concrete
+     library-relative paths and a plan-time ETag fetch, not a rule, so a profile edited between
+     generating and executing cannot silently retarget an already-reviewed plan. Execution is
+     per-item: one file refused on a stale precondition does not block any other file in the same
+     plan, and the reversal log is written before any write and corrected as each rename lands, so
+     a crash mid-apply fails in the safe direction rather than silently. Deliberately out of this
+     slice, and left for 6b and 6c: `generate_move_plan` and `execute_move_plan`, including async
+     cross-library polling; `replicate_template`; the `$batch` builder; and `conflictBehavior`.
+     Every one of them arrives with the caller that exercises it, the same rule that moved `$batch`
+     out of phase 2. **No rename has been applied to a real SharePoint library, no reversal log has
+     been replayed, and no real 412 has been observed.** `docs/OPEN-ITEMS.md` carries the dated
+     record of exactly what is and is not covered; the merge gate is the full loop against the
+     sandbox tenant described in the design spec's own verification section, and it has not run.
+   - **6b and 6c.** Held rather than started: the move tools, `replicate_template`, `$batch`, and
+     `conflictBehavior`, in the order 6a's own design spec lays out.
+   Then **Copilot Studio integration and governance**, then the **evaluation suite**, whose
+   questions are already written in `docs/EVALUATION-QUESTIONS.md`. They exist early on purpose, so
+   phase 3 has a concrete target rather than inventing its own test afterward.
 
 Of the three decisions the parent spec required before phase 2, two are settled and recorded in
 `docs/OPEN-ITEMS.md`: the per-site grant does not accept a delegated token, and the MCP endpoint
@@ -338,6 +362,44 @@ every fake in the suite answered as though the call had been accepted. A fake pr
 what the author believed the API would do. When a phase depends on an API surface this project has
 never actually called, the cheapest possible live probe against that surface comes first, before
 the design that assumes it.
+
+Phase 6a produced a related failure on 2026-09-18, against this project's own reconciliation engine
+rather than an external API, and it belongs here because the rule it teaches generalizes, not
+because it was caught the same way. The phase 6a spec's "What a rename plan is" section made two
+wrong assumptions about what `reconcile()` returns for two files competing for one canonical name:
+that they would appear as two separate `ArtifactFinding` entries, and that the collision would be
+found by grouping those entries by target path. `matchArtifacts` resolves one winner per slot and
+demotes every other candidate to a `DuplicateFinding`, never a second artifact, so neither
+assumption survives contact with the engine.
+
+That defect was not found by a dedicated test written to catch it. Task 4's twelve tool-level tests
+for `generate_rename_plan` already called the real `reconcile()` through the tool's own handler.
+Nine of them failed first, against a separate wrong assumption, that `expectedPath` is a full file
+path rather than the rendered taxonomy folder it actually is. Once that was fixed, the twelfth test
+still failed, and tracing `match.ts` from that one remaining failure is what found the
+two-artifacts-collide assumption above. `tests/domain/rename/plan.reconcile.test.ts` was written
+afterward, so a future mismatch of this kind fails directly in the domain layer instead of only
+surfacing as a tool-test failure that still has to be traced back to its cause. It closes the gap
+this incident found; it did not itself catch this one.
+
+A second, distinct family lived in four separate fixtures across three review rounds, and it is not
+the same mistake as the grouping error above, though it is adjacent to it: each fixture hand-built a
+report in which an artifact, a duplicate, or an orphan already occupied a rename candidate's target
+path, independently of how `matchArtifacts` actually resolves competing candidates for one slot, a
+shape that turns out to be unreachable once traced against the engine's own resolution. Three were
+deleted in `55dc5ee`, "fix(tools): correct rename exclusion reasons and cost reporting found in
+review", by a reviewer reading them and reproducing against the engine. The fourth, the
+orphan-occupancy fixture, was found by the implementer's own reasoning during a later fix round and
+deleted in `b7d48ef`, whose own message says as much: "each survived review until traced against the
+engine." Every one of these four fixtures passed its own review before being caught, at the cost of
+human tracing across three separate rounds, and none was caught by any reconcile()-backed test; each
+was simply shown unreachable and deleted, with no replacement.
+
+The rule both incidents point to: when a module consumes another module's output, at least one test
+must obtain that output from the real producer rather than construct it. A fixture proves the code
+does what its author believed the producer returns, which is exactly the shape of the Excel lesson
+above, just aimed inward instead of outward. `plan.reconcile.test.ts` is what stops the next one
+from surviving at all; it is not what caught either family described here.
 
 ## Reference
 

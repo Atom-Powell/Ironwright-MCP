@@ -20,6 +20,7 @@ function scriptedClient(responses: Record<string, unknown>): GraphClient {
       return responses[path] as T;
     },
     post: async <T,>(): Promise<T> => { throw new Error("this fake does not implement post"); },
+    patch: () => Promise.reject(new Error("this fake Graph client does not implement patch")),
     getBytes: async (): Promise<Uint8Array> => { throw new Error("this fake does not implement getBytes"); },
   };
 }
@@ -245,6 +246,10 @@ describe("runScan", () => {
             },
           ],
         } as T;
+      },
+      patch: () => {
+        requests += 1;
+        return Promise.reject(new Error("this fake Graph client does not implement patch"));
       },
       getBytes: async (): Promise<Uint8Array> => {
         throw new Error("this fake does not implement getBytes");

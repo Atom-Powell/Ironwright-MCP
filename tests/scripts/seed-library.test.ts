@@ -12,7 +12,7 @@ import {
   formatExecutionReport,
   formatWorkbookReport,
   loadSeedProfile,
-  MISNAMED_FILE_CLIENT,
+  MISNAMED_FILE_CLIENTS,
   MISNAMED_FILE_MONTH,
   MISSING_FILE_CLIENT,
   MISSING_FILE_MONTH,
@@ -289,12 +289,17 @@ describe("buildSeedPlan", () => {
     expect(MISSING_FILE_MONTH).toBe(1);
   });
 
-  it("writes the planted misnamed file in the vendor-token shape", () => {
+  it("plants one misnamed file per client in the planted set, each replacing that client's compliant file", () => {
     const plan = buildSeedPlan(exampleSeedProfile(), options);
-    const compliant = `2026/${MISNAMED_FILE_CLIENT}/01-January/2026-01_${MISNAMED_FILE_CLIENT}_MonthlyTraining.xlsx`;
-    const misnamed = `2026/${MISNAMED_FILE_CLIENT}/01-January/2026-01_${MISNAMED_FILE_CLIENT}_VendorTraining.xlsx`;
-    expect(plan.tree.filePaths).not.toContain(compliant);
-    expect(plan.tree.filePaths).toContain(misnamed);
+
+    for (const client of MISNAMED_FILE_CLIENTS) {
+      const compliant = `2026/${client}/01-January/2026-01_${client}_MonthlyTraining.xlsx`;
+      const misnamed = `2026/${client}/01-January/2026-01_${client}_VendorTraining.xlsx`;
+
+      expect(plan.tree.filePaths, `${client} still carries its compliant file`).not.toContain(compliant);
+      expect(plan.tree.filePaths, `${client} has no misnamed file`).toContain(misnamed);
+    }
+    expect(MISNAMED_FILE_CLIENTS.length).toBeGreaterThan(1);
     expect(MISNAMED_FILE_MONTH).toBe(1);
   });
 
@@ -303,10 +308,11 @@ describe("buildSeedPlan", () => {
   });
 
   it("refuses a clientCount below the highest planted client index", () => {
-    // MISNAMED_FILE_CLIENT is Client09, the higher of the two planted client
-    // indexes, so a clientCount of 8 never builds a folder for it: planting
-    // would fail for a reason that has nothing to do with the naming
-    // template, which is exactly the false blame this guard exists to avoid.
+    // MISNAMED_FILE_CLIENTS is ["Client08", "Client09"], and Client09 is the
+    // highest index among every planted client, so a clientCount of 8 never
+    // builds a folder for it: planting would fail for a reason that has
+    // nothing to do with the naming template, which is exactly the false
+    // blame this guard exists to avoid.
     expect(() => buildSeedPlan(exampleSeedProfile(), { ...options, clientCount: 8 })).toThrow(/clientCount/);
   });
 
@@ -332,11 +338,15 @@ describe("buildSeedPlan", () => {
   // pair while building the tree. With clientCount 9 (the plant's own floor)
   // and throughMonth 1, that pair count is 9 (9 clients times 1 month), and
   // month 1 is never a quarter-end month, so the quarterly branch never adds
-  // a read. buildSeedPlan then reads the template three more times, in a
-  // fixed order, one read per plantedPath call: omitted (the missing-file
-  // plant), then replacedFrom (the misnamed-file plant's rename source),
-  // then replacedTo (its rename target). So the omitted read is read 10, and
-  // the replacedFrom read is read 11.
+  // a read. buildSeedPlan then reads the template once more for the
+  // missing-file plant's omitted path, read 10, and then loops over
+  // MISNAMED_FILE_CLIENTS in order, reading each planted client's rename
+  // source and then its rename target before moving to the next client. So
+  // the omitted read is read 10, and the first client's (Client08's) rename-
+  // source read is read 11. A divergence on read 11 need only reach that one
+  // client's own check to prove the misnamed-file path fires independently
+  // of the missing-file one; which client the loop happens to be on is not
+  // what either test below demonstrates.
   const DIVERGENCE_OPTIONS = { clientCount: 9, year: 2026, includeQuarterly: true, throughMonth: 1 };
   const OMITTED_TEMPLATE_READ = 10;
   const REPLACED_FROM_TEMPLATE_READ = 11;
@@ -357,8 +367,8 @@ describe("buildSeedPlan", () => {
   }
 
   it("names the missing-file plant when only its path was computed from a different template", () => {
-    // Read 10 (omitted) answers with a different template; read 11
-    // (replacedFrom) still answers with the real one, so the misnamed check
+    // Read 10 (omitted) answers with a different template; every rename
+    // loop read still answers with the real one, so every misnamed check
     // passes on its own and the missing-file check is the one that fires.
     expect(() => buildSeedPlan(profileWithDivergedTemplateOnRead(OMITTED_TEMPLATE_READ), DIVERGENCE_OPTIONS)).toThrow(
       /missing-file plant/,
@@ -366,9 +376,10 @@ describe("buildSeedPlan", () => {
   });
 
   it("names the misnamed-file plant when only its rename-source path was computed from a different template", () => {
-    // Read 11 (replacedFrom) answers with a different template; read 10
-    // (omitted) still answers with the real one, so the misnamed check is
-    // the one that fires, independently of the missing-file check.
+    // Read 11, Client08's rename-source read, answers with a different
+    // template; read 10 (omitted) still answers with the real one, so
+    // Client08's own check is the one that fires, independently of the
+    // missing-file check.
     expect(() =>
       buildSeedPlan(profileWithDivergedTemplateOnRead(REPLACED_FROM_TEMPLATE_READ), DIVERGENCE_OPTIONS),
     ).toThrow(/misnamed-file plant/);

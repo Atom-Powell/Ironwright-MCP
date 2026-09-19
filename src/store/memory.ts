@@ -1,5 +1,6 @@
 import { inventoryPartitionKey, MAX_TRANSACTION_SIZE, planInventoryChanges } from "./keys.js";
-import type { ApplyResult, InventoryRecord, ScannedDrive, StateStore } from "./types.js";
+import { MAX_PLAN_JSON_CHARS, PlanTooLargeError } from "./types.js";
+import type { ApplyResult, InventoryRecord, ScannedDrive, StateStore, StoredPlan } from "./types.js";
 
 /**
  * For tests and for a local run with no storage account. It counts batches the
@@ -10,6 +11,7 @@ import type { ApplyResult, InventoryRecord, ScannedDrive, StateStore } from "./t
 export function createMemoryStateStore(): StateStore {
   const deltaLinks = new Map<string, { deltaLink: string; lastScanAt: string }>();
   const inventories = new Map<string, Map<string, InventoryRecord>>();
+  const plans = new Map<string, StoredPlan>();
 
   function inventoryFor(profileId: string, driveId: string): Map<string, InventoryRecord> {
     const key = inventoryPartitionKey(profileId, driveId);
@@ -80,6 +82,29 @@ export function createMemoryStateStore(): StateStore {
         drives.push({ driveId: key.slice(prefix.length), lastScanAt: value.lastScanAt });
       }
       return drives;
+    },
+
+    async savePlan(profileId, plan) {
+      // Enforced here too, and by the same measurement the Table store uses,
+      // rather than left to that implementation alone: a StateStore caller
+      // must not be able to tell which implementation answered, and a plan
+      // this store would accept but the Table store would refuse is exactly
+      // the drift that promise exists to rule out.
+      const items = JSON.stringify(plan.items);
+      const excluded = JSON.stringify(plan.excluded);
+      const total = items.length + excluded.length;
+      if (total > MAX_PLAN_JSON_CHARS) throw new PlanTooLargeError(plan.planId, total);
+
+      // Cloned on the way in and out. Without it, a caller holding the object
+      // it saved could mutate what the store later hands to someone else,
+      // which the Table implementation cannot do, and a StateStore caller must
+      // not be able to tell which implementation answered.
+      plans.set(inventoryPartitionKey(profileId, plan.planId), structuredClone(plan));
+    },
+
+    async getPlan(profileId, planId) {
+      const stored = plans.get(inventoryPartitionKey(profileId, planId));
+      return stored === undefined ? undefined : structuredClone(stored);
     },
   };
 }

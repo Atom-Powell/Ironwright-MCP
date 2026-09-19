@@ -24,6 +24,13 @@ export interface GraphClient {
   get<T>(pathOrUrl: string, headers?: Record<string, string>): Promise<T>;
   post<T>(pathOrUrl: string, body?: unknown, headers?: Record<string, string>): Promise<T>;
   /**
+   * The only mutating verb this server has. Required rather than optional on
+   * the interface: a caller that had to branch on whether `patch` exists would
+   * be deciding at runtime whether this deployment can write, and that decision
+   * belongs to the registry's write gate, where it is reviewed once.
+   */
+  patch<T>(pathOrUrl: string, body: unknown, headers?: Record<string, string>): Promise<T>;
+  /**
    * Bytes rather than JSON, for driveItem content. It goes through this client
    * rather than a bare fetch so the request counter and the Retry-After policy
    * still apply: the scan reports that count, and a download that bypassed it
@@ -50,7 +57,7 @@ interface RawResponse {
 }
 
 interface RequestOptions {
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "PATCH";
   body?: unknown;
   headers?: Record<string, string>;
   /**
@@ -157,6 +164,22 @@ export function createGraphClient(options: GraphClientOptions): GraphClient {
         method: "POST",
         retryTransportErrors: false,
         ...(body === undefined ? {} : { body }),
+        ...(headers === undefined ? {} : { headers }),
+      });
+    },
+
+    async patch<T>(pathOrUrl: string, body: unknown, headers?: Record<string, string>): Promise<T> {
+      // retryTransportErrors is false for the same reason it is false for POST:
+      // a transport rejection leaves it unknown whether the request reached
+      // Graph, and replaying a mutation that already applied is worse than
+      // surfacing the failure. If-Match makes a blind replay merely refuse
+      // rather than apply twice, but it would refuse with a 412, and a 412 is
+      // reported to the operator as "this file changed since you planned it",
+      // which would be a confident wrong answer about what happened.
+      return request<T>(pathOrUrl, {
+        method: "PATCH",
+        retryTransportErrors: false,
+        body,
         ...(headers === undefined ? {} : { headers }),
       });
     },
