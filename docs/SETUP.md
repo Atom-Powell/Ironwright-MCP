@@ -472,7 +472,11 @@ development build afterward puts the setup output back.
   performs a full enumeration rather than an incremental one, since there is no `deltaLink` from
   an earlier run to resume from. That is a reasonable local run and a poor deployment, which is
   why the deployment contract below lists it as optional rather than required: the distinction is
-  what the server enforces, not what an operator should do.
+  what the server enforces, not what an operator should do. The Azure Table state store creates
+  three tables under this connection string, each on first use: `DeltaLinks`, one row per drive's
+  persisted continuation link; `Inventory`, the repository snapshot each scan reconciles against;
+  and `Plans`, which holds generated rename plans and the reversal logs that undo them, both under
+  the same entity shape.
 - `PORT` defaults to 3000 if unset.
 - `IW_ALLOW_WRITES` stays unset, and writes stay disabled, until an operator opts a deployment in
   by setting it to `true`, regardless of the site permission granted by the normal setup run.

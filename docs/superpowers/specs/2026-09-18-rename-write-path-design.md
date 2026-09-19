@@ -82,11 +82,39 @@ Files discovered by the Microsoft Search cross-check always carry an empty etag,
 not return one. They never reach this path: a file in another library is `misplaced`, which is a
 move, and moves are not in this slice.
 
-**Two collisions are detected at plan time and excluded with a reason**, because neither can be
-resolved without `conflictBehavior`, which this slice does not have. Two misnamed files in one
-folder whose canonical names are identical, and a misnamed file whose canonical name is already
-taken by a file that is already compliant. Both are reported in the plan as items that will not be
-attempted, rather than being discovered as failures during a write.
+**Amended 2026-09-18, after Task 3's own tests were run against a real `reconcile()` report rather
+than a hand-built one.** The paragraph this replaces described two misnamed files appearing as two
+separate artifacts and colliding on one canonical name. The reconciliation engine cannot produce
+that shape. `matchArtifacts` (`src/domain/reconcile/match.ts`) resolves one winner per slot by
+`STATE_RANK` and demotes every other file matching that slot to a `DuplicateFinding`; the canonical
+filename is a pure function of the slot, so every file that would claim one canonical path
+necessarily parses to the same slot and competes for the same single `ArtifactFinding`. A rename
+plan therefore never learns about a losing file from a second artifact grouped by target path. It
+learns about it from `report.duplicates`, where the engine already recorded the loser once
+`matchArtifacts` resolved the competition.
+
+This was found only when a test was written that feeds a real `reconcile()` report into
+`pairMisnamedArtifacts` rather than a hand-built `ArtifactFinding` and `DuplicateFinding` pair: the
+original implementation, and the four fixtures across Task 3's synthetic-report tests that shared
+its same two wrong assumptions about the engine's own output, all passed against each other while
+disagreeing with what `reconcile()` actually returns.
+
+**Three collisions are detected at plan time and excluded with a reason**, because none can be
+resolved without `conflictBehavior`, which this slice does not have. Each reason states only what
+the code observed, not an inference about why:
+
+- `target_path_already_occupied`: the slot's winner already sits at the canonical path, so
+  something is physically there today.
+- `slot_already_satisfied_by_another_file`: the slot's winner is compliant under a recognizer whose
+  declared verdict is "compliant" for a name other than the canonical template, so the canonical
+  path is free, but renaming the loser onto it would create a second file for a slot the winner
+  already satisfies.
+- `two_files_share_one_target_name`: the winner itself is not at the canonical path yet either
+  (misnamed or misplaced) and would also land there once corrected, by a rename or by phase 6b's
+  move.
+
+All three are reported in the plan as items that will not be attempted, rather than being
+discovered as failures during a write.
 
 ## Execute
 

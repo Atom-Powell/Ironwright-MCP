@@ -2152,3 +2152,38 @@ A third finding is worth recording because of where it was: two places claimed t
 ordering regression "by position", and under that exact regression only one of the two tests failed.
 The branch that fixed a documented-but-never-printed log corrected a documented-but-never-run
 assertion before merging.
+
+## Phase 6a: covered only by fakes, 2026-09-18
+
+Phase 6a is the first write path this server has. As of this commit it is covered by fakes only. No
+rename has been applied to a real SharePoint library, no reversal log has been replayed, and no real
+412 has been observed.
+
+Every fake in this suite rejects `patch` except the two written for the rename tests, which apply
+renames into memory. A fake proves the code does what its author believed Graph does. The ETag
+precondition in particular is a claim about Graph's behavior on a `driveItem` PATCH that this
+project has never made.
+
+The merge gate is the full loop against the sandbox tenant: generate, dry run, execute, confirm the
+renames in SharePoint, roll back through the reversal log, confirm the library is byte for byte
+where it started, then edit one file between generating and executing and confirm that item alone
+is refused while the others apply.
+
+**The Azure Table 32768-character limit has never been probed live.** `MAX_PLAN_JSON_CHARS` in
+`src/store/types.ts` sets the plan-size cap at 32000, a margin under Azure Table's documented
+32768-character limit on a single String property, and `PlanTooLargeError` fires whenever a stored
+plan's JSON exceeds it. Every test that exercises this cap runs against `FakeTableClient`, not a
+real Azure Table Storage account or even Azurite, so the margin's own correctness, that a plan just
+under 32000 characters actually persists and a plan just over it is actually rejected by the real
+service rather than by this project's own arithmetic, is unverified.
+
+**The `If-Match` precondition behavior is a claim about Graph this project has never made.** Three
+questions are unanswered by anything except reading Graph's documentation: whether a stale etag on
+a `driveItem` PATCH yields 412 rather than 404 or 409, whether a successful PATCH response actually
+carries the item's new `eTag`, and whether a path-addressed read resolves immediately after a rename
+or lags behind it. `src/tools/rename/execute.ts` carries a fallback branch, reached when a PATCH
+response has no `eTag`, that falls back to a metadata GET through `readDriveItemEtag`. That branch
+is exercised in `tests/tools/rename/execute.test.ts` and `tests/tools/rename/execute.errors.test.ts`,
+but only against fakes that were told to omit the etag; nothing has observed whether Graph's own
+PATCH response for a `driveItem` rename actually omits it in practice, which is the premise the
+branch exists to cover.

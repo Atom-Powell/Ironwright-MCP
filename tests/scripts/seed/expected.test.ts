@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { buildSeedPlan, ABSENT_CLIENT, MISNAMED_FILE_CLIENT, MISSING_FILE_CLIENT } from "../../../scripts/seed-library.js";
+import { buildSeedPlan, ABSENT_CLIENT, MISNAMED_FILE_CLIENTS, MISSING_FILE_CLIENT } from "../../../scripts/seed-library.js";
 import { expectedReport, formatExpectedReport, parseProfile } from "../../../scripts/seed/expected.js";
 import { exampleSeedProfile } from "./fixtures.js";
 
@@ -36,10 +36,12 @@ describe("expectedReport", () => {
     expect(missing[0]?.period).toEqual({ year: 2026, month: 1 });
   });
 
-  it("reports the planted file as misnamed rather than unrecognized", () => {
-    const misnamed = report().artifacts.filter((a) => a.client === MISNAMED_FILE_CLIENT && a.state === "misnamed");
-    expect(misnamed).toHaveLength(1);
-    expect(misnamed[0]?.period).toEqual({ year: 2026, month: 1 });
+  it("reports each planted file as misnamed rather than unrecognized", () => {
+    const misnamed = report().artifacts.filter(
+      (a) => MISNAMED_FILE_CLIENTS.includes(a.client) && a.state === "misnamed",
+    );
+    expect(misnamed).toHaveLength(MISNAMED_FILE_CLIENTS.length);
+    for (const artifact of misnamed) expect(artifact.period).toEqual({ year: 2026, month: 1 });
   });
 
   it("predicts the seeder's own workbook as the one orphan the live tool will report", () => {
@@ -59,7 +61,7 @@ describe("expectedReport", () => {
   });
 
   it("refuses any client that is not planted to carry an exception", () => {
-    const planted = new Set([ABSENT_CLIENT, MISSING_FILE_CLIENT, MISNAMED_FILE_CLIENT]);
+    const planted = new Set([ABSENT_CLIENT, MISSING_FILE_CLIENT, ...MISNAMED_FILE_CLIENTS]);
     const surprises = report().artifacts.filter((a) => a.state !== "compliant" && !planted.has(a.client));
     expect(surprises).toEqual([]);
   });
