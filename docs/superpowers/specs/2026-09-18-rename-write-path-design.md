@@ -145,14 +145,23 @@ A dry run writes no reversal log, because it changes nothing to reverse.
 
 ## What the report says
 
-Applied items, and skipped items each carrying which of three reasons applied:
+Applied items, and skipped items each carrying which of four reasons applied:
 
 - the item changed since the plan was generated, so its `If-Match` was refused;
 - the item is no longer at that path;
+- Graph refused the write for some other reason, which this server cannot interpret and does not
+  try to;
 - the item was excluded when the plan was generated, for one of the two name collisions or for
   having no usable ETag.
 
 Plus the reversal plan id when one was written, and the Graph cost of this call.
+
+**Amended 2026-09-18 while writing the implementation plan.** This section named three reasons and
+had not contemplated the third above. Only a 412 and a 404 are outcomes the executor can read; every
+other Graph failure is one it cannot, and folding those into either named reason would tell an
+operator something this server did not observe. Such a failure is recorded against its own item and
+the run continues, rather than ending the call, because abandoning it would discard the report, which
+is the operator's only account of which renames already applied.
 
 The third reason is decided at plan time and reported at execute time, rather than only appearing in
 the plan. An operator reading an execution report should not have to hold the plan open beside it to
