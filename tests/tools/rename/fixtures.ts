@@ -400,3 +400,84 @@ export function renamingGraphClient(options: RenamingClientOptions = {}): GraphC
     requests: () => requestCount,
   };
 }
+
+/**
+ * A library that actually holds files, unlike `renamingGraphClient`, which
+ * applies renames into nothing at all.
+ *
+ * It exists for one thing no other fake here can do: replay a reversal plan
+ * through `runExecuteRenamePlan` and read back whether the library ended where
+ * it started. Every reversal test before it asserted the reversal plan's
+ * CONTENTS, which is a different claim, and a defect that wrote one item's
+ * fresh etag into the wrong entry would leave those contents looking populated
+ * while the rollback they describe refuses every item.
+ *
+ * Each rename moves the key to the new name in the same folder and stamps a
+ * fresh etag that names the path it belongs to. The etag naming its own path is
+ * what lets a test prove entry alignment rather than only that the etags
+ * differ: a reversal entry carrying an etag for some other file's path is
+ * exactly the misalignment this fake was added to catch.
+ */
+export function libraryGraphClient(etagsByPath: Record<string, string>): GraphClient & {
+  paths: () => string[];
+  etagAt: (path: string) => string | undefined;
+} {
+  const state = new Map<string, string>(Object.entries(etagsByPath));
+  let requestCount = 0;
+  let version = 0;
+
+  function encodedOf(path: string): string {
+    return path.split("/").map(encodeURIComponent).join("/");
+  }
+
+  function pathIn(pathOrUrl: string): string | undefined {
+    return [...state.keys()].find((path) => pathOrUrl.includes(encodedOf(path)));
+  }
+
+  function parentOf(path: string): string {
+    const cut = path.lastIndexOf("/");
+    return cut === -1 ? "" : path.slice(0, cut);
+  }
+
+  return {
+    paths: () => [...state.keys()].sort(),
+    etagAt: (path: string) => state.get(path),
+    async get<T>(pathOrUrl: string): Promise<T> {
+      requestCount += 1;
+      const path = pathIn(pathOrUrl);
+      if (path === undefined) {
+        throw new GraphRequestError({ method: "GET", path: pathOrUrl, status: 404, body: "{}" });
+      }
+      return { eTag: state.get(path) } as unknown as T;
+    },
+    post: () => {
+      requestCount += 1;
+      return Promise.reject(new Error("the fake library client does not implement post"));
+    },
+    async patch<T>(pathOrUrl: string, body: unknown, headers?: Record<string, string>): Promise<T> {
+      requestCount += 1;
+      const path = pathIn(pathOrUrl);
+      if (path === undefined) {
+        throw new GraphRequestError({ method: "PATCH", path: pathOrUrl, status: 404, body: "{}" });
+      }
+      const ifMatch = headers?.["if-match"];
+      if (ifMatch !== undefined && ifMatch !== state.get(path)) {
+        throw new GraphRequestError({ method: "PATCH", path: pathOrUrl, status: 412, body: "{}" });
+      }
+
+      const folder = parentOf(path);
+      const name = (body as { name: string }).name;
+      const moved = folder === "" ? name : `${folder}/${name}`;
+      version += 1;
+      const etag = `etag-${String(version)}-for-${moved}`;
+      state.delete(path);
+      state.set(moved, etag);
+      return { eTag: etag } as unknown as T;
+    },
+    getBytes: () => {
+      requestCount += 2;
+      return Promise.reject(new Error("the fake library client does not implement getBytes"));
+    },
+    requests: () => requestCount,
+  };
+}

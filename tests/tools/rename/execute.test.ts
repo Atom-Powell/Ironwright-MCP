@@ -2,10 +2,11 @@ import { describe, expect, it } from "vitest";
 import { runExecuteRenamePlan } from "../../../src/tools/rename/execute.js";
 import { createFakeToolContext } from "../fake-context.js";
 import { MAX_PLAN_ITEMS_LISTED, type ExecuteRenamePlanOutput } from "../../../src/tools/rename/output.js";
-import { ITEM_A, ITEM_B, manyRenameItems, planWith, renamingGraphClient } from "./fixtures.js";
+import { ITEM_A, ITEM_B, libraryGraphClient, manyRenameItems, planWith, renamingGraphClient } from "./fixtures.js";
 
 const PLAN_ID = "rnm-2026-09-18-a1b2c3d4";
 const REVERSAL_ID = "rev-2026-09-18-ffffffff";
+const ROLLBACK_REVERSAL_ID = "rev-2026-09-18-eeeeeeee";
 
 function outputOf(result: Awaited<ReturnType<typeof runExecuteRenamePlan>>): ExecuteRenamePlanOutput {
   return result.structuredContent as unknown as ExecuteRenamePlanOutput;
@@ -222,5 +223,63 @@ describe("execute_rename_plan confirmed run", () => {
     expect(output.reversalEntriesNotRefreshed).toBe(1);
     const reversal = await context.store.getPlan("example", REVERSAL_ID);
     expect(reversal?.items[0]?.etag).toBe(ITEM_A.etag);
+  });
+});
+
+/**
+ * The reversal log's own usefulness, which every other test in this file
+ * approaches by asserting the plan's contents rather than by using it.
+ *
+ * That gap let a real defect sit unpinned: writing each item's fresh etag into
+ * `reversal.items[0]` instead of `reversal.items[index]` left the whole suite
+ * green, while on a multi-item plan it gives entry zero the last item's etag
+ * and leaves every other entry stale. A rollback then refuses every item and
+ * reports a clean run having undone nothing, which is the silently-useless
+ * failure the design spec names.
+ */
+describe("the reversal log as something that is actually replayed", () => {
+  it("gives each reversal entry the fresh etag of its own file, not another item's", async () => {
+    const graph = libraryGraphClient({ [ITEM_A.path]: ITEM_A.etag, [ITEM_B.path]: ITEM_B.etag });
+    const context = createFakeToolContext({ graph });
+    await context.store.savePlan("example", planWith([ITEM_A, ITEM_B]));
+
+    await runExecuteRenamePlan({ profileId: "example", planId: PLAN_ID, confirm: true }, context, () => REVERSAL_ID);
+
+    const reversal = await context.store.getPlan("example", REVERSAL_ID);
+    const entries = reversal?.items ?? [];
+    expect(entries).toHaveLength(2);
+    // Each entry's path is where its file now sits, and the fake stamps an etag
+    // naming the path it belongs to, so this asserts alignment rather than only
+    // that the two etags differ. An entry carrying another file's etag is what
+    // the off-by-index defect produces.
+    for (const entry of entries) {
+      expect(entry.etag).toBe(graph.etagAt(entry.path));
+    }
+    expect(entries[0]?.etag).not.toBe(entries[1]?.etag);
+    expect(entries[0]?.etag).not.toBe(ITEM_A.etag);
+    expect(entries[1]?.etag).not.toBe(ITEM_B.etag);
+  });
+
+  it("puts the library back where it started when the reversal plan is executed", async () => {
+    const graph = libraryGraphClient({ [ITEM_A.path]: ITEM_A.etag, [ITEM_B.path]: ITEM_B.etag });
+    const context = createFakeToolContext({ graph });
+    await context.store.savePlan("example", planWith([ITEM_A, ITEM_B]));
+    const before = graph.paths();
+
+    await runExecuteRenamePlan({ profileId: "example", planId: PLAN_ID, confirm: true }, context, () => REVERSAL_ID);
+    expect(graph.paths()).toEqual([ITEM_A.targetPath, ITEM_B.targetPath].sort());
+
+    const rollback = outputOf(
+      await runExecuteRenamePlan(
+        { profileId: "example", planId: REVERSAL_ID, confirm: true },
+        context,
+        () => ROLLBACK_REVERSAL_ID,
+      ),
+    );
+
+    expect(rollback.counts.renamed).toBe(2);
+    expect(rollback.counts.changedSincePlan).toBe(0);
+    expect(rollback.reverses).toBe(PLAN_ID);
+    expect(graph.paths()).toEqual(before);
   });
 });
