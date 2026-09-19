@@ -105,13 +105,24 @@ function parentOf(path: string): string {
  * Every library-relative path in this report that something already occupies.
  *
  * No construction has been found where a candidate's own target path actually
- * appears in this set: any same-library file sitting at that path carries the
- * canonical name for that path's slot, so it parses back to that same slot and
- * wins it, which is what makes the duplicates pass below the mechanism that
- * actually reports a slot already spoken for today. This check is kept anyway
- * as a guard against an engine change that would make such a path reachable,
- * since a negative is not proven and removing a guard on a write path is the
- * worse risk of the two.
+ * appears in this set, for either of the two things folded into it:
+ *
+ * - An artifact's or a duplicate's own matched path: any same-library file
+ *   sitting at that path carries the canonical name for that path's slot, so
+ *   it parses back to that same slot and wins or loses it as an artifact or a
+ *   duplicate, which is what makes the duplicates pass below the mechanism
+ *   that actually reports a slot already spoken for today.
+ * - An orphan's path: a file sitting at a candidate's target path would carry
+ *   that slot's canonical name too, so it would parse to that slot and win it
+ *   outright as a `compliant` artifact rather than being orphaned. An orphan
+ *   requires either a parse failure or a slot nobody owes, and a candidate's
+ *   target path is owed by construction, since the candidate's own existence
+ *   proves it.
+ *
+ * Both are retained anyway as a guard against an engine change that would
+ * make either path reachable, deliberately rather than by oversight: a
+ * negative is not proven by not having found a counterexample, and removing a
+ * guard on a write path is the worse risk of the two.
  *
  * Built from the whole report rather than from the candidates, and always over
  * every client regardless of any scope the caller will apply afterwards: a plan
@@ -333,11 +344,12 @@ export function pairMisnamedArtifacts(report: ReconciliationReport): RenamePairi
     // own current path is in `occupied` by construction, and the target path
     // can never equal it, since a rename with the same name is refused above.
     // The comparison is kept anyway so a future change to that rule cannot
-    // turn every candidate into a collision with itself. See occupiedPaths's
-    // own comment: no reachable report has been constructed where this branch
-    // fires, but it stays as a guard against an engine change, and the
+    // turn every candidate into a collision with itself. This branch has no
+    // constructed reachable case at all, for either an artifact, a duplicate
+    // or an orphan occupying the target: see occupiedPaths's own comment for
+    // why each is retained deliberately rather than by oversight. The
     // duplicates pass below is what actually reports a slot already spoken
-    // for today.
+    // for, today.
     if (occupied.has(candidate.targetPath) && candidate.targetPath !== candidate.path) {
       collisions.push(collisionFrom(candidate, "target_path_already_occupied"));
       continue;

@@ -4,15 +4,22 @@ import type { ArtifactFinding } from "../../../src/domain/reconcile/index.js";
 import { misnamed, misnamedDuplicate, report } from "./fixtures.js";
 
 describe("collisions", () => {
-  // A report with two ArtifactFinding entries sharing one target path used to
-  // be tested here directly, but the engine cannot produce that shape: the
-  // canonical name is a pure function of a slot, so two files that would both
-  // claim it necessarily parse to the same slot, and matchArtifacts resolves
-  // that competition into one winning artifact plus a DuplicateFinding before
-  // pairMisnamedArtifacts ever sees the report. A test pinning the shape the
-  // engine cannot produce is worse than no test, so this now matches what a
-  // real report actually looks like: one misnamed winner and one misnamed
-  // duplicate sharing its slot.
+  // This describe block used to hold four more tests: one pinning two
+  // ArtifactFinding entries sharing a target path, and three pinning a
+  // candidate's target path occupied by a compliant artifact, a duplicate,
+  // or an orphan. All four were reports the engine cannot produce. The
+  // canonical name is a pure function of a slot, so any same-library file
+  // that would occupy a candidate's target necessarily carries that slot's
+  // own canonical name, which means it parses back to that exact slot and
+  // wins or loses it as an artifact or a duplicate rather than sitting beside
+  // it as an unrelated occupant, and an orphan requires a slot nobody owes,
+  // which a candidate's own target slot is not. A test pinning a shape the
+  // engine cannot produce is worse than no test, so all four were deleted
+  // with no replacement rather than patched into a different impossible
+  // shape. The surviving coverage for these paths is
+  // tests/domain/rename/plan.reconcile.test.ts, which cannot encode an
+  // impossible report at all, since it asserts only on what a real
+  // `reconcile()` call actually returned.
   it("keeps the slot's winner as the candidate and excludes the losing duplicate", () => {
     const winner = misnamed("CLIENTA", "one.xlsx", "2026-01_CLIENTA_MonthlyTraining.xlsx");
     const loser = misnamedDuplicate("CLIENTA", "two.xlsx");
@@ -37,25 +44,6 @@ describe("collisions", () => {
         reason: "two_files_share_one_target_name",
       },
     ]);
-  });
-
-  it("excludes a file whose canonical name is already taken by an orphan", () => {
-    const candidate = misnamed("CLIENTA", "wrong.xlsx", "2026-01_CLIENTA_MonthlyTraining.xlsx");
-
-    const pairing = pairMisnamedArtifacts(
-      report([candidate], {
-        orphans: [
-          {
-            path: "2026/CLIENTA/01-January/2026-01_CLIENTA_MonthlyTraining.xlsx",
-            name: "2026-01_CLIENTA_MonthlyTraining.xlsx",
-            kind: "unexpected",
-          },
-        ],
-      }),
-    );
-
-    expect(pairing.candidates).toEqual([]);
-    expect(pairing.collisions[0]?.reason).toBe("target_path_already_occupied");
   });
 });
 
