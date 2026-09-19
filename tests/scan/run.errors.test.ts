@@ -63,6 +63,7 @@ describe("runScan when the stored deltaLink is rejected", () => {
         } as T;
       },
       post: async <T,>(): Promise<T> => { throw new Error("this fake does not implement post"); },
+      patch: () => Promise.reject(new Error("this fake Graph client does not implement patch")),
       getBytes: async (): Promise<Uint8Array> => { throw new Error("this fake does not implement getBytes"); },
     };
 
@@ -90,6 +91,7 @@ describe("runScan when a page fails partway", () => {
         throw new GraphRequestError({ method: "GET", path, status: 503, body: "unavailable" });
       },
       post: async <T,>(): Promise<T> => { throw new Error("this fake does not implement post"); },
+      patch: () => Promise.reject(new Error("this fake Graph client does not implement patch")),
       getBytes: async (): Promise<Uint8Array> => { throw new Error("this fake does not implement getBytes"); },
     };
 
@@ -158,6 +160,7 @@ describe("runScan when a resync discards a partially applied first attempt", () 
         throw new Error(`unexpected path ${path}`);
       },
       post: async <T,>(): Promise<T> => { throw new Error("this fake does not implement post"); },
+      patch: () => Promise.reject(new Error("this fake Graph client does not implement patch")),
       getBytes: async (): Promise<Uint8Array> => { throw new Error("this fake does not implement getBytes"); },
     };
 

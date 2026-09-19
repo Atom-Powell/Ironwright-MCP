@@ -30,6 +30,7 @@ function clientDownloading(getBytes: GraphClient["getBytes"]): GraphClient {
     post: async <T,>(): Promise<T> => {
       throw new Error("this test does not expect a post");
     },
+    patch: () => Promise.reject(new Error("this fake Graph client does not implement patch")),
     getBytes,
   };
 }

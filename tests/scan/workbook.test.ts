@@ -34,6 +34,10 @@ function scriptedClient(getResponses: Record<string, unknown>, bytes: Uint8Array
     post: async <T,>(): Promise<T> => {
       throw new Error("this test does not expect a post");
     },
+    patch: () => {
+      requests += 1;
+      return Promise.reject(new Error("this fake Graph client does not implement patch"));
+    },
     getBytes: async (path: string): Promise<Uint8Array> => {
       requests += 1;
       if (path !== CONTENT_PATH) throw new Error(`unexpected getBytes ${path}`);
