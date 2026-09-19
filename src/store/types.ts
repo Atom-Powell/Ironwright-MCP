@@ -135,10 +135,17 @@ export interface StoredPlan {
 }
 
 /**
- * Azure Table caps a String property at 32768 characters. The margin below
- * that covers the rest of the entity, and the refusal is raised in this
- * codebase rather than left to the service, whose own error names neither the
- * plan nor a remedy.
+ * Azure Table caps a single String property at 32768 characters, and the
+ * check in `table.ts` compares this constant against the combined length of
+ * two separate String properties, `items` and `excluded`, rather than either
+ * one alone. That sum is not the quantity the service actually limits, but
+ * checking it this way can only over-refuse relative to the real per-property
+ * cap, never under-refuse: whichever of the two strings is larger is bounded
+ * by the same total, so neither one can pass this check while itself
+ * exceeding 32768. The margin below the true limit covers the rest of the
+ * entity's other properties, and the refusal is raised in this codebase
+ * rather than left to the service, whose own error names neither the plan nor
+ * a remedy.
  */
 export const MAX_PLAN_JSON_CHARS = 32000;
 
@@ -155,5 +162,30 @@ export class PlanTooLargeError extends Error {
     this.name = "PlanTooLargeError";
     this.planId = planId;
     this.chars = chars;
+  }
+}
+
+/**
+ * Raised by `getPlan` when a row exists but cannot be reconstructed
+ * faithfully. Unlike `getScannedDrives`, which skips a row an older build
+ * wrote without every current field, a plan is what a rename or a rollback
+ * acts on: a listing that tolerates a partial row loses one answer, but a
+ * plan that tolerates one loses files, which is why this throws instead of
+ * substituting a default and returning what looks like a valid plan with
+ * nothing to do.
+ */
+export class MalformedPlanEntityError extends Error {
+  readonly planId: string;
+  readonly field: string;
+
+  constructor(planId: string, field: string, detail: string) {
+    super(
+      `The stored plan "${planId}" cannot be read: its ${field} ${detail}. Refused rather than ` +
+        "reconstructed, because a plan is what a rename or a rollback acts on, and a plan rebuilt " +
+        "around a missing field reads as a valid plan with nothing to do.",
+    );
+    this.name = "MalformedPlanEntityError";
+    this.planId = planId;
+    this.field = field;
   }
 }

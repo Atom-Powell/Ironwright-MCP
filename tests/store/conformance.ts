@@ -322,4 +322,41 @@ export function stateStoreConformance(create: () => StateStore): void {
     const stored = await store.getPlan("example", plan.planId);
     expect(stored?.items[0]?.etag).toBe("e1");
   });
+
+  it("does not let a caller mutate a stored plan through the object the store handed back", async () => {
+    // The mirror of the inbound case above. The Table implementation passes
+    // this for a different reason than the memory implementation: it
+    // reparses the stored JSON into a fresh object on every read, where the
+    // memory implementation needs its own outbound clone to get the same
+    // answer. A StateStore caller must not be able to tell which one is
+    // behind it, so both directions belong in the shared suite, not only the
+    // inbound one.
+    const store = create();
+    const plan: StoredPlan = {
+      planId: "rnm-2026-09-18-a1b2",
+      profileId: "example",
+      kind: "rename",
+      driveId: "d1",
+      createdAt: "2026-09-18T12:00:00Z",
+      items: [
+        {
+          path: "a.xlsx",
+          currentName: "a.xlsx",
+          targetName: "b.xlsx",
+          targetPath: "b.xlsx",
+          etag: "e1",
+          client: "CLIENTA",
+        },
+      ],
+      excluded: [],
+    };
+
+    await store.savePlan("example", plan);
+    const firstRead = await store.getPlan("example", plan.planId);
+    const firstReadItem = firstRead?.items[0];
+    if (firstReadItem !== undefined) firstReadItem.etag = "tampered";
+
+    const secondRead = await store.getPlan("example", plan.planId);
+    expect(secondRead?.items[0]?.etag).toBe("e1");
+  });
 }
