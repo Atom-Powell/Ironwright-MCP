@@ -363,21 +363,43 @@ what the author believed the API would do. When a phase depends on an API surfac
 never actually called, the cheapest possible live probe against that surface comes first, before
 the design that assumes it.
 
-Phase 6a produced the same failure in a new place on 2026-09-18, and it is worth recording here for
-the same reason: not against an external API this time, but against this project's own
-reconciliation engine. The phase 6a spec's "What a rename plan is" section made two assumptions
-about what `reconcile()` returns for two files competing for one canonical name: that they would
-appear as two separate `ArtifactFinding` entries, and that the collision would be found by grouping
-those entries by target path. Both are wrong. `matchArtifacts` resolves one winner per slot and
-reports every other candidate as a `DuplicateFinding`, never as a second artifact, so that grouping
-could never fire. Four separate test fixtures across Task 3's synthetic-report tests encoded the
-same two wrong assumptions, and every one of them passed review, because in each case the code was
-checked against the fixture and the fixture was checked against nothing. All four were found only
-when a test was written that calls the real `reconcile()` and asserts on what it actually returned,
-rather than on a hand-built report standing in for it. The rule this generalizes to: when a module
-consumes another module's output, at least one test must obtain that output from the real producer
-rather than construct it. A fixture proves the code does what its author believed the producer
-returns, which is exactly the shape of the Excel lesson above, just aimed inward instead of outward.
+Phase 6a produced a related failure on 2026-09-18, against this project's own reconciliation engine
+rather than an external API, and it belongs here because the rule it teaches generalizes, not
+because it was caught the same way. The phase 6a spec's "What a rename plan is" section made two
+wrong assumptions about what `reconcile()` returns for two files competing for one canonical name:
+that they would appear as two separate `ArtifactFinding` entries, and that the collision would be
+found by grouping those entries by target path. `matchArtifacts` resolves one winner per slot and
+demotes every other candidate to a `DuplicateFinding`, never a second artifact, so neither
+assumption survives contact with the engine.
+
+That defect was not found by a dedicated test written to catch it. Task 4's twelve tool-level tests
+for `generate_rename_plan` already called the real `reconcile()` through the tool's own handler.
+Nine of them failed first, against a separate wrong assumption, that `expectedPath` is a full file
+path rather than the rendered taxonomy folder it actually is. Once that was fixed, the twelfth test
+still failed, and tracing `match.ts` from that one remaining failure is what found the
+two-artifacts-collide assumption above. `tests/domain/rename/plan.reconcile.test.ts` was written
+afterward, so a future mismatch of this kind fails directly in the domain layer instead of only
+surfacing as a tool-test failure that still has to be traced back to its cause. It closes the gap
+this incident found; it did not itself catch this one.
+
+A second, distinct family lived in four separate fixtures across three review rounds, and it is not
+the same mistake as the grouping error above, though it is adjacent to it: each fixture hand-built a
+report in which an artifact, a duplicate, or an orphan already occupied a rename candidate's target
+path, independently of how `matchArtifacts` actually resolves competing candidates for one slot, a
+shape that turns out to be unreachable once traced against the engine's own resolution. Three were
+deleted in `55dc5ee`, "fix(tools): correct rename exclusion reasons and cost reporting found in
+review", by a reviewer reading them and reproducing against the engine. The fourth, the
+orphan-occupancy fixture, was found by the implementer's own reasoning during a later fix round and
+deleted in `b7d48ef`, whose own message says as much: "each survived review until traced against the
+engine." Every one of these four fixtures passed its own review before being caught, at the cost of
+human tracing across three separate rounds, and none was caught by any reconcile()-backed test; each
+was simply shown unreachable and deleted, with no replacement.
+
+The rule both incidents point to: when a module consumes another module's output, at least one test
+must obtain that output from the real producer rather than construct it. A fixture proves the code
+does what its author believed the producer returns, which is exactly the shape of the Excel lesson
+above, just aimed inward instead of outward. `plan.reconcile.test.ts` is what stops the next one
+from surviving at all; it is not what caught either family described here.
 
 ## Reference
 
