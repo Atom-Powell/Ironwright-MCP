@@ -49,17 +49,25 @@ export function generatePlanText(output: GenerateRenamePlanOutput): string[] {
 export function executePlanText(output: ExecuteRenamePlanOutput): string[] {
   const lines = output.dryRun
     ? [
-        `Dry run of plan ${output.planId} against library "${output.library}". Nothing was changed.`,
+        `Dry run of plan ${output.planId} against drive ${output.driveId}. Nothing was changed.`,
         `${String(output.counts.wouldRename)} ${output.counts.wouldRename === 1 ? "rename" : "renames"} would be attempted.`,
         "This preview contacted Graph not at all, so it did not check whether any file has changed since the plan " +
           "was generated. Those refusals can only appear in a confirmed run.",
       ]
     : [
-        `Applied plan ${output.planId} against library "${output.library}".`,
+        `Applied plan ${output.planId} against drive ${output.driveId}.`,
         `${String(output.counts.renamed)} renamed, ${String(output.counts.changedSincePlan)} refused because the ` +
           `file changed since the plan, ${String(output.counts.notFound)} no longer at the planned path, ` +
           `${String(output.counts.failed)} failed.`,
       ];
+
+  // Stated before the item listing rather than beside the reversal line at the
+  // end, because it changes what every line below it means: these renames undo
+  // another plan's rather than apply new ones. Without it a rollback's report
+  // reads exactly like a forward run's.
+  if (output.reverses !== undefined) {
+    lines.push(`This plan reverses plan ${output.reverses}.`);
+  }
 
   for (const result of output.results) {
     lines.push(`  ${result.path} -> ${result.targetName} (${result.outcome})`);

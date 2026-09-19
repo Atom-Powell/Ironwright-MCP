@@ -147,7 +147,7 @@ function execOutput(overrides: Partial<ExecuteRenamePlanOutput> = {}): ExecuteRe
   return {
     planId: "rnm-2026-09-18-a1b2c3d4",
     profileId: "example",
-    library: "Compliance Reports",
+    driveId: "drive-1",
     dryRun: true,
     results: [],
     resultCount: 0,
@@ -163,10 +163,10 @@ function execOutput(overrides: Partial<ExecuteRenamePlanOutput> = {}): ExecuteRe
 }
 
 describe("executePlanText", () => {
-  it("states a dry run on the first line and that nothing was changed", () => {
-    const lines = executePlanText(execOutput({ planId: "rnm-2026-09-18-a1b2c3d4", library: "Compliance Reports" }));
+  it("states a dry run on the first line, naming the drive it would write to, and that nothing was changed", () => {
+    const lines = executePlanText(execOutput({ planId: "rnm-2026-09-18-a1b2c3d4", driveId: "drive-1" }));
 
-    expect(lines[0]).toBe('Dry run of plan rnm-2026-09-18-a1b2c3d4 against library "Compliance Reports". Nothing was changed.');
+    expect(lines[0]).toBe("Dry run of plan rnm-2026-09-18-a1b2c3d4 against drive drive-1. Nothing was changed.");
   });
 
   it("uses the singular for exactly one would-be rename and the plural otherwise", () => {
@@ -198,7 +198,7 @@ describe("executePlanText", () => {
       }),
     );
 
-    expect(lines[0]).toBe('Applied plan rnm-2026-09-18-a1b2c3d4 against library "Compliance Reports".');
+    expect(lines[0]).toBe("Applied plan rnm-2026-09-18-a1b2c3d4 against drive drive-1.");
     expect(lines[1]).toBe("3 renamed, 1 refused because the file changed since the plan, 2 no longer at the planned path, 4 failed.");
   });
 
@@ -281,6 +281,16 @@ describe("executePlanText", () => {
 
     const zero = executePlanText(execOutput({ dryRun: false, reversalEntriesNotRefreshed: 0 }));
     expect(zero.some((line) => line.includes("reversal entr"))).toBe(false);
+  });
+
+  it("says which plan a rollback undoes, and says nothing when the plan is a forward one", () => {
+    // Without this line a rollback's report is shape-identical to a forward
+    // run's, and an operator reading one cannot tell which they are looking at.
+    const rollback = executePlanText(execOutput({ dryRun: false, reverses: "rnm-2026-09-18-a1b2c3d4" }));
+    expect(rollback).toContain("This plan reverses plan rnm-2026-09-18-a1b2c3d4.");
+
+    const forward = executePlanText(execOutput({ dryRun: false }));
+    expect(forward.some((line) => line.startsWith("This plan reverses"))).toBe(false);
   });
 
   it("ends with the Graph operations line", () => {

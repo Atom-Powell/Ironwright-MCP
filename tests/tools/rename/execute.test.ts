@@ -103,6 +103,24 @@ describe("execute_rename_plan confirmed run", () => {
     expect(output.graphOperationsIssued).toBe(2);
   });
 
+  it("reports the drive it actually wrote to, not a library name it never read", async () => {
+    // A plan carries the drive it was generated against. If a profile's
+    // identity.library is changed afterwards and this older plan is then
+    // executed, the renames still land on the drive the plan names, and under
+    // Sites.Selected both drives are writable. Naming the profile's current
+    // library in the report would name a library this call did not touch.
+    const graph = renamingGraphClient();
+    const context = createFakeToolContext({ graph });
+    await context.store.savePlan("example", { ...planWith([ITEM_A]), driveId: "drive-the-plan-was-made-against" });
+
+    const output = outputOf(
+      await runExecuteRenamePlan({ profileId: "example", planId: PLAN_ID, confirm: true }, context, () => REVERSAL_ID),
+    );
+
+    expect(output.driveId).toBe("drive-the-plan-was-made-against");
+    expect(graph.calls[0]?.path).toContain("drive-the-plan-was-made-against");
+  });
+
   it("writes a reversal log that is a valid plan with the pairs inverted", async () => {
     const context = createFakeToolContext({ graph: renamingGraphClient() });
     await context.store.savePlan("example", planWith([ITEM_A]));

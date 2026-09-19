@@ -218,7 +218,12 @@ export async function runExecuteRenamePlan(
     const output: ExecuteRenamePlanOutput = {
       planId: plan.planId,
       profileId: plan.profileId,
-      library: profile.identity.library,
+      // The plan's drive, not the profile's library name. Every write above
+      // addressed plan.driveId, and a profile whose identity.library changed
+      // after this plan was generated would make that name describe a library
+      // this call did not touch.
+      driveId: plan.driveId,
+      ...(plan.reverses === undefined ? {} : { reverses: plan.reverses }),
       dryRun: !args.confirm,
       results: results.slice(0, MAX_PLAN_ITEMS_LISTED),
       resultCount: results.length,

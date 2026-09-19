@@ -148,7 +148,17 @@ export interface RenameItemResult {
 export interface ExecuteRenamePlanOutput {
   planId: string;
   profileId: string;
-  library: string;
+  /**
+   * The drive this run addressed, taken from the plan. The profile's library
+   * name is deliberately NOT reported here, unlike on a generated plan: this
+   * call writes to the plan's own drive, so a profile whose `identity.library`
+   * changed after the plan was generated would make that name describe a
+   * different library from the one written to, and under `Sites.Selected` both
+   * are writable.
+   */
+  driveId: string;
+  /** The plan id this run undoes. Absent unless the plan executed is itself a reversal. */
+  reverses?: string;
   dryRun: boolean;
   results: RenameItemResult[];
   resultCount: number;
@@ -166,7 +176,21 @@ export interface ExecuteRenamePlanOutput {
 export const EXECUTE_RENAME_PLAN_OUTPUT_SCHEMA = {
   planId: z.string().describe("The plan this call applied or previewed."),
   profileId: z.string().describe("The profile the plan belongs to."),
-  library: z.string().describe("The document library named by the profile's identity."),
+  driveId: z
+    .string()
+    .describe(
+      "The drive every rename in this run was addressed within, taken from the plan itself rather than from the " +
+        "profile. The profile's library name is not reported here on purpose: an older plan executed after the " +
+        "profile's library changed still writes to the drive the plan names, and reporting the new library's name " +
+        "beside those writes would name a library this call did not touch.",
+    ),
+  reverses: z
+    .string()
+    .optional()
+    .describe(
+      "The plan id this run undoes, present only when the plan executed is itself a reversal log. A rollback is a " +
+        "plan like any other, so without this field its report is shape-identical to a forward run's.",
+    ),
   dryRun: z
     .boolean()
     .describe(
