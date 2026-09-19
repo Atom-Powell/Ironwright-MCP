@@ -13,8 +13,11 @@ The changes a deployment needs that can be proven on a development machine:
 - An explicit configuration contract, including where profiles come from.
 
 The merge gate is that the COMPILED PRODUCTION OUTPUT answers all five read tools correctly against
-the live tenant, run as `node dist/server/main.js`. Every live sitting this project has run so far
-used `tsx` against TypeScript source, so the compiled artifact has never been executed.
+the live tenant, run as `node dist/server/main.js`. Every live sitting before this one used `tsx`
+against TypeScript source, so the compiled artifact had never been executed. That gate ran on
+2026-09-18 and passed, with every figure matching the phase 4b and 4c sittings;
+`docs/OPEN-ITEMS.md` carries the record and what it does not establish, the shutdown deadline
+above all, which no Windows run can exercise.
 
 This section was rewritten by the amendment below. The phase originally centered on a container
 image and the machine has no runtime to build one.
@@ -68,10 +71,11 @@ slice, held until a runtime exists to build one.
 
 **The merge gate changes and does not weaken.** It was that the container answers all five read
 tools against the live tenant. It is now that the COMPILED PRODUCTION OUTPUT does, run as
-`node dist/server/main.js` from `npm run build:prod`. Every live sitting this project has ever run
-used `tsx` against TypeScript source. Nothing has ever exercised the compiled artifact, and the
+`node dist/server/main.js` from `npm run build:prod`. Every live sitting before this phase used
+`tsx` against TypeScript source. Nothing had ever exercised the compiled artifact, and the
 production compile is precisely where excluding the setup command could break something that source
-execution hides. That is a real gate against an artifact this project has genuinely never run.
+execution hides. That was a real gate against an artifact this project had genuinely never run, and
+it ran and passed on 2026-09-18.
 
 ## The image, deferred to its own slice
 

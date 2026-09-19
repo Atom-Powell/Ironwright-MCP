@@ -53,14 +53,21 @@ request, which Copilot Studio requires and which prevents cross-request state le
 **Graph access, in priority order.** Path-based `driveItem` addressing over ID addressing.
 `$batch` for combining requests, respecting the 20-request and 4 MB caps. Delta query with a
 persisted `deltaLink`. Microsoft Search as the cross-check for a correctly named file filed into a
-different document library of the same site. ETags with `If-Match` on every write. Each is built
+different document library of the same site. ETags with `If-Match` on every write; measured
+against a real tenant on 2026-09-19, a `driveItem` PATCH returns the updated item carrying its new
+`eTag`, so a write refreshes its own precondition from the response and needs no follow-up metadata
+read. Each is built
 with the caller that exercises it rather than ahead of any consumer, which is why phase 2b was
-split on 2026-09-14: `$batch` moves to phase 6, where the write tools are its first real caller,
-and the Microsoft Search cross-check becomes phase 2c. Amended 2026-09-17: the cross-check's
+split on 2026-09-14: `$batch` moves to phase 6, where the write tools were expected to be its first
+real caller, and the Microsoft Search cross-check becomes phase 2c. Amended 2026-09-17: the
+cross-check's
 original target, a file outside the taxonomy, was already covered by phase 2a's delta scan and the
 matcher's `misplaced` finding; the real gap is a second document library of the same site.
 Cross-site is out of reach on the same grant, since `Sites.Selected` trims Search results to the
-one granted site.
+one granted site. Amended 2026-09-19: phase 6a issues renames sequentially and deferred `$batch`
+again, so it still has no caller. The measurement that decides when batching earns its complexity
+now exists rather than being guessed at: a rename costs exactly one Graph operation, the plan-time
+etag fetch costs one per candidate, and an excluded item costs none.
 
 **Reading the workbook. Rewritten 2026-09-16 by a live tenant run; the previous entry is void.**
 The Graph Excel API is unreachable from this server. `/workbook/` calls are refused with 403
@@ -84,7 +91,7 @@ server must be structurally incapable of writing to the customer's live operatio
 than merely not calling the wrong method, still governs: a downloaded copy cannot write back at all,
 so the guarantee is stronger than a non-persistent session gave. What it got wrong was assuming the
 mechanism existed. It had never been run. The evidence is in `docs/OPEN-ITEMS.md`; the replacement
-reader has no design yet, and writing one is its own session.
+reader was its own session, phase 2b-2, and is the shipped reader this entry describes above.
 
 **Single-flight scan coordination.** Adopted 2026-09-14 for scans in `src/scan/coordinator.ts`, where
 concurrent scans share a process-level store client and a persisted `deltaLink` that outlive the
@@ -93,7 +100,10 @@ re-enumerating, and a concurrent call reading it inside that window would report
 library as missing.
 
 **State store.** Azure Table Storage for per-drive `deltaLink`s, inventory snapshots, plans, and
-reversal logs.
+reversal logs. Plans stopped being a promise on 2026-09-19: a plan written by `generate_rename_plan`
+persisted and was read back by `execute_rename_plan` in a separate tool call, through the real
+`@azure/data-tables` client against Azurite. Azurite rather than a real Azure Table Storage
+account, which no part of this store has met yet.
 
 **Hosting.** Azure Container Apps, Node-native and stateless, minimum one replica. Cloudflare
 Workers was considered and rejected for this workload. Do not relitigate without a real cost or
@@ -130,7 +140,7 @@ path rather than a separate one.
 
 | Tool | Kind | Notes |
 |---|---|---|
-| `inventory_tree` | read | Full tree via delta and batch, not recursive per-folder walks |
+| `inventory_tree` | read | Full tree via delta, not recursive per-folder walks |
 | `describe_workbook` | read | No source: lists sheets and tables. One source: its header row and columns, no mapping proposed |
 | `reconcile_workbook_vs_repository` | read | The centerpiece. Expected versus actual, structured gap report |
 | `query_repository` | read | Operational questions served from the state index |
@@ -198,7 +208,7 @@ registry, so a tool added later inherits every check.
 
 ## Build Sequence
 
-The spec carries the full phase descriptions. Status as of 2026-09-18:
+The spec carries the full phase descriptions. Status as of 2026-09-19:
 
 1. **Foundation.** Complete and merged. Stateless transport, all ten tools registered as honest
    stubs behind the contract test, the pure profile schema, the two-layer write gate, and a
@@ -233,8 +243,10 @@ The spec carries the full phase descriptions. Status as of 2026-09-18:
      one of four distinguishable reasons when the cross-check did not complete, and says nothing
      when it did.
    - The `$batch` builder left this phase on 2026-09-14 for phase 6. A delta-driven inventory
-     has no use for it and a range read is one call either way, so its first real caller is the
-     write tools.
+     has no use for it and a range read is one call either way, so a write tool was expected to be
+     its first real caller. Phase 6a deferred it again and issues renames sequentially, so it still
+     has none; see the Decision Record's Graph access entry for the measured per-rename cost that
+     decides when it arrives.
 3. **Reconciliation engine.** Complete, pending review. Pure and fixture-tested with no Graph
    dependency, which is what let it be built ahead of phase 2. `reconcile` is the single public
    entry; the four stages behind it stay internal so two tools cannot disagree about whether a
@@ -303,9 +315,8 @@ The spec carries the full phase descriptions. Status as of 2026-09-18:
      after discovering mid-plan that the development machine has no container runtime; it is held
      for its own slice rather than dropped, and the merge gate became the compiled production
      output answering live in its place. That gate, `node dist/server/main.js` built from `npm
-     run build:prod` against all five read tools on the live tenant, is the controller's to run
-     before merge and has not run yet; every live sitting this project has performed so far used
-     `tsx` against source, never the compiled artifact. `docs/SETUP.md` carries the full
+     run build:prod` against all five read tools on the live tenant, ran and passed on 2026-09-18,
+     as recorded above. `docs/SETUP.md` carries the full
      deployment configuration contract this phase settled.
    - **5b: everything past the image.** Held rather than started. The container image itself,
      recorded in the design spec so this slice does not restart from nothing; the federated
@@ -321,7 +332,7 @@ The spec carries the full phase descriptions. Status as of 2026-09-18:
 6. **Write tools**, sliced vertically rather than horizontally, per
    `docs/superpowers/specs/2026-09-18-rename-write-path-design.md`: a write layer built ahead of any
    caller is precisely the shape this project already rejected once.
-   - **6a: the rename write path. Built and covered by fakes only; the live sitting has not run.**
+   - **6a: the rename write path. Complete and verified live on 2026-09-19.**
      `generate_rename_plan` and `execute_rename_plan`, the first write this server has ever made,
      plus only the substrate those two tools need: a `GraphClient` PATCH verb carrying `If-Match`
      and distinguishing success, a 412 precondition failure, and a 404 not-found; `StateStore` plan
@@ -337,10 +348,20 @@ The spec carries the full phase descriptions. Status as of 2026-09-18:
      slice, and left for 6b and 6c: `generate_move_plan` and `execute_move_plan`, including async
      cross-library polling; `replicate_template`; the `$batch` builder; and `conflictBehavior`.
      Every one of them arrives with the caller that exercises it, the same rule that moved `$batch`
-     out of phase 2. **No rename has been applied to a real SharePoint library, no reversal log has
-     been replayed, and no real 412 has been observed.** `docs/OPEN-ITEMS.md` carries the dated
-     record of exactly what is and is not covered; the merge gate is the full loop against the
-     sandbox tenant described in the design spec's own verification section, and it has not run.
+     out of phase 2. **The full loop ran against the sandbox tenant on 2026-09-19 and passed**: a
+     plan generated, dry run, applied for real, the renames confirmed by a fresh delta scan, rolled
+     back through the reversal log, the library confirmed back where it started, and then one file
+     edited between generating and executing so that item alone was refused on its own precondition
+     while the other still applied. Two facts about Graph that this project had only assumed are now
+     measured. A `driveItem` PATCH does return the updated item carrying its new `eTag`, so the
+     reversal entries were refreshed from the response and the rollback was not refused. And Graph
+     evaluates `If-Match` BEFORE existence: a stale precondition against a path holding nothing
+     answers 412 `resourceModified`, not 404. Since this server always sends `If-Match`, its
+     `not_found` outcome is unreachable in practice; `execute_rename_plan` reports that refusal as
+     `precondition_refused` and says only that the item at that path is not the one the plan
+     recorded, without naming which of "changed" or "absent" caused it, since 412 alone cannot
+     tell the two apart and telling them apart would cost a GET per refusal.
+     `docs/OPEN-ITEMS.md` carries the dated record, including what the sitting did not establish.
    - **6b and 6c.** Held rather than started: the move tools, `replicate_template`, `$batch`, and
      `conflictBehavior`, in the order 6a's own design spec lays out.
    Then **Copilot Studio integration and governance**, then the **evaluation suite**, whose
@@ -350,9 +371,9 @@ The spec carries the full phase descriptions. Status as of 2026-09-18:
 Of the three decisions the parent spec required before phase 2, two are settled and recorded in
 `docs/OPEN-ITEMS.md`: the per-site grant does not accept a delegated token, and the MCP endpoint
 authenticates through Container Apps built-in Entra auth. The third, which delegated scopes the
-setup command's device-code sign-in must request, is still open, but it governs that sign-in
-rather than the server's own Graph access, so it did not block phase 2b-1 and does not block
-2c.
+setup command's device-code sign-in must request, is still open. It governs that sign-in rather
+than the server's own Graph access, which is why it has blocked no phase so far and blocked none
+through 6a.
 
 A fourth question, which nobody thought to ask, was settled the hard way on 2026-09-16: whether the
 Excel API accepts an app-only token at all. It does not. The lesson is recorded here rather than

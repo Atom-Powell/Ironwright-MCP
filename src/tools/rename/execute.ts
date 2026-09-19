@@ -164,8 +164,18 @@ export async function runExecuteRenamePlan(
       if (renameResult === "failed") {
         outcome = "failed";
       } else if (renameResult.kind === "precondition_failed") {
-        outcome = "changed_since_plan";
+        outcome = "precondition_refused";
       } else if (renameResult.kind === "not_found") {
+        // Unreachable while this executor always sends If-Match. The live probe
+        // at .superpowers/live-sitting/probe-precondition.ts measured Graph
+        // evaluating If-Match before existence: a stale precondition against a
+        // path holding nothing answers 412, never 404. Kept rather than
+        // removed, the same way src/domain/rename/plan.ts keeps its own
+        // unreachable collision branches labeled instead of deleted: nothing
+        // proves a negative, and removing a branch on a write path is the
+        // worse risk. readDriveItemEtag's own 404 mapping is not affected by
+        // this: that call is a GET carrying no precondition at all, so its 404
+        // stays live and meaningful.
         outcome = "not_found";
       } else {
         // The rename is done. This outcome is final; the bookkeeping below has
@@ -231,7 +241,7 @@ export async function runExecuteRenamePlan(
       counts: {
         renamed: countOf(results, "renamed"),
         wouldRename: countOf(results, "would_rename"),
-        changedSincePlan: countOf(results, "changed_since_plan"),
+        preconditionRefused: countOf(results, "precondition_refused"),
         notFound: countOf(results, "not_found"),
         failed: countOf(results, "failed"),
       },

@@ -278,7 +278,7 @@ describe("the reversal log as something that is actually replayed", () => {
     );
 
     expect(rollback.counts.renamed).toBe(2);
-    expect(rollback.counts.changedSincePlan).toBe(0);
+    expect(rollback.counts.preconditionRefused).toBe(0);
     expect(rollback.reverses).toBe(PLAN_ID);
     expect(graph.paths()).toEqual(before);
   });

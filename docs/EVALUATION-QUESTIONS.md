@@ -125,3 +125,9 @@ capability that only becomes visible when someone asks a real question.
 That is the point of running these before the write tools exist. A description that misleads a
 model into reading the wrong thing is cheap to fix. The same description misleading it into
 renaming four hundred files is not.
+
+**Overtaken by phase 6a, 2026-09-19.** The rename path now exists and this suite still has not
+run, so the second sentence above describes a live risk rather than an anticipated one. The two
+conditions the risk was always stated against are both in place, `IW_ALLOW_WRITES` and a per-call
+`confirm`, and neither is a substitute for having read what the write tools' descriptions actually
+tell a model.

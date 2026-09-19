@@ -56,9 +56,9 @@ export function executePlanText(output: ExecuteRenamePlanOutput): string[] {
       ]
     : [
         `Applied plan ${output.planId} against drive ${output.driveId}.`,
-        `${String(output.counts.renamed)} renamed, ${String(output.counts.changedSincePlan)} refused because the ` +
-          `file changed since the plan, ${String(output.counts.notFound)} no longer at the planned path, ` +
-          `${String(output.counts.failed)} failed.`,
+        `${String(output.counts.renamed)} renamed, ${String(output.counts.preconditionRefused)} refused because ` +
+          `the item there is not the one the plan recorded, ${String(output.counts.notFound)} no longer at the ` +
+          `planned path, ${String(output.counts.failed)} failed.`,
       ];
 
   // Stated before the item listing rather than beside the reversal line at the

@@ -38,6 +38,22 @@ Three responses matter and must be distinguishable to the caller rather than col
 412 meaning the item changed since the ETag was taken, and a 404 meaning it is no longer there. The
 executor reports those differently because an operator acts on them differently.
 
+**Amended 2026-09-19 by the live sitting. The 404 is not a live outcome of the PATCH path.** Graph
+evaluates `If-Match` before existence. Probed directly against the sandbox tenant:
+
+    absent path, no If-Match     : 400 invalidRequest
+    absent path, stale If-Match  : 412 resourceModified
+    present path, stale If-Match : 412 resourceModified
+
+Since this server always sends `If-Match`, a PATCH at a path holding nothing is refused as 412
+rather than 404, so `renameDriveItem`'s `not_found` outcome is unreachable by construction through
+the executor. It is retained and labeled as such rather than deleted: nothing proves a negative and
+removing a branch on a write path is the worse risk. The 404 mapping that does still fire is
+`readDriveItemEtag`'s, because that call is a GET carrying no precondition, and it is what produces
+the plan-time `file_not_found_at_plan_time` exclusion. Also settled by the same sitting: a 412
+alone does not say whether the item changed or is absent, which is what the report section's own
+2026-09-19 amendment turns on.
+
 **`StateStore` gains plan persistence.** The Decision Record has always said Azure Table holds
 "plans and reversal logs" and the interface never had them.
 
@@ -123,6 +139,16 @@ The rule both families point to is unchanged, and is why this section was amende
 module consumes another module's output, at least one test must obtain that output from the real
 producer rather than construct it.
 
+**Confirmed 2026-09-19 by the live sitting, and it settles the fixtures question.** The exclusion
+path those four fixtures were trying to reach is reachable on real data, by the route the engine
+actually takes rather than the one they hand-built. Re-seeding left a compliant file from an
+earlier sitting at a client's canonical path alongside a newly planted misnamed one; the engine
+collapsed both into one slot, the compliant file won it, the misnamed file arrived in
+`report.duplicates`, and the plan excluded it as `target_path_already_occupied`, issuing no etag
+lookup for it. That is the strongest available evidence that deleting the four fixtures rather than
+repairing them was right: the shape they asserted is unreachable, while the outcome they were
+written to cover arrives on its own from a real report.
+
 **Three collisions are detected at plan time and excluded with a reason**, because none can be
 resolved without `conflictBehavior`, which this slice does not have. Each reason states only what
 the code observed, not an inference about why:
@@ -193,13 +219,20 @@ live call shows otherwise, the fallback is the same metadata GET the generator a
 one applies is settled by calling it, not by reading about it, and the answer belongs in the plan
 before the code is written.
 
+**Answered 2026-09-19 by the live sitting.** A `driveItem` PATCH does return the updated item
+carrying its new `eTag`. Two renames cost exactly two Graph operations,
+`reversalEntriesNotRefreshed` was zero, and every reversal entry was refreshed from the response
+body, so the documented behavior is also the observed one and the fallback GET costs nothing in the
+normal case. The fallback branch itself remains unexercised against a real tenant, because no PATCH
+in that sitting returned a body without an `eTag`; `docs/OPEN-ITEMS.md` carries that as open.
+
 A dry run writes no reversal log, because it changes nothing to reverse.
 
 ## What the report says
 
 Applied items, and skipped items each carrying which of four reasons applied:
 
-- the item changed since the plan was generated, so its `If-Match` was refused;
+- Graph refused the write because the item at that path is not the one the plan recorded;
 - the item is no longer at that path;
 - Graph refused the write for some other reason, which this server cannot interpret and does not
   try to;
@@ -222,6 +255,17 @@ learn why a file they expected to be renamed was not.
 Counts are computed over the complete set before any truncation and reported exactly, as everywhere
 else in this server.
 
+**Amended 2026-09-19 by the live sitting.** The first reason above read "the item changed since the
+plan was generated, so its `If-Match` was refused", and that is an assertion the code cannot
+observe. Graph answers a refused precondition with 412 whether the item changed or is simply gone,
+so the executor sees one status and cannot tell the two apart; distinguishing them would cost a GET
+per refusal this project deliberately does not pay. The outcome is named `precondition_refused`,
+counts key `preconditionRefused`, renamed from `changed_since_plan` in `adc3d04`, and every rendered
+line and schema description says only that the item at that path is not the one the plan recorded.
+The second reason is a consequence of the same finding: with `If-Match` always sent, nothing an
+operator does produces it, so it is a schema branch expected to stay at zero rather than a reason
+anybody will read in a report. It is kept for the reason the substrate section's amendment gives.
+
 ## Sequential, not batched
 
 Renames are issued one at a time and the report says how many requests that cost.
@@ -231,6 +275,13 @@ misnamed files, so batching would be an untested complexity added for an unmeasu
 per-sub-request preconditions and partial batch failures in the same review as the first mutation
 this server has ever made. The measured request count from the live sitting is what should decide
 when it arrives, and a real number will be available afterward rather than an estimate.
+
+**Measured 2026-09-19.** The number exists. A rename costs exactly one Graph operation, the
+plan-time etag fetch costs one per candidate, and an item excluded at plan time costs none, which
+the sitting confirmed by seeing one etag lookup issued for two misnamed files when one of them was
+excluded. Two renames cost two operations. On a sandbox holding a handful of misnamed files that is
+not a case for batching; `$batch` earns its complexity at a plan size where the per-item request
+count actually hurts, and this is the figure to multiply when judging that.
 
 ## Verification before merge
 
@@ -252,6 +303,11 @@ one.
 
 Step 5 exercises the ETag refusal against a real 412 rather than against a fixture, which is the
 same reasoning that made earlier phases probe an API before designing for it.
+
+**This sitting ran on 2026-09-19 and all five steps passed.** Step 4's confirmation is a fresh
+delta scan, so what it establishes is that paths, names and counts returned to the seeded baseline,
+not that the library is byte for byte where it started. `docs/OPEN-ITEMS.md` carries the record and
+what the sitting did not establish.
 
 ## What 6b and 6c inherit
 

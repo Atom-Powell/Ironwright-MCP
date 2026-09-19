@@ -4,11 +4,17 @@ import { driveItemPath } from "./paths.js";
 
 /**
  * The three responses a rename can produce, kept apart rather than collapsed
- * into success-or-throw. A 412 and a 404 are expected outcomes of a plan
- * applied against a library other people also use, and an operator acts on
- * them differently: a 412 means re-plan, a 404 means the file moved or was
- * deleted. Turning either into an exception would make the executor catch its
- * own normal path.
+ * into success-or-throw. A 412 is the expected outcome of a plan applied
+ * against a library other people also use, and it does not by itself say
+ * whether the item changed or is simply gone: measured against the live
+ * tenant (.superpowers/live-sitting/probe-precondition.ts, 2026-09-19), Graph
+ * evaluates If-Match before existence, so a stale precondition against an
+ * absent path also answers 412, never 404. A 404 therefore only reaches this
+ * function when no If-Match precondition was sent, which does not happen
+ * through this project's executor today. The mapping is kept anyway rather
+ * than removed, since a branch on a write path is not removed on the strength
+ * of a negative nobody can prove. Turning either into an exception would make
+ * the executor catch its own normal path.
  */
 export type RenameOutcome =
   | { kind: "renamed"; etag: string | undefined }
@@ -67,6 +73,12 @@ export async function renameDriveItem(
     return { kind: "renamed", etag: etagOf(updated) };
   } catch (error) {
     if (error instanceof GraphRequestError && error.status === 412) return { kind: "precondition_failed" };
+    // Unreachable through execute_rename_plan today: every call into this
+    // function carries an If-Match etag, and Graph checks that precondition
+    // before existence, so a stale one against an absent path answers 412
+    // above, never reaches here. readDriveItemEtag below is different and its
+    // own 404 mapping stays live and meaningful, because that call is a GET
+    // carrying no precondition at all.
     if (error instanceof GraphRequestError && error.status === 404) return { kind: "not_found" };
     throw error;
   }
