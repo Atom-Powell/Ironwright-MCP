@@ -2187,3 +2187,29 @@ is exercised in `tests/tools/rename/execute.test.ts` and `tests/tools/rename/exe
 but only against fakes that were told to omit the etag; nothing has observed whether Graph's own
 PATCH response for a `driveItem` rename actually omits it in practice, which is the premise the
 branch exists to cover.
+
+### The phase 6a whole-branch fix wave, 2026-09-19
+
+Two things the fix wave settled it could not fix, recorded here rather than left implicit.
+
+**A confirmed run leaves the stored inventory and delta link stale, and this server is now what
+makes them stale.** `execute_rename_plan` renames files in the library and writes nothing back to
+the inventory, so every path it changed is wrong in the stored snapshot until the next scan.
+`query_repository` answers from that snapshot at zero Graph requests, which is its own documented
+promise and not a defect, and it reports the scan's timestamp, so a reader is told how old the
+answer is. What is new in this branch is the cause: before phase 6a, a divergence between the
+snapshot and the library was always somebody else's edit arriving between scans, and now this
+server can produce one itself within a single session. A caller who renames and then queries gets
+the pre-rename paths back with an honest timestamp attached. Whether the executor should invalidate
+the delta link, apply its own changes to the inventory, or leave both alone is a design question
+this wave did not answer and did not want to answer inside a fix.
+
+**The `Plans` table's `as unknown as TableClientLike` cast has never been exercised against the
+real `@azure/data-tables` client.** `tableStateStoreFromConnectionString` in `src/store/table.ts`
+now makes three such casts, not two. The `DeltaLinks` and `Inventory` casts were held against the
+real client on Azurite on 2026-09-16, which is recorded under "Phase 2a: covered only by fakes"
+above; the `Plans` cast is new in this branch and has met nothing but `FakeTableClient`. The
+compiler checks nothing at that line by construction, so no fake can check it either. The phase 6a
+entry above records the 32768-character cap as unprobed, which is a different claim: the cap is
+about what the service accepts, the cast is about whether the real client satisfies the interface
+this code calls through at all.

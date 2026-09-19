@@ -82,8 +82,7 @@ Files discovered by the Microsoft Search cross-check always carry an empty etag,
 not return one. They never reach this path: a file in another library is `misplaced`, which is a
 move, and moves are not in this slice.
 
-**Amended 2026-09-18, after Task 3's own tests were run against a real `reconcile()` report rather
-than a hand-built one.** The paragraph this replaces described two misnamed files appearing as two
+**Amended 2026-09-18.** The paragraph this replaces described two misnamed files appearing as two
 separate artifacts and colliding on one canonical name. The reconciliation engine cannot produce
 that shape. `matchArtifacts` (`src/domain/reconcile/match.ts`) resolves one winner per slot by
 `STATE_RANK` and demotes every other file matching that slot to a `DuplicateFinding`; the canonical
@@ -93,11 +92,36 @@ plan therefore never learns about a losing file from a second artifact grouped b
 learns about it from `report.duplicates`, where the engine already recorded the loser once
 `matchArtifacts` resolved the competition.
 
-This was found only when a test was written that feeds a real `reconcile()` report into
-`pairMisnamedArtifacts` rather than a hand-built `ArtifactFinding` and `DuplicateFinding` pair: the
-original implementation, and the four fixtures across Task 3's synthetic-report tests that shared
-its same two wrong assumptions about the engine's own output, all passed against each other while
-disagreeing with what `reconcile()` actually returns.
+**Corrected 2026-09-19.** The account that stood here, that this was "found only when a test was
+written that feeds a real `reconcile()` report into `pairMisnamedArtifacts`" and that four fixtures
+shared "its same two wrong assumptions", is not what happened. `48be642` put that account into both
+`CLAUDE.md` and this document; `f4d126b` corrected only `CLAUDE.md`, which left the binding document
+carrying the false version. The two now agree. What actually happened, in two parts, because these
+are two distinct defect families rather than one:
+
+Task 4's twelve tool-level tests for `generate_rename_plan` already called the real `reconcile()`
+through the tool's own handler. Nine of them failed first, against a separate wrong assumption, that
+`expectedPath` is a full file path rather than the rendered taxonomy folder it actually is. Once
+that was fixed, the twelfth test still failed, and tracing `match.ts` from that one remaining
+failure is what found the two-artifacts-collide assumption above.
+`tests/domain/rename/plan.reconcile.test.ts` was written afterward, so a future mismatch of this
+kind fails directly in the domain layer instead of surfacing as a tool-test failure that still has
+to be traced back to its cause. It prevents a recurrence; it did not catch this one.
+
+The four impossible fixtures are the second family, adjacent to the first but not the same mistake.
+Each hand-built a report in which an artifact, a duplicate, or an orphan already occupied a rename
+candidate's target path, independently of how `matchArtifacts` resolves competing candidates for one
+slot, a shape that turns out to be unreachable once traced against the engine's own resolution.
+Three were deleted in `55dc5ee`, found by a reviewer reading them and reproducing against the
+engine; the fourth, the orphan-occupancy fixture, was found by the implementer's own reasoning and
+deleted in `b7d48ef`. Each passed its own review first, and none was caught by any
+`reconcile()`-backed test; each was simply shown unreachable and deleted, with no replacement. A
+fifth, a `misnamed` artifact hand-built with a `library` on its match, survived until the
+whole-branch review and was restated rather than deleted, since the guard it covers is kept.
+
+The rule both families point to is unchanged, and is why this section was amended at all: when a
+module consumes another module's output, at least one test must obtain that output from the real
+producer rather than construct it.
 
 **Three collisions are detected at plan time and excluded with a reason**, because none can be
 resolved without `conflictBehavior`, which this slice does not have. Each reason states only what
