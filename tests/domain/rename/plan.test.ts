@@ -34,7 +34,7 @@ describe("pairMisnamedArtifacts", () => {
       client: "CLIENTC",
       deliverable: "MonthlyTraining",
       period: { year: 2026, month: 1 },
-      expectedPath: "2026/CLIENTC/01-January/2026-01_CLIENTC_MonthlyTraining.xlsx",
+      expectedPath: "2026/CLIENTC/01-January",
       expectedName: "2026-01_CLIENTC_MonthlyTraining.xlsx",
       state: "missing",
     };

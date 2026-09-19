@@ -1,4 +1,4 @@
-import type { ArtifactFinding, ReconciliationReport } from "../reconcile/index.js";
+import type { ArtifactFinding, DuplicateFinding, ReconciliationReport, Slot } from "../reconcile/index.js";
 
 export interface RenameCandidate {
   /** Library-relative, no leading slash. */
@@ -104,11 +104,19 @@ function candidateFrom(artifact: ArtifactFinding): RenameCandidate | undefined {
   // Putting it right is a move, which is phase 6b.
   if (matched.library !== undefined) return undefined;
 
+  // expectedPath is the expected FOLDER, not a full file path; expectedName is
+  // the expected filename. The engine reports them as two separate fields,
+  // rendered independently in expected.ts from the taxonomy and the naming
+  // template respectively, so they are composed into a full path here rather
+  // than assumed to already arrive composed. An earlier version of this
+  // function called parentOf on expectedPath, which is wrong for a value that
+  // is already a folder: it stripped one segment too many and rejected every
+  // correctly-shaped misnamed artifact as a folder mismatch. Reach for this
+  // comment before reaching for parentOf on expectedPath again.
   const folder = parentOf(matched.path);
-  const expectedFolder = parentOf(artifact.expectedPath);
-  if (folder !== expectedFolder) {
+  if (folder !== artifact.expectedPath) {
     throw new MisnamedArtifactShapeError(
-      `"${matched.path}" sits in "${folder}" while its expected path "${artifact.expectedPath}" is in "${expectedFolder}"`,
+      `"${matched.path}" sits in "${folder}" while its expected folder is "${artifact.expectedPath}"`,
     );
   }
   if (matched.name === artifact.expectedName) {
@@ -121,10 +129,11 @@ function candidateFrom(artifact: ArtifactFinding): RenameCandidate | undefined {
     path: matched.path,
     currentName: matched.name,
     targetName: artifact.expectedName,
-    // Derived from the match's own folder rather than taken from
-    // expectedPath, so the two are proven equal by the guard above rather
-    // than assumed equal here.
-    targetPath: folder === "" ? artifact.expectedName : `${folder}/${artifact.expectedName}`,
+    // A library-root artifact renders an empty expectedPath (an empty
+    // taxonomy), so the join must not always insert a slash: that would
+    // produce a leading-slash path this library's paths never carry.
+    targetPath:
+      artifact.expectedPath === "" ? artifact.expectedName : `${artifact.expectedPath}/${artifact.expectedName}`,
     client: artifact.client,
   };
 }
@@ -140,48 +149,137 @@ function collisionFrom(candidate: RenameCandidate, reason: CollisionReason): Ren
 }
 
 /**
+ * A stable key for the (client, deliverable, period) a `Slot` names, shared by
+ * `ArtifactFinding` and `DuplicateFinding.slot`. Kept local rather than
+ * imported from `match.ts`, which does not export its own version of this:
+ * the engine's internal stages, `match.ts` included, stay unreachable from
+ * outside `src/domain/reconcile`, by that package's own entry-point rule.
+ *
+ * `JSON.stringify` of the tuple rather than a delimited string: a client name
+ * or deliverable id can contain any printable character a workbook author
+ * chose, so a hand-picked delimiter could be forged into a collision (two
+ * different slots serializing to one key), where JSON's own escaping of `"`
+ * and `\` inside each element cannot. `match.ts`'s own `slotKey` reaches for a
+ * literal NUL byte to rule that out instead; this file does not, since a
+ * literal NUL in tracked source fails this repo's own hygiene test.
+ */
+function slotKeyOf(slot: Slot): string {
+  return JSON.stringify([slot.client, slot.deliverable, slot.period.year, slot.period.month]);
+}
+
+/**
+ * The artifact that won the slot a duplicate names.
+ *
+ * The engine guarantees one exists: `matchArtifacts` only ever produces a
+ * `DuplicateFinding` for a slot it also resolved a winner for, since a
+ * duplicate is by definition a losing candidate for a slot something else
+ * already claimed. A report where a duplicate's slot has no matching artifact,
+ * or an artifact with no `matched` file, contradicts that guarantee, so this
+ * throws rather than silently dropping the duplicate: a rename plan silently
+ * missing a file it should have flagged is the exact failure this module's
+ * other refusals exist to prevent.
+ */
+function winnerFor(report: ReconciliationReport, duplicate: DuplicateFinding): ArtifactFinding & { matched: NonNullable<ArtifactFinding["matched"]> } {
+  const key = slotKeyOf(duplicate.slot);
+  const winner = report.artifacts.find((artifact) => slotKeyOf(artifact) === key);
+  if (winner === undefined) {
+    throw new MisnamedArtifactShapeError(
+      `a duplicate at "${duplicate.path}" names a slot (client "${duplicate.slot.client}", deliverable ` +
+        `"${duplicate.slot.deliverable}", ${String(duplicate.slot.period.year)}-${String(duplicate.slot.period.month)}) ` +
+        "with no artifact in this report to have won it",
+    );
+  }
+  if (winner.matched === undefined) {
+    throw new MisnamedArtifactShapeError(
+      `the artifact for the slot a duplicate at "${duplicate.path}" names has no matched file, which the ` +
+        "engine cannot produce for a slot that also produced a duplicate",
+    );
+  }
+  return { ...winner, matched: winner.matched };
+}
+
+/**
+ * A losing candidate for a slot this report's engine already resolved.
+ *
+ * Only a duplicate whose own state is "misnamed" is relevant here: that is the
+ * state meaning "this file sits in the right folder under the wrong name," the
+ * same meaning `candidateFrom` acts on for the slot's winner. A duplicate
+ * carrying a `library` came from the Microsoft Search cross-check and lives in
+ * another library, so it is excluded the same way `candidateFrom` excludes a
+ * foreign match: correcting it is a move, not a rename.
+ *
+ * The reason is chosen by comparing the winner's own matched path against the
+ * target this duplicate and the winner both converge on, rather than by
+ * switching on the winner's state. That comparison is exactly true when the
+ * winner is "compliant," since compliant is the only state whose matched path
+ * already equals the canonical target; for a "misnamed" or "misplaced" winner
+ * the matched path differs from the target for now, and correcting the
+ * winner, by rename or by phase 6b's move, would land it on that same target,
+ * which is what "two files share one target name" describes.
+ */
+function excludedFromDuplicate(report: ReconciliationReport, duplicate: DuplicateFinding): RenameCollision {
+  const winner = winnerFor(report, duplicate);
+  const targetPath =
+    winner.expectedPath === "" ? winner.expectedName : `${winner.expectedPath}/${winner.expectedName}`;
+
+  const reason: CollisionReason =
+    winner.matched.path === targetPath ? "target_path_already_occupied" : "two_files_share_one_target_name";
+
+  return {
+    path: duplicate.path,
+    currentName: duplicate.name,
+    targetName: winner.expectedName,
+    client: duplicate.slot.client,
+    reason,
+  };
+}
+
+/**
  * Turns a reconciliation report into the from-and-to pairs a rename plan holds,
  * plus the pairs that cannot be attempted and why.
  *
  * Pure, and over the whole report. The caller narrows the result to the clients
  * it was asked about; this function must not, because the collision rules read
  * paths belonging to clients the caller may be excluding.
+ *
+ * The canonical name for a slot is a pure function of that slot, so two files
+ * that would both claim one canonical path necessarily parse to the same
+ * slot, and `matchArtifacts` resolves that competition before this function
+ * ever sees the report: one candidate wins and becomes the slot's single
+ * `ArtifactFinding`, and every other candidate for that slot becomes a
+ * `DuplicateFinding`. Two artifacts sharing a target path is therefore not a
+ * shape this engine can produce, and a rename plan learns about a losing file
+ * from `report.duplicates`, never from a second artifact grouped by target
+ * path. An earlier version of this function grouped candidates by target
+ * path looking for that grouping, and it could never fire.
  */
 export function pairMisnamedArtifacts(report: ReconciliationReport): RenamePairing {
   const occupied = occupiedPaths(report);
 
-  const paired: RenameCandidate[] = [];
-  for (const artifact of report.artifacts) {
-    const candidate = candidateFrom(artifact);
-    if (candidate !== undefined) paired.push(candidate);
-  }
-
-  const byTarget = new Map<string, RenameCandidate[]>();
-  for (const candidate of paired) {
-    const group = byTarget.get(candidate.targetPath);
-    if (group === undefined) byTarget.set(candidate.targetPath, [candidate]);
-    else group.push(candidate);
-  }
-
   const candidates: RenameCandidate[] = [];
   const collisions: RenameCollision[] = [];
 
-  for (const candidate of paired) {
-    const sharing = byTarget.get(candidate.targetPath) ?? [];
-    if (sharing.length > 1) {
-      collisions.push(collisionFrom(candidate, "two_files_share_one_target_name"));
-      continue;
-    }
+  for (const artifact of report.artifacts) {
+    const candidate = candidateFrom(artifact);
+    if (candidate === undefined) continue;
     // `!== candidate.path` rather than a bare membership test: the candidate's
     // own current path is in `occupied` by construction, and the target path
     // can never equal it, since a rename with the same name is refused above.
     // The comparison is kept anyway so a future change to that rule cannot
-    // turn every candidate into a collision with itself.
+    // turn every candidate into a collision with itself. This still catches a
+    // cross-slot collision, the one occupiedPaths always covered: a target
+    // path held by an unrelated artifact, duplicate or orphan belonging to a
+    // different slot entirely.
     if (occupied.has(candidate.targetPath) && candidate.targetPath !== candidate.path) {
       collisions.push(collisionFrom(candidate, "target_path_already_occupied"));
       continue;
     }
     candidates.push(candidate);
+  }
+
+  for (const duplicate of report.duplicates) {
+    if (duplicate.state !== "misnamed" || duplicate.library !== undefined) continue;
+    collisions.push(excludedFromDuplicate(report, duplicate));
   }
 
   return { candidates, collisions };
