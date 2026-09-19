@@ -39,28 +39,6 @@ describe("collisions", () => {
     ]);
   });
 
-  it("excludes a file whose canonical name is already taken by a compliant file", () => {
-    const candidate = misnamed("CLIENTA", "wrong.xlsx", "2026-01_CLIENTA_MonthlyTraining.xlsx");
-    const occupant: ArtifactFinding = {
-      client: "CLIENTA",
-      deliverable: "MonthlyTraining",
-      period: { year: 2026, month: 2 },
-      expectedPath: "2026/CLIENTA/01-January",
-      expectedName: "2026-01_CLIENTA_MonthlyTraining.xlsx",
-      state: "compliant",
-      matched: {
-        path: "2026/CLIENTA/01-January/2026-01_CLIENTA_MonthlyTraining.xlsx",
-        name: "2026-01_CLIENTA_MonthlyTraining.xlsx",
-        etag: "e2",
-      },
-    };
-
-    const pairing = pairMisnamedArtifacts(report([candidate, occupant]));
-
-    expect(pairing.candidates).toEqual([]);
-    expect(pairing.collisions[0]?.reason).toBe("target_path_already_occupied");
-  });
-
   it("excludes a file whose canonical name is already taken by an orphan", () => {
     const candidate = misnamed("CLIENTA", "wrong.xlsx", "2026-01_CLIENTA_MonthlyTraining.xlsx");
 
@@ -78,63 +56,6 @@ describe("collisions", () => {
 
     expect(pairing.candidates).toEqual([]);
     expect(pairing.collisions[0]?.reason).toBe("target_path_already_occupied");
-  });
-
-  it("excludes a file whose canonical name is already taken by a duplicate in this library", () => {
-    // The duplicate names a DIFFERENT slot (month 2, not month 1) from the
-    // candidate's. Two duplicates cannot share a slot with a misnamed
-    // candidate unless they rank no better than "misnamed" -- see the winning
-    // duplicate test above -- so the only shape that reaches
-    // target_path_already_occupied through a same-library duplicate at all is
-    // one unrelated slot's leftover file that happens to physically sit at
-    // this candidate's target path.
-    const candidate = misnamed("CLIENTA", "wrong.xlsx", "2026-01_CLIENTA_MonthlyTraining.xlsx");
-
-    const pairing = pairMisnamedArtifacts(
-      report([candidate], {
-        duplicates: [
-          {
-            path: "2026/CLIENTA/01-January/2026-01_CLIENTA_MonthlyTraining.xlsx",
-            name: "2026-01_CLIENTA_MonthlyTraining.xlsx",
-            slot: { client: "CLIENTA", deliverable: "MonthlyTraining", period: { year: 2026, month: 2 } },
-            state: "compliant",
-          },
-        ],
-      }),
-    );
-
-    expect(pairing.collisions[0]?.reason).toBe("target_path_already_occupied");
-  });
-
-  it("does not treat a file in ANOTHER library as occupying the target path", () => {
-    // A qualified path is relative to a library this plan does not write to,
-    // so it cannot collide with anything here. Treating it as an occupant
-    // would refuse a rename that is perfectly safe.
-    //
-    // The duplicate shares the candidate's own slot, so its state has to rank
-    // no better than "misnamed" for the candidate to legitimately be that
-    // slot's winner: "misnamed_and_misplaced" rather than "compliant", which
-    // a library-qualified match can never carry anyway, since
-    // computeState in match.ts forces locationCorrect false whenever library
-    // is set.
-    const candidate = misnamed("CLIENTA", "wrong.xlsx", "2026-01_CLIENTA_MonthlyTraining.xlsx");
-
-    const pairing = pairMisnamedArtifacts(
-      report([candidate], {
-        duplicates: [
-          {
-            path: "2026/CLIENTA/01-January/2026-01_CLIENTA_MonthlyTraining.xlsx",
-            name: "2026-01_CLIENTA_MonthlyTraining.xlsx",
-            slot: { client: "CLIENTA", deliverable: "MonthlyTraining", period: { year: 2026, month: 1 } },
-            state: "misnamed_and_misplaced",
-            library: "Archive",
-          },
-        ],
-      }),
-    );
-
-    expect(pairing.collisions).toEqual([]);
-    expect(pairing.candidates).toHaveLength(1);
   });
 });
 

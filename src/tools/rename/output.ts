@@ -2,10 +2,15 @@ import { z } from "zod";
 import type { PlanExclusionReason } from "../../store/types.js";
 
 /**
- * The most items one generated plan holds. A plan larger than this cannot be
- * stored, since Azure Table caps a String property, and the refusal is raised
- * at generation time with a remedy a caller can act on rather than at the save,
- * where the message can only name characters.
+ * A coarse pre-check against an obviously oversized plan, refused before a
+ * single Graph request is spent rather than after the etag fetch loop. It is
+ * not the real ceiling: the store's actual bound is `MAX_PLAN_JSON_CHARS`
+ * (32000 characters across `items` and `excluded` combined), and a realistic
+ * item serializes to roughly 274 characters, so the true limit is closer to
+ * 116 items with `excluded` unbounded. This number exists only so a plan far
+ * past any reasonable size fails fast, with a remedy a caller can act on,
+ * before the etag fetch loop runs at all; `savePlan` is what actually enforces
+ * the character cap, in both StateStore implementations.
  */
 export const MAX_PLAN_ITEMS = 200;
 
@@ -18,10 +23,25 @@ export const MAX_PLAN_ITEMS_LISTED = 50;
 
 export const PLAN_EXCLUSION_REASONS = [
   "target_path_already_occupied",
+  "slot_already_satisfied_by_another_file",
   "two_files_share_one_target_name",
   "no_etag_available",
   "file_not_found_at_plan_time",
-] as const;
+] as const satisfies readonly PlanExclusionReason[];
+
+/**
+ * Compile-time proof this list is exhaustive, not merely valid. The
+ * `satisfies` clause above only checks each listed string is some
+ * `PlanExclusionReason`; it says nothing about whether every
+ * `PlanExclusionReason` is listed. `AssertNever`'s constraint fails to
+ * compile the moment `PlanExclusionReason` gains a member this list omits,
+ * which is what lets a new reason fail here, at a build, rather than only at
+ * a live tenant when the SDK validates `structuredContent` against
+ * `z.enum(PLAN_EXCLUSION_REASONS)` and finds a value the schema does not
+ * declare.
+ */
+type AssertNever<T extends never> = T;
+type _PlanExclusionReasonsExhaustive = AssertNever<Exclude<PlanExclusionReason, (typeof PLAN_EXCLUSION_REASONS)[number]>>;
 
 export interface GenerateRenamePlanOutput {
   planId: string;
@@ -37,7 +57,7 @@ export interface GenerateRenamePlanOutput {
   excludedCount: number;
   excludedOmitted: number;
   workbookReadGraphRequestsByThisCall: number;
-  etagLookupGraphRequests: number;
+  etagLookupsIssued: number;
   scanGraphRequestsByThisCall: number;
   scanSharedWithConcurrentCall: boolean;
 }
@@ -78,7 +98,7 @@ export const GENERATE_RENAME_PLAN_OUTPUT_SCHEMA = {
       }),
     )
     .describe(
-      "Misnamed files this plan will NOT attempt, each with why. The first two reasons are name collisions this " +
+      "Misnamed files this plan will NOT attempt, each with why. The first three reasons are name collisions this " +
         "server cannot resolve without a conflict behavior it deliberately does not implement; the last two mean " +
         "the file had no usable precondition when the plan was generated.",
     ),
@@ -88,12 +108,14 @@ export const GENERATE_RENAME_PLAN_OUTPUT_SCHEMA = {
     .number()
     .int()
     .describe("What reading the workbook cost this call. A download costs two requests, not one."),
-  etagLookupGraphRequests: z
+  etagLookupsIssued: z
     .number()
     .int()
     .describe(
-      "One per candidate whose etag this call fetched, counted rather than measured against the shared request " +
-        "counter, which a concurrent call also moves.",
+      "Lookups issued, one per candidate whose etag this call fetched, counted rather than measured against the " +
+        "shared Graph request counter, which a concurrent call also moves and which a retried lookup can move more " +
+        "than once. Not a Graph request count: a throttled lookup retries and spends more than one request while " +
+        "still counting as one lookup here.",
     ),
   scanGraphRequestsByThisCall: z
     .number()

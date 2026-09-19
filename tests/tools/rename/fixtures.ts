@@ -71,6 +71,38 @@ export function snapshotWhereTargetIsOccupied(): RepositorySnapshot {
   return snapshot([file(MISNAMED_PATH), file(CANONICAL_PATH, "other-etag")], ["2026", "2026/ACME", FOLDER]);
 }
 
+export function canonicalPathFor(client: string): string {
+  return `2026/${client}/09-September/2026-09_${client}_MonthlyTraining.xlsx`;
+}
+
+/**
+ * One misnamed file for each of `candidateClients`, plus a misnamed file
+ * alongside its own canonical-path occupant for each of `excludedClients`, so
+ * one scenario produces a plan with both a large item list and a large
+ * excluded list at once.
+ */
+export function snapshotForTruncation(
+  candidateClients: readonly string[],
+  excludedClients: readonly string[],
+): RepositorySnapshot {
+  const folderPaths = new Set<string>(["2026"]);
+  const files: RepositoryFile[] = [];
+
+  for (const client of candidateClients) {
+    folderPaths.add(`2026/${client}`);
+    folderPaths.add(`2026/${client}/09-September`);
+    files.push(file(misnamedPathFor(client)));
+  }
+  for (const client of excludedClients) {
+    folderPaths.add(`2026/${client}`);
+    folderPaths.add(`2026/${client}/09-September`);
+    files.push(file(misnamedPathFor(client)));
+    files.push(file(canonicalPathFor(client), "occupant-etag"));
+  }
+
+  return snapshot(files, [...folderPaths]);
+}
+
 export function scanResultFor(snapshotValue: RepositorySnapshot, driveId = "drive-1"): ScanResult {
   return {
     snapshot: snapshotValue,

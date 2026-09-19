@@ -78,7 +78,16 @@ export interface StateStore {
  * Why a misnamed file the engine found is recorded in the plan as something
  * that will not be attempted.
  *
- * The first two are name collisions, neither resolvable without
+ * The first three describe what a duplicate finding's slot resolution told
+ * this code, not what it inferred: `target_path_already_occupied` means a
+ * file already sits at the canonical path; `slot_already_satisfied_by_another_file`
+ * means the slot's winner is compliant, satisfying it under an accepted
+ * alias, but that winner is not physically at the canonical path, so nothing
+ * occupies it and renaming here would only create a second file for a slot
+ * already met; `two_files_share_one_target_name` means the winner is itself
+ * not yet at the canonical path either (misnamed or misplaced) and would
+ * also land there once corrected, so this file and the winner are two files
+ * contending for one name. None of the three is resolvable without
  * `conflictBehavior`, which this phase deliberately does not build. The last
  * two come from the plan-time etag fetch: a file with no etag has no usable
  * precondition, and silently sending no `If-Match` for it would turn the item
@@ -86,6 +95,7 @@ export interface StateStore {
  */
 export type PlanExclusionReason =
   | "target_path_already_occupied"
+  | "slot_already_satisfied_by_another_file"
   | "two_files_share_one_target_name"
   | "no_etag_available"
   | "file_not_found_at_plan_time";

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { runGenerateRenamePlan } from "../../../src/tools/rename/generate.js";
 import type { GenerateRenamePlanOutput } from "../../../src/tools/rename/output.js";
+import { MAX_PLAN_ITEMS_LISTED } from "../../../src/tools/rename/output.js";
 import {
   CANONICAL_NAME,
   CANONICAL_PATH,
@@ -8,6 +9,7 @@ import {
   contextWith,
   etagGraphClient,
   misnamedPathFor,
+  snapshotForTruncation,
   snapshotWithMisnamedFile,
   snapshotWithMisnamedFilePerClient,
   workbookFixture,
@@ -61,7 +63,7 @@ describe("generate_rename_plan", () => {
     );
 
     expect(graph.lookups).toEqual([MISNAMED_PATH]);
-    expect(output.etagLookupGraphRequests).toBe(1);
+    expect(output.etagLookupsIssued).toBe(1);
   });
 
   it("narrows the plan to the clients it was asked about", async () => {
@@ -82,6 +84,44 @@ describe("generate_rename_plan", () => {
     expect(output.items[0]?.client).toBe("ACME");
     // Scoping happens after pairing, so only the in-scope candidate was fetched.
     expect(graph.lookups).toEqual([misnamedPathFor("ACME")]);
+  });
+
+  it("truncates the listing above MAX_PLAN_ITEMS_LISTED while itemCount, excludedCount and the stored plan stay exact", async () => {
+    // 55 clients contribute a plain candidate each, and a different 55 each
+    // contribute a misnamed file alongside its own canonical-path occupant,
+    // so a single call produces both an item list and an excluded list past
+    // MAX_PLAN_ITEMS_LISTED (50) at once. Kept well under MAX_PLAN_ITEMS
+    // (200) and, combined, under MAX_PLAN_JSON_CHARS too: this is a
+    // truncation test, not a size-refusal test, and a count large enough to
+    // trip the store's own character cap would make this test assert nothing
+    // about truncation at all.
+    const itemCount = MAX_PLAN_ITEMS_LISTED + 5;
+    const candidateClients = Array.from({ length: itemCount }, (_value, index) => `CAND${String(index).padStart(4, "0")}`);
+    const excludedClients = Array.from({ length: itemCount }, (_value, index) => `EXCL${String(index).padStart(4, "0")}`);
+
+    const graph = etagGraphClient(
+      Object.fromEntries(candidateClients.map((client) => [misnamedPathFor(client), '"{GUID},1"'])),
+    );
+    const context = contextWith(graph, snapshotForTruncation(candidateClients, excludedClients));
+
+    const output = outputOf(
+      await runGenerateRenamePlan({ profileId: "example" }, context, async () =>
+        workbookFixture([...candidateClients, ...excludedClients]),
+      ),
+    );
+
+    expect(output.itemCount).toBe(itemCount);
+    expect(output.items).toHaveLength(MAX_PLAN_ITEMS_LISTED);
+    expect(output.itemsOmitted).toBe(itemCount - MAX_PLAN_ITEMS_LISTED);
+
+    expect(output.excludedCount).toBe(itemCount);
+    expect(output.excluded).toHaveLength(MAX_PLAN_ITEMS_LISTED);
+    expect(output.excludedOmitted).toBe(itemCount - MAX_PLAN_ITEMS_LISTED);
+
+    // The listing is a prefix; the stored plan is not.
+    const stored = await context.store.getPlan("example", output.planId);
+    expect(stored?.items).toHaveLength(itemCount);
+    expect(stored?.excluded).toHaveLength(itemCount);
   });
 
   it("names plans with a prefix and date a caller can predict", async () => {

@@ -38,10 +38,10 @@ function file(path: string, etag: string): RepositoryFile {
   return { path, name: path.slice(path.lastIndexOf("/") + 1), size: 1024, modified: "2026-06-14T09:00:00Z", etag };
 }
 
-function repository(files: RepositoryFile[]): RepositorySnapshot {
+function repository(files: RepositoryFile[], extraFolders: string[] = []): RepositorySnapshot {
   return {
     files,
-    folderPaths: ["2026", `2026/${CLIENT}`, FOLDER],
+    folderPaths: ["2026", `2026/${CLIENT}`, FOLDER, ...extraFolders],
     scannedAt: "2026-06-14T09:00:00Z",
     searchCrossCheckIncluded: false,
   };
@@ -107,6 +107,115 @@ describe("pairMisnamedArtifacts against a real reconcile() report", () => {
         targetName: CANONICAL_NAME,
         client: CLIENT,
         reason: "target_path_already_occupied",
+      },
+    ]);
+  });
+
+  it("keeps the tiebreak winner as the candidate when two misnamed files claim one slot", () => {
+    // Both names match the same "legacy-spaced" recognizer for the same slot,
+    // since month name resolution is case- and abbreviation-insensitive (see
+    // parse.ts). Both sit in the correct folder, so both are "misnamed"
+    // candidates for the identical slot, and matchArtifacts's tiebreak (most
+    // recently modified, then path ascending) has to pick one winner. Both
+    // files here share one modified timestamp, so the tiebreak falls to path:
+    // "Jun" sorts before "June" (a space sorts before "e"), so the
+    // abbreviated name wins and the full name becomes the duplicate.
+    const abbreviated = `${FOLDER}/CLIENTX Safety - Jun 2026.xlsx`;
+    const full = `${FOLDER}/${MISNAMED_NAME}`;
+    const snapshot = repository([file(abbreviated, "e1"), file(full, "e2")]);
+    const report = reconcile(PROFILE, workbookOwing(CLIENT), snapshot, AS_OF);
+
+    const finding = report.artifacts.find((artifact) => artifact.client === CLIENT && artifact.period.month === AS_OF.month);
+    expect(finding?.state).toBe("misnamed");
+    expect(finding?.matched?.path).toBe(abbreviated);
+    expect(report.duplicates).toEqual([expect.objectContaining({ path: full, state: "misnamed" })]);
+
+    const pairing = pairMisnamedArtifacts(report);
+
+    expect(pairing.candidates).toEqual([
+      {
+        path: abbreviated,
+        currentName: "CLIENTX Safety - Jun 2026.xlsx",
+        targetName: CANONICAL_NAME,
+        targetPath: `${FOLDER}/${CANONICAL_NAME}`,
+        client: CLIENT,
+      },
+    ]);
+    expect(pairing.collisions).toEqual([
+      {
+        path: full,
+        currentName: MISNAMED_NAME,
+        targetName: CANONICAL_NAME,
+        client: CLIENT,
+        reason: "two_files_share_one_target_name",
+      },
+    ]);
+  });
+
+  it("excludes a misnamed duplicate as two_files_share_one_target_name when the slot's winner is itself misplaced rather than compliant", () => {
+    // The canonical NAME is correct but the file sits in July's folder; the
+    // naming template embeds the period in the filename itself, so this file
+    // still parses to June's slot regardless of which folder holds it, and
+    // computeState reports it "misplaced" (name correct, location wrong). A
+    // "misplaced" winner has not reached the canonical path either, so the
+    // misnamed loser and the winner both converge on that same path once
+    // each is corrected, which two_files_share_one_target_name describes,
+    // not target_path_already_occupied.
+    const wrongFolder = "2026/CLIENTX/07-July";
+    const misplacedPath = `${wrongFolder}/${CANONICAL_NAME}`;
+    const misnamedPath = `${FOLDER}/${MISNAMED_NAME}`;
+    const snapshot = repository([file(misplacedPath, "e1"), file(misnamedPath, "e2")], [wrongFolder]);
+    const report = reconcile(PROFILE, workbookOwing(CLIENT), snapshot, AS_OF);
+
+    const finding = report.artifacts.find((artifact) => artifact.client === CLIENT && artifact.period.month === AS_OF.month);
+    expect(finding?.state).toBe("misplaced");
+    expect(finding?.matched?.path).toBe(misplacedPath);
+    expect(report.duplicates).toEqual([expect.objectContaining({ path: misnamedPath, state: "misnamed" })]);
+
+    const pairing = pairMisnamedArtifacts(report);
+
+    // The misplaced winner needs a move, not a rename, so phase 6a's own
+    // candidateFrom produces nothing for it; only the excluded duplicate
+    // shows up here.
+    expect(pairing.candidates).toEqual([]);
+    expect(pairing.collisions).toEqual([
+      {
+        path: misnamedPath,
+        currentName: MISNAMED_NAME,
+        targetName: CANONICAL_NAME,
+        client: CLIENT,
+        reason: "two_files_share_one_target_name",
+      },
+    ]);
+  });
+
+  it("excludes a misnamed duplicate as slot_already_satisfied_by_another_file when the winner is compliant under an accepted alias", () => {
+    // alias-compact is the fixture profile's own accepted-alias recognizer
+    // (verdict "compliant" for a name other than the canonical template). Its
+    // file sits in the correct folder under its own alias name, not the
+    // canonical name, so it wins the slot as "compliant" while its matched
+    // path still differs from the canonical target: the slot is met, but
+    // nothing physically occupies that target path.
+    const aliasPath = `${FOLDER}/CLIENTX-202606-Safety.xlsx`;
+    const misnamedPath = `${FOLDER}/${MISNAMED_NAME}`;
+    const snapshot = repository([file(aliasPath, "e1"), file(misnamedPath, "e2")]);
+    const report = reconcile(PROFILE, workbookOwing(CLIENT), snapshot, AS_OF);
+
+    const finding = report.artifacts.find((artifact) => artifact.client === CLIENT && artifact.period.month === AS_OF.month);
+    expect(finding?.state).toBe("compliant");
+    expect(finding?.matched?.path).toBe(aliasPath);
+    expect(report.duplicates).toEqual([expect.objectContaining({ path: misnamedPath, state: "misnamed" })]);
+
+    const pairing = pairMisnamedArtifacts(report);
+
+    expect(pairing.candidates).toEqual([]);
+    expect(pairing.collisions).toEqual([
+      {
+        path: misnamedPath,
+        currentName: MISNAMED_NAME,
+        targetName: CANONICAL_NAME,
+        client: CLIENT,
+        reason: "slot_already_satisfied_by_another_file",
       },
     ]);
   });

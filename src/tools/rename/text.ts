@@ -31,8 +31,9 @@ export function generatePlanText(output: GenerateRenamePlanOutput): string[] {
 
   lines.push(
     `Graph requests: ${String(output.workbookReadGraphRequestsByThisCall)} for the workbook, ` +
-      `${String(output.scanGraphRequestsByThisCall)} for the scan, ` +
-      `${String(output.etagLookupGraphRequests)} for the etag lookups.`,
+      `${String(output.scanGraphRequestsByThisCall)} for the scan. ` +
+      `${String(output.etagLookupsIssued)} etag lookups issued, not counted as Graph requests since a retried ` +
+      "lookup can spend more than one.",
   );
   lines.push(`Review this plan, then apply it with execute_rename_plan. It runs as a dry run unless confirm is true.`);
 

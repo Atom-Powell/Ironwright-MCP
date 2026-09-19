@@ -11,12 +11,24 @@ export interface RenameCandidate {
 }
 
 /**
- * The two collisions this phase can detect and cannot resolve. Both need
- * `conflictBehavior`, which the design deliberately holds back, so both are
- * recorded in the plan as items that will not be attempted rather than being
- * discovered as failures during a write.
+ * The three collisions this phase can detect and cannot resolve, each naming
+ * what the code actually observed rather than what it inferred:
+ * `target_path_already_occupied` means a file already sits at the canonical
+ * path; `slot_already_satisfied_by_another_file` means the slot's winner is
+ * compliant under an accepted alias (a recognizer can declare
+ * `verdict: "compliant"` for a name other than the canonical template) but is
+ * not physically at the canonical path, so renaming here would only create a
+ * second file for a slot already met; `two_files_share_one_target_name` means
+ * the winner is not at the canonical path either and would also land there
+ * once corrected. None is resolvable without `conflictBehavior`, which the
+ * design deliberately holds back, so all three are recorded in the plan as
+ * items that will not be attempted rather than being discovered as failures
+ * during a write.
  */
-export type CollisionReason = "target_path_already_occupied" | "two_files_share_one_target_name";
+export type CollisionReason =
+  | "target_path_already_occupied"
+  | "slot_already_satisfied_by_another_file"
+  | "two_files_share_one_target_name";
 
 export interface RenameCollision {
   path: string;
@@ -56,6 +68,34 @@ export class MisnamedArtifactShapeError extends Error {
   }
 }
 
+/**
+ * A duplicate whose slot contradicts what `matchArtifacts` guarantees: that
+ * every `DuplicateFinding` is produced in the same pass that resolves its
+ * slot's winning `ArtifactFinding`, with a matched file already attached.
+ *
+ * A separate class from `MisnamedArtifactShapeError` rather than a reuse of
+ * it, because that error's fixed trailing sentences are about a misnamed
+ * finding's own folder and name, and would send an operator reading this
+ * message to check the wrong thing for a contradiction that is about slot
+ * resolution instead.
+ *
+ * Thrown for the same reason `MisnamedArtifactShapeError` is: a report that
+ * contradicts the engine's own contract is not one this function can safely
+ * build a partial rename plan from, and a plan feeds straight into renaming
+ * real files.
+ */
+export class RenameSlotContradictionError extends Error {
+  constructor(detail: string) {
+    super(
+      `A duplicate finding names a slot that contradicts what matchArtifacts guarantees: ${detail}. ` +
+        "Every duplicate is produced in the same pass that resolves its slot's winning artifact with a matched " +
+        "file attached, so a report missing that winner, or missing its matched file, is not a report this " +
+        "function can safely act on.",
+    );
+    this.name = "RenameSlotContradictionError";
+  }
+}
+
 function parentOf(path: string): string {
   const cut = path.lastIndexOf("/");
   return cut === -1 ? "" : path.slice(0, cut);
@@ -63,6 +103,15 @@ function parentOf(path: string): string {
 
 /**
  * Every library-relative path in this report that something already occupies.
+ *
+ * No construction has been found where a candidate's own target path actually
+ * appears in this set: any same-library file sitting at that path carries the
+ * canonical name for that path's slot, so it parses back to that same slot and
+ * wins it, which is what makes the duplicates pass below the mechanism that
+ * actually reports a slot already spoken for today. This check is kept anyway
+ * as a guard against an engine change that would make such a path reachable,
+ * since a negative is not proven and removing a guard on a write path is the
+ * worse risk of the two.
  *
  * Built from the whole report rather than from the candidates, and always over
  * every client regardless of any scope the caller will apply afterwards: a plan
@@ -183,14 +232,14 @@ function winnerFor(report: ReconciliationReport, duplicate: DuplicateFinding): A
   const key = slotKeyOf(duplicate.slot);
   const winner = report.artifacts.find((artifact) => slotKeyOf(artifact) === key);
   if (winner === undefined) {
-    throw new MisnamedArtifactShapeError(
+    throw new RenameSlotContradictionError(
       `a duplicate at "${duplicate.path}" names a slot (client "${duplicate.slot.client}", deliverable ` +
         `"${duplicate.slot.deliverable}", ${String(duplicate.slot.period.year)}-${String(duplicate.slot.period.month)}) ` +
         "with no artifact in this report to have won it",
     );
   }
   if (winner.matched === undefined) {
-    throw new MisnamedArtifactShapeError(
+    throw new RenameSlotContradictionError(
       `the artifact for the slot a duplicate at "${duplicate.path}" names has no matched file, which the ` +
         "engine cannot produce for a slot that also produced a duplicate",
     );
@@ -208,22 +257,40 @@ function winnerFor(report: ReconciliationReport, duplicate: DuplicateFinding): A
  * another library, so it is excluded the same way `candidateFrom` excludes a
  * foreign match: correcting it is a move, not a rename.
  *
- * The reason is chosen by comparing the winner's own matched path against the
- * target this duplicate and the winner both converge on, rather than by
- * switching on the winner's state. That comparison is exactly true when the
- * winner is "compliant," since compliant is the only state whose matched path
- * already equals the canonical target; for a "misnamed" or "misplaced" winner
- * the matched path differs from the target for now, and correcting the
- * winner, by rename or by phase 6b's move, would land it on that same target,
- * which is what "two files share one target name" describes.
+ * The reason is chosen from two observations rather than a switch on the
+ * winner's state, since a switch would have to enumerate every state that can
+ * legally win a slot holding a "misnamed" loser, and miss one the way this
+ * function's first version missed "misplaced":
+ *
+ * - Does the winner's own matched path already equal the target this
+ *   duplicate and the winner both converge on? If so, something is physically
+ *   there today: `target_path_already_occupied`. This is only true for a
+ *   "compliant" winner, since compliant is the only state whose matched path
+ *   already equals the canonical target.
+ * - Otherwise, is the winner "compliant" anyway? A recognizer can declare
+ *   `verdict: "compliant"` for a name other than the canonical template (see
+ *   `src/domain/profile/schema.ts`'s recognizer schema), so a winner can
+ *   satisfy its slot under an accepted alias while sitting somewhere other
+ *   than the canonical path. Nothing occupies that path, but renaming this
+ *   duplicate onto it would create a second file for a slot already met:
+ *   `slot_already_satisfied_by_another_file`.
+ * - Otherwise the winner is itself not at the canonical path yet either
+ *   (misnamed or misplaced) and would also land there once corrected, by
+ *   rename or by phase 6b's move: `two_files_share_one_target_name`.
  */
 function excludedFromDuplicate(report: ReconciliationReport, duplicate: DuplicateFinding): RenameCollision {
   const winner = winnerFor(report, duplicate);
   const targetPath =
     winner.expectedPath === "" ? winner.expectedName : `${winner.expectedPath}/${winner.expectedName}`;
 
-  const reason: CollisionReason =
-    winner.matched.path === targetPath ? "target_path_already_occupied" : "two_files_share_one_target_name";
+  let reason: CollisionReason;
+  if (winner.matched.path === targetPath) {
+    reason = "target_path_already_occupied";
+  } else if (winner.state === "compliant") {
+    reason = "slot_already_satisfied_by_another_file";
+  } else {
+    reason = "two_files_share_one_target_name";
+  }
 
   return {
     path: duplicate.path,
@@ -266,10 +333,11 @@ export function pairMisnamedArtifacts(report: ReconciliationReport): RenamePairi
     // own current path is in `occupied` by construction, and the target path
     // can never equal it, since a rename with the same name is refused above.
     // The comparison is kept anyway so a future change to that rule cannot
-    // turn every candidate into a collision with itself. This still catches a
-    // cross-slot collision, the one occupiedPaths always covered: a target
-    // path held by an unrelated artifact, duplicate or orphan belonging to a
-    // different slot entirely.
+    // turn every candidate into a collision with itself. See occupiedPaths's
+    // own comment: no reachable report has been constructed where this branch
+    // fires, but it stays as a guard against an engine change, and the
+    // duplicates pass below is what actually reports a slot already spoken
+    // for today.
     if (occupied.has(candidate.targetPath) && candidate.targetPath !== candidate.path) {
       collisions.push(collisionFrom(candidate, "target_path_already_occupied"));
       continue;

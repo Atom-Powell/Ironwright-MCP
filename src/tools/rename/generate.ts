@@ -151,8 +151,10 @@ export async function runGenerateRenamePlan(
       // Counted, not bracketed. The request counter lives on a process-level
       // client a concurrent call also moves, so a bracket around this loop
       // would attribute another call's requests to this one. One lookup is
-      // issued per candidate, so the count is exact by construction.
-      etagLookupGraphRequests: candidates.length,
+      // issued per candidate, so the count is exact by construction; it is a
+      // count of lookups, not of Graph requests, since a throttled lookup
+      // retries and spends more than one request while still being one lookup.
+      etagLookupsIssued: candidates.length,
       scanGraphRequestsByThisCall: scan.joined ? 0 : scan.result.graphRequests,
       scanSharedWithConcurrentCall: scan.joined,
     };
