@@ -159,10 +159,14 @@ two defects this introduced and then fixed on the same branch: the first version
 nothing whatsoever, because the API that replaced that property defers its callback and
 `process.exit` does not wait for it.
 
-**Before phase 4 wires real handlers.** `ToolDefinition.inputSchema` is a `z.ZodRawShape`,
-which structurally forbids an object-level refinement. `generate_move_plan` already needs one,
-since nothing enforces that `scopeValue` is present when `scope` is `client` or `deliverable`.
-Cheap to settle now, ten files later.
+**Before a write tool needs a cross-field constraint.** `generate_move_plan` still has no
+refinement enforcing that `scopeValue` is present when `scope` is `client` or `deliverable`. The
+cause this item used to name, that `ToolDefinition.inputSchema` is a `z.ZodRawShape` which
+structurally forbids an object-level refinement, is gone: phase 4b widened the field to
+`z.ZodTypeAny`. What blocks it now is the installed SDK, which advertises an empty input schema
+for any tool carrying a top-level refinement; that defect, the version it was measured against,
+and the two routes still open are recorded under "The MCP SDK cannot advertise a refined input
+schema" below.
 
 ## Known minor issues
 
@@ -468,11 +472,18 @@ needs a grant issuer to exist. On a developer tenant the orphaned entry grants a
 and is not worth recreating a grant issuer for. See the teardown hole above, which is the product
 gap this is one instance of.
 
-## Phase 2a: covered only by fakes, 2026-09-13
+## Phase 2a: what the unit tests cover, 2026-09-13
 
-Phase 2a has not been run against a real tenant. No Graph call, no Azure Storage call, and no
-Azurite run has ever been made by this code. Everything below is verified against fake
-transports and a fake table client, and nothing more should be read into it than that.
+**This section was written before the live sitting and is kept as it was, minus the claims that are
+no longer true.** It opened "Phase 2a has not been run against a real tenant. No Graph call, no
+Azure Storage call, and no Azurite run has ever been made by this code," which was correct on
+2026-09-13 and false from 2026-09-16, when the operator checklist at the foot of this section was
+worked through against the developer tenant: see "The first live tenant sitting, 2026-09-16" below,
+which is the record. Of that checklist, step 9, the server-application teardown, is the only step
+still owed; step 7 was blocked on the day and ran on 2026-09-17 once phase 2b-2 supplied the
+workbook snapshot. Correcting it in place rather than appending a line, for the reason the phase 4b
+section gives: this is the document a reader consults to decide what counts as evidence. What
+follows describes what the unit tests reach.
 
 **What is covered.** The Graph client and its `Retry-After` backoff in both the delta-seconds and
 HTTP-date header forms. The token provider's caching and single-flight behavior. Path addressing
@@ -482,14 +493,15 @@ the snapshot assembly. The scan's orchestration, including its resync path. Ever
 scan command prints. All of it against fakes, all of it green, none of it against Graph or Azure
 Table Storage.
 
-**The claim this phase exists to support is unverified.** The reason phase 2a exists is that a
-recursive per-folder inventory cost hundreds of Graph calls, and delta plus a persisted
+**The claim this phase exists to support was checked on 2026-09-16.** The reason phase 2a exists is
+that a recursive per-folder inventory cost hundreds of Graph calls, and delta plus a persisted
 continuation link should reduce that to a small bounded number. The scan reports its own Graph
-request count precisely so that claim can be checked against a real tenant. It has not been
-checked. Until a live run happens, the request-count reduction is a design argument, not
-evidence.
+request count precisely so that claim could be checked against a real tenant. A cold scan
+enumerated 144 files and 122 folders in 4 Graph requests and an immediate re-scan in 3, against a
+tree a recursive walk would have cost at least 122. The figures and their limits are in the sitting
+section below; the request-count reduction is a measurement rather than a design argument.
 
-**One line that is unproven and cannot be proven by a fake.**
+**One line that was unproven and could not be proven by a fake.**
 `tableStateStoreFromConnectionString` in `src/store/table.ts` bridges the real
 `@azure/data-tables` `TableClient` to the narrow `TableClientLike` interface with an
 `as unknown as` cast:
@@ -501,29 +513,39 @@ inventory: TableClient.fromConnectionString(connectionString, "Inventory") as un
 
 A reviewer confirmed against the installed package that the real client does not structurally
 satisfy `TableClientLike` without the cast, so the compiler checks nothing at that line and no
-fake can either. The first real connection is what validates it. `ensureTables` is tested against
-the fake but has likewise never created a real table.
+fake can either. The first real connection is what validates it, and it did on 2026-09-16: both
+casts held against the real `@azure/data-tables` client on Azurite and `ensureTables` created real
+tables. Azurite is not Azure Table Storage proper, and that difference is not claimed away here.
 
-**The ETag gap, as a precondition for phase 6.** `src/scan/changes.ts` records a file's ETag as
-`item.eTag ?? ""`. The domain's `RepositoryFile.etag` is a required string, so a file for which
-Graph sent no ETag is stored as an empty string that nothing downstream can distinguish from a
-real one. That field exists specifically so a plan generator can use it as an `If-Match`
-precondition. The scan command now reports how many files carry no ETag, so the gap is visible
-to an operator, but the type still cannot express absence. Phase 6 must settle this before any
-write tool sends an `If-Match`, and the honest fix is to make the field optional, which changes
-the reconciliation engine's frozen report shape and its golden fixture.
+**The ETag gap. Settled by phase 6a, by a different route than this entry prescribed.**
+`src/scan/changes.ts` records a file's ETag as `item.eTag ?? ""`. The domain's
+`RepositoryFile.etag` is a required string, so a file for which Graph sent no ETag is stored as an
+empty string that nothing downstream can distinguish from a real one. That field exists so a plan
+generator can use it as an `If-Match` precondition. This entry used to prescribe making the field
+optional, which would have changed the reconciliation engine's frozen report shape and its golden
+fixture. Phase 6a did not do that. `generate_rename_plan` fetches each candidate's etag at plan
+time through `readDriveItemEtag` rather than reading it from the inventory, since the inventory's
+copy comes from a snapshot that may be hours old, and excludes a candidate as `no_etag_available`
+when the fresh fetch returns none. No write ever sends an `If-Match` built from the inventory's
+field, so the write path has no empty-string hole. The inventory field itself is untouched and
+still writes an empty string, and the scan command still reports how many files carry no ETag, so
+the hole survives for any future consumer that reads `RepositoryFile.etag` and believes it.
 
 **The environment variable naming split, as a precondition for hosting.** `npm run setup` prints
 `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET`. The server reads `IW_TENANT_ID`,
 `IW_CLIENT_ID` and `IW_CLIENT_SECRET`. The missing-credentials message now states the mapping at
 the moment of failure, which unblocks an operator, but two names for one value is the actual
-defect. The hosting phase is where these names get written into a deployment definition and is
-where they should be unified.
+defect. This entry used to say the hosting phase was where these names get written into a
+deployment definition and where they should be unified. Phase 5a came and went without unifying
+them, and `docs/SETUP.md` now documents both spellings as the standing contract rather than as a
+transitional state. Still open, reassigned to phase 5b, which is where a Container Apps deployment
+definition actually gets written.
 
-**Why the live run has not happened.** The design called for a live run against the developer
-tenant used for phase 1: a synthetic library, a profile for it, Azurite, a cold scan, an
-immediate second scan, and one scan after each of an add, a rename, a move, and a delete. None of
-that ran in the implementing session. It needs a synthetic library created in the tenant by hand
+**Why the live run did not happen in the implementing session.** The design called for a live run
+against the developer tenant used for phase 1: a synthetic library, a profile for it, Azurite, a
+cold scan, an immediate second scan, and one scan after each of an add, a rename, a move, and a
+delete. None of that ran in the implementing session. It needs a synthetic library created in the
+tenant by hand
 and working server-application credentials, and the server application from the phase 1 setup
 run should not be reused: its client secret was displayed in a session's scrollback, and the
 outstanding operator action above is to delete and purge it, not rotate it. A session that cannot
@@ -582,9 +604,8 @@ operator.
    still was not exercised, and do not describe an untested path as working. Record step 9's two
    answers in the same section.
 
-Until those numbers exist, this phase's central claim, that delta plus a persisted continuation
-link bounds the Graph request count, is unverified. The numbers belong in this file when they
-exist, not before.
+Those numbers now exist for steps 5, 6, 7 and 8, and they are in "The first live tenant sitting,
+2026-09-16" below, with step 7's in the 2026-09-17 sitting. Step 9's two answers do not exist yet.
 
 ## The first live tenant sitting, 2026-09-16
 
@@ -1021,6 +1042,13 @@ kind `write` when writes are disabled. The three absent tools were exactly `exec
 `generate_move_plan`, stayed visible, because they are kind `plan` rather than `write`. This is the
 first live confirmation of the outer layer of the two-layer write gate, and of the decision record
 that there are three tool kinds rather than two.
+
+**The gate's other position, observed 2026-09-19.** The phase 6a sitting was the first run of this
+server with `IW_ALLOW_WRITES=true`. What that run establishes about the outer layer is narrow:
+`generate_rename_plan` and `execute_rename_plan` were both reachable through the transport and both
+executed, so a tool of kind `write` is advertised when writes are enabled. Nobody recorded how many
+tools the registry advertised under that setting, so this file states no count, and the
+write-enabled listing has not been checked tool by tool the way the read-only listing above was.
 
 **What this does and does not establish.** It establishes that the composed tool returns a correct
 report against a real library, through real Graph, a real downloaded and parsed xlsx, and real
@@ -1559,21 +1587,27 @@ a deterministic test against the real coordinator and the real in-memory store; 
 exercised against Azure Table Storage with two callers racing, and the cross-replica window
 remains open by design and is recorded above.
 
-## Phase 4c: covered only by fakes, 2026-09-18
+## Phase 4c: what the unit tests cover, 2026-09-18
 
 Phase 4c wired `describe_workbook`, the last of the five read tools, on branch
-`phase-4c-describe-workbook`. No call this phase's own code makes has reached a tenant, and
-nothing on the branch claims otherwise.
+`phase-4c-describe-workbook`.
+
+**This section was written before the live sitting and is kept as it was, minus the claims that are
+no longer true.** It read "No call this phase's own code makes has reached a tenant, and nothing
+on the branch claims otherwise," which was correct when it was written and false later the same
+day, when both modes of the tool ran against the live site: see "The phase 4c live tenant sitting,
+2026-09-18" below, which is the record. Correcting it in place rather than appending a line, for
+the reason the phase 4b section gives. What follows describes what the unit tests reach.
 
 Two halves of an earlier draft of this paragraph overstated what the phase inherits, and both are
 corrected here. It said the phase reuses a drive-download path phase 4a and 4b already exercised
 live: only 4a did, since 4b resolves a drive and never downloads content from it. And it credited
 the granted-site configuration to those phases as well, which it cannot: 4a and 4b resolve a site
 from a profile's own `identity.siteUrl`, and resolving one from `IW_SITE_URL` at startup is a
-different mechanism, new on this branch, that has never run anywhere. What this phase genuinely
-inherits from a live run is `resolveDrive` and `downloadDriveItem` as phase 4a exercised them. The
-enumeration, header-detection and column-description logic is new to this codebase and none of it
-has been proven by use.
+different mechanism, new on this branch, that had never run anywhere when this was written. What
+this phase genuinely inherited from an earlier live run is `resolveDrive` and `downloadDriveItem`
+as phase 4a exercised them. The enumeration, header-detection and column-description logic is new
+to this codebase and none of it had been proven by use at that point.
 
 **What is covered.** `loadGrantedSiteUrl` in `src/config.ts`, present or absent
 (`tests/config.test.ts`). The profile registry's new site-mismatch refusal, a profile whose
@@ -1605,14 +1639,15 @@ an in-memory transport, asserting the SDK's own output validation passes against
 (`tests/tools/describe/wire.test.ts`). All of it against fakes and hand-built fixtures, all of it
 green, none of it against a real workbook or a real site.
 
-**The live sitting this phase owes**, copied from the design spec rather than restated from
+**The live sitting this phase owed**, copied from the design spec rather than restated from
 memory: run both modes against the real tracking workbook and confirm that the source and header
 row the deep mode proposes are the ones `profiles/synthetic.json` already uses, and that the
 columns it describes include the header texts that profile's mapping names. The tool should
 rediscover a mapping this repository independently knows is correct. If it proposes something
 different, either the tool is wrong or the profile is, and both are worth knowing before merge;
-neither is discoverable from a fixture this phase's own author wrote. This has not run. The
-branch does not merge until it has.
+neither is discoverable from a fixture this phase's own author wrote. It ran on 2026-09-18 and the
+tool rediscovered the mapping; the record, and the request-count defect the sitting found, are
+below.
 
 **`IW_SITE_URL` is now required server configuration, and phase 5 hosting must set it or the
 server will not start.** The stub this phase replaced took a `siteUrl` input, which promised a
@@ -1900,11 +1935,11 @@ are all recorded in the design spec so that slice does not restart from nothing.
 Because the container is deferred, the merge gate changed to match what this phase can actually
 prove. It is that the COMPILED PRODUCTION OUTPUT answers all five read tools correctly against
 the live tenant, run as `node dist/server/main.js` from `npm run build:prod`, not `tsx` against
-source. Every live sitting this project has ever run, phases 2a through 4c, used `tsx`. The
-compiled artifact has never been executed at all, and the production compile is exactly where
-excluding the setup command could break something source execution hides. **That run is the
-controller's to perform before merge and has not happened as of this section being written.**
-Nothing in this document should be read as claiming it has.
+source. Every live sitting before this one, phases 2a through 4c, used `tsx`. The compiled
+artifact had never been executed at all, and the production compile is exactly where excluding the
+setup command could break something source execution hides. **That run happened on 2026-09-18 and
+passed**; see "The phase 5a merge gate, 2026-09-18" below, which is the record, including what it
+does not establish.
 
 **The production compile now excludes `src/setup`, and that is a security boundary rather than a
 size saving.** See the closed carried item above for the mechanism. The reasoning is restated
@@ -2073,9 +2108,10 @@ between the runs, after the branch's own history of a report claiming a clean su
 out to be a lucky single run rather than a reproducible one (see the closed shutdown item above:
 the production-compile test's default 5 second timeout had no margin under full-suite worker
 contention and needed an explicit, explained 60 second allowance before it held reliably). Beyond
-those unit tests, this phase has no live evidence of its own. The compiled production output
+those unit tests, this phase's live evidence is its merge gate: the compiled production output
 answering all five read tools against the live tenant, through `node dist/server/main.js` rather
-than `tsx`, is the verification the controller runs before merge, and it has not run yet.
+than `tsx`. That gate ran on 2026-09-18 and is recorded immediately below, with what it does not
+establish.
 
 ## The phase 5a merge gate, 2026-09-18
 
@@ -2192,7 +2228,9 @@ is the live proof of the refresh chain the spec calls easy to get wrong and sile
 fresh delta scan then found the library exactly where it started.
 
 **Per-item preconditions hold against real Graph.** One file was edited between generating and
-executing. That item alone came back `changed_since_plan` and the untouched file still renamed.
+executing. That item alone came back `changed_since_plan` (the outcome's name on the day; it was
+renamed `precondition_refused` later the same day, for the reason the finding below gives, so
+`changed_since_plan` no longer appears in `src/`) and the untouched file still renamed.
 
 ### The finding: Graph evaluates If-Match before existence
 
@@ -2235,40 +2273,50 @@ write path is the worse risk.
 - **`cTag` versus `eTag`.** The code uses `eTag` throughout and it worked; nothing here shows
   `cTag` would not also have worked, or what either does across a content change.
 
-## Phase 6a: covered only by fakes, 2026-09-18
+## Phase 6a: what the unit tests cover, 2026-09-18
 
-Phase 6a is the first write path this server has. As of this commit it is covered by fakes only. No
-rename has been applied to a real SharePoint library, no reversal log has been replayed, and no real
-412 has been observed.
+Phase 6a is the first write path this server has.
+
+**This section was written before the live sitting and is kept as it was, minus three claims that
+are no longer true.** It read "As of this commit it is covered by fakes only. No rename has been
+applied to a real SharePoint library, no reversal log has been replayed, and no real 412 has been
+observed." All three were correct on 2026-09-18 and false from 2026-09-19, when the full loop ran
+against the sandbox tenant: see "The phase 6a live sitting, 2026-09-19: the first write this server
+has made" above, which is the record. Correcting it in place rather than appending a line, for the
+reason the phase 4b section gives: this is the document a reader consults to decide what counts as
+evidence, and a false sentence about evidence here is worse than in any other file. What follows
+describes what the unit tests reach, which is still worth knowing alongside the sitting.
 
 Every fake in this suite rejects `patch` except the two written for the rename tests, which apply
-renames into memory. A fake proves the code does what its author believed Graph does. The ETag
-precondition in particular is a claim about Graph's behavior on a `driveItem` PATCH that this
-project has never made.
+renames into memory. A fake proves the code does what its author believed Graph does.
 
-The merge gate is the full loop against the sandbox tenant: generate, dry run, execute, confirm the
-renames in SharePoint, roll back through the reversal log, confirm the library is byte for byte
-where it started, then edit one file between generating and executing and confirm that item alone
-is refused while the others apply.
+**The merge gate passed on 2026-09-19.** The gate was the full loop against the sandbox tenant:
+generate, dry run, execute, confirm the renames in SharePoint, roll back through the reversal log,
+confirm the library returned to where it started, then edit one file between generating and
+executing and confirm that item alone is refused while the others apply. Every step ran and passed.
+The confirmation step is a fresh delta scan, so what it establishes is that paths, names and counts
+are back at the seeded baseline, not that the library is byte for byte where it started; the sitting
+write-up above claims only the former.
 
 **The Azure Table 32768-character limit has never been probed live.** `MAX_PLAN_JSON_CHARS` in
 `src/store/types.ts` sets the plan-size cap at 32000, a margin under Azure Table's documented
 32768-character limit on a single String property, and `PlanTooLargeError` fires whenever a stored
-plan's JSON exceeds it. Every test that exercises this cap runs against `FakeTableClient`, not a
-real Azure Table Storage account or even Azurite, so the margin's own correctness, that a plan just
-under 32000 characters actually persists and a plan just over it is actually rejected by the real
-service rather than by this project's own arithmetic, is unverified.
+plan's JSON exceeds it. Plan persistence itself did reach the real `@azure/data-tables` client on
+Azurite during the 2026-09-19 sitting, but no plan anywhere near the cap did: every test that
+exercises the cap runs against `FakeTableClient`, and the sitting's plans held two items. So the
+margin's own correctness, that a plan just under 32000 characters actually persists and a plan just
+over it is actually rejected by the real service rather than by this project's own arithmetic, is
+still unverified.
 
-**The `If-Match` precondition behavior is a claim about Graph this project has never made.** Three
-questions are unanswered by anything except reading Graph's documentation: whether a stale etag on
-a `driveItem` PATCH yields 412 rather than 404 or 409, whether a successful PATCH response actually
-carries the item's new `eTag`, and whether a path-addressed read resolves immediately after a rename
-or lags behind it. `src/tools/rename/execute.ts` carries a fallback branch, reached when a PATCH
-response has no `eTag`, that falls back to a metadata GET through `readDriveItemEtag`. That branch
-is exercised in `tests/tools/rename/execute.test.ts` and `tests/tools/rename/execute.errors.test.ts`,
-but only against fakes that were told to omit the etag; nothing has observed whether Graph's own
-PATCH response for a `driveItem` rename actually omits it in practice, which is the premise the
-branch exists to cover.
+**The empty-body PATCH fallback is still unexercised against a real tenant.**
+`src/tools/rename/execute.ts` carries a fallback branch, reached when a PATCH response has no
+`eTag`, that falls back to a metadata GET through `readDriveItemEtag`. That branch is exercised in
+`tests/tools/rename/execute.test.ts` and `tests/tools/rename/execute.errors.test.ts`, but only
+against fakes that were told to omit the etag. Every PATCH in the 2026-09-19 sitting returned a body
+carrying an `eTag`, so nothing has yet observed Graph omitting it, which is the premise the branch
+exists to cover. The other two questions this entry used to raise, whether a stale etag yields 412
+and whether a successful PATCH carries the new `eTag`, were both answered by measurement in that
+sitting and are recorded there.
 
 ### The phase 6a whole-branch fix wave, 2026-09-19
 
@@ -2286,12 +2334,14 @@ the pre-rename paths back with an honest timestamp attached. Whether the executo
 the delta link, apply its own changes to the inventory, or leave both alone is a design question
 this wave did not answer and did not want to answer inside a fix.
 
-**The `Plans` table's `as unknown as TableClientLike` cast has never been exercised against the
-real `@azure/data-tables` client.** `tableStateStoreFromConnectionString` in `src/store/table.ts`
-now makes three such casts, not two. The `DeltaLinks` and `Inventory` casts were held against the
-real client on Azurite on 2026-09-16, which is recorded under "Phase 2a: covered only by fakes"
-above; the `Plans` cast is new in this branch and has met nothing but `FakeTableClient`. The
-compiler checks nothing at that line by construction, so no fake can check it either. The phase 6a
-entry above records the 32768-character cap as unprobed, which is a different claim: the cap is
-about what the service accepts, the cast is about whether the real client satisfies the interface
-this code calls through at all.
+**No `as unknown as TableClientLike` cast has met a real Azure Table Storage account.**
+`tableStateStoreFromConnectionString` in `src/store/table.ts` now makes three such casts, not two.
+The `DeltaLinks` and `Inventory` casts were held against the real `@azure/data-tables` client on
+Azurite on 2026-09-16, recorded under "Phase 2a: what the unit tests cover" above; the `Plans` cast
+is new in this branch and was held against that same real client on Azurite on 2026-09-19, when a
+plan generated by one tool call was read back by the executor in a separate call. All three are
+therefore proven against the emulator and none against a real storage account. The compiler checks
+nothing at those lines by construction, so no fake can check them either. The phase 6a entry above
+records the 32768-character cap as unprobed, which is a different claim: the cap is about what the
+service accepts, the cast is about whether the real client satisfies the interface this code calls
+through at all.
