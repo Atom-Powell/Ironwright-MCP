@@ -672,12 +672,24 @@ of this sitting on 2026-09-16; its last two sentences, that nothing here says wh
 returns the right answer and that phase 4a remains verified against fakes only, no longer describe
 the project's current state.
 
-**Step 9 did not run.** The server application, the grant issuer, and a throwaway `WAC probe`
-registration created for the permission testing below are all still present in the tenant. The
-probe application holds tenant-wide `Files.ReadWrite.All` and `Files.Read.All` and should be
-deleted. Teardown, and the two questions it exists to answer, whether the purge really empties
-**Deleted applications** and whether a service principal survives the application delete, are
-still unanswered.
+**Step 9 did not run when this section was written.** The server application, the grant issuer, and
+a throwaway `WAC probe` registration created for the permission testing below were all still
+present in the tenant, and the probe application held tenant-wide `Files.ReadWrite.All` and
+`Files.Read.All`.
+
+**UPDATE 2026-09-19. Two of the three are gone.** The grant issuer was deleted and purged by
+`npm run setup -- --delete-bootstrap --confirm` after the phase 6a live sitting; the command
+reported both the delete and the purge, which is what actually ends a standing
+`Sites.FullControl.All` rather than leaving the object restorable with its credentials for 30 days.
+The throwaway probe application was confirmed absent by a client-credentials token request against
+its own recorded id, which Entra refused with `AADSTS700016`, application not found in the
+directory. That request is evidence of absence rather than of a bad secret, because 700016 names
+the application rather than the credential. The server application remains, holding no more than
+`Sites.Selected` with the `read` role on one site.
+
+The two questions teardown exists to answer are now partly answered: the purge path ran and
+reported success on a real tenant. Whether a service principal survives an application delete was
+not separately checked, so that half stays open.
 
 **Two seeder defects the sitting exposed, both fixed by the workbook-bytes-reader phase's task 9.**
 
