@@ -132,17 +132,51 @@ export function textOf(result: CallToolResult): string {
 }
 
 /**
+ * The ways a Graph response can carry no usable etag. Three shapes rather than
+ * one, because they are three different JavaScript values by the time a caller
+ * sees them, and code that handles only the first throws on the other two:
+ *
+ * - `item_without_etag`: an object Graph returned that simply has no `eTag`.
+ * - `empty_body`: `createGraphClient`'s `request()` returns `undefined as T`
+ *   for a zero-length response body, and a 204 passes its success check, so
+ *   this is what a PATCH answered with no body actually looks like.
+ * - `null_body`: a body of the four characters `null`, which parses to `null`.
+ *
+ * Both fakes in this file used to express only the first, which is the shape
+ * their author imagined rather than the shape the real client produces. The
+ * code they exercised was written against that same imagined shape, so the two
+ * agreed with each other while the real client crashed the caller.
+ */
+export type NoEtagShape = "item_without_etag" | "empty_body" | "null_body";
+
+function bodyFor(shape: NoEtagShape): unknown {
+  if (shape === "item_without_etag") return {};
+  return shape === "null_body" ? null : undefined;
+}
+
+/** An etag string, a Graph status to fail with, or a response carrying no etag. */
+export type EtagFixture = string | number | { readonly noEtag: NoEtagShape };
+
+export function noEtag(shape: NoEtagShape): { readonly noEtag: NoEtagShape } {
+  return { noEtag: shape };
+}
+
+function isNoEtag(value: EtagFixture): value is { readonly noEtag: NoEtagShape } {
+  return typeof value === "object";
+}
+
+/**
  * Answers the plan-time etag lookups and nothing else. A path maps to an etag
- * string, to `null` for an item Graph returns with no etag at all, or to a
- * number for a Graph status the lookup should fail with. A path with no entry
- * makes the fake throw, so a handler that reached for a call the test did not
- * intend fails loudly instead of receiving a plausible answer.
+ * string, to a `noEtag(...)` shape for a response Graph returns with no etag in
+ * it, or to a number for a Graph status the lookup should fail with. A path
+ * with no entry makes the fake throw, so a handler that reached for a call the
+ * test did not intend fails loudly instead of receiving a plausible answer.
  *
  * Every method moves the same counter `requests()` reports, the way the real
  * client does. This project's sharpest phase 2 review finding was a cost
  * assertion measured against a counter that could not move.
  */
-export function etagGraphClient(etagsByPath: Record<string, string | null | number>): GraphClient & {
+export function etagGraphClient(etagsByPath: Record<string, EtagFixture>): GraphClient & {
   lookups: string[];
 } {
   let requestCount = 0;
@@ -151,9 +185,9 @@ export function etagGraphClient(etagsByPath: Record<string, string | null | numb
   // updates the recorded etag, the way a real rename invalidates the item's
   // old one, so a caller that reads a path again after patching it sees the
   // new value rather than the fixture it started with.
-  const state = new Map<string, string | null | number>(Object.entries(etagsByPath));
+  const state = new Map<string, EtagFixture>(Object.entries(etagsByPath));
 
-  function findMatch(pathOrUrl: string): [string, string | null | number] | undefined {
+  function findMatch(pathOrUrl: string): [string, EtagFixture] | undefined {
     return [...state.entries()].find(([path]) =>
       pathOrUrl.includes(path.split("/").map(encodeURIComponent).join("/")),
     );
@@ -169,7 +203,7 @@ export function etagGraphClient(etagsByPath: Record<string, string | null | numb
       if (typeof match[1] === "number") {
         throw new GraphRequestError({ method: "GET", path: pathOrUrl, status: match[1], body: "{}" });
       }
-      return (match[1] === null ? {} : { eTag: match[1] }) as unknown as T;
+      return (isNoEtag(match[1]) ? bodyFor(match[1].noEtag) : { eTag: match[1] }) as T;
     },
     post: () => {
       requestCount += 1;
@@ -192,13 +226,17 @@ export function etagGraphClient(etagsByPath: Record<string, string | null | numb
       if (typeof current === "number") {
         throw new GraphRequestError({ method: "PATCH", path: pathOrUrl, status: current, body: "{}" });
       }
+      // A path whose fixture carries no etag has nothing an If-Match can match,
+      // so any precondition sent for it is refused, exactly as one built on a
+      // stale value would be.
+      const currentEtag = typeof current === "string" ? current : undefined;
       const ifMatch = headers?.["if-match"];
-      if (ifMatch !== undefined && current !== ifMatch) {
+      if (ifMatch !== undefined && currentEtag !== ifMatch) {
         throw new GraphRequestError({ method: "PATCH", path: pathOrUrl, status: 412, body: "{}" });
       }
       // A rename invalidates the old etag. Bumped deterministically rather
       // than randomized, so a test asserting the returned etag can predict it.
-      const nextEtag = `${current ?? "no-etag"}-renamed`;
+      const nextEtag = `${currentEtag ?? "no-etag"}-renamed`;
       state.set(path, nextEtag);
       return { eTag: nextEtag, name: (body as { name?: unknown }).name } as unknown as T;
     },
@@ -295,8 +333,14 @@ export interface RenameCall {
 export interface RenamingClientOptions {
   /** Library-relative path to the Graph status its PATCH answers with. Absent means success. */
   patchStatuses?: Record<string, number>;
-  /** False makes the PATCH response carry no etag, forcing the follow-up read. */
-  etagOnPatchResponse?: boolean;
+  /**
+   * What a successful PATCH answers with. Anything but "item" carries no etag
+   * and forces the follow-up read, and which shape is chosen matters: the real
+   * client hands back `undefined` for an empty body, not an empty object.
+   */
+  patchResponse?: "item" | NoEtagShape;
+  /** What a follow-up etag read answers with, in the same three shapes. */
+  etagLookupResponse?: "item" | NoEtagShape;
   /** A Graph status for the follow-up etag read, so the unrefreshable case can be exercised. */
   etagLookupStatus?: number;
 }
@@ -312,7 +356,8 @@ export interface RenamingClientOptions {
  */
 export function renamingGraphClient(options: RenamingClientOptions = {}): GraphClient & { calls: RenameCall[] } {
   const patchStatuses = options.patchStatuses ?? {};
-  const etagOnPatchResponse = options.etagOnPatchResponse ?? true;
+  const patchResponse = options.patchResponse ?? "item";
+  const etagLookupResponse = options.etagLookupResponse ?? "item";
   const calls: RenameCall[] = [];
   let requestCount = 0;
   let version = 100;
@@ -328,6 +373,7 @@ export function renamingGraphClient(options: RenamingClientOptions = {}): GraphC
       if (options.etagLookupStatus !== undefined) {
         throw new GraphRequestError({ method: "GET", path: pathOrUrl, status: options.etagLookupStatus, body: "{}" });
       }
+      if (etagLookupResponse !== "item") return bodyFor(etagLookupResponse) as T;
       version += 1;
       return { eTag: `"{GUID},${String(version)}"` } as unknown as T;
     },
@@ -343,8 +389,9 @@ export function renamingGraphClient(options: RenamingClientOptions = {}): GraphC
       if (failing !== undefined) {
         throw new GraphRequestError({ method: "PATCH", path: pathOrUrl, status: failing[1], body: "{}" });
       }
+      if (patchResponse !== "item") return bodyFor(patchResponse) as T;
       version += 1;
-      return (etagOnPatchResponse ? { eTag: `"{GUID},${String(version)}"` } : {}) as unknown as T;
+      return { eTag: `"{GUID},${String(version)}"` } as unknown as T;
     },
     getBytes: () => {
       requestCount += 2;

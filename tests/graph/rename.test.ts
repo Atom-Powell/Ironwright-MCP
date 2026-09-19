@@ -31,6 +31,28 @@ describe("renameDriveItem", () => {
       renameDriveItem(client, { driveId: "d1", path: "a.xlsx", newName: "b.xlsx", etag: "e" }),
     ).resolves.toEqual({ kind: "renamed", etag: undefined });
   });
+
+  // An object with no eTag property, which the test above covers, is not the
+  // only way Graph can answer without one. `createGraphClient` returns
+  // `undefined as T` for a zero-length body, and a 204 passes its success
+  // check, so a PATCH answered with no body reaches this function as
+  // `undefined`. Reading a property off that used to throw, and the executor's
+  // error boundary then reported a rename that HAD happened as failed.
+  it("reports a renamed item when the response body was empty, rather than throwing on it", async () => {
+    const client = { patch: async <T>(): Promise<T> => undefined as T };
+
+    await expect(
+      renameDriveItem(client, { driveId: "d1", path: "a.xlsx", newName: "b.xlsx", etag: "e" }),
+    ).resolves.toEqual({ kind: "renamed", etag: undefined });
+  });
+
+  it("reports a renamed item when the response body was null, rather than throwing on it", async () => {
+    const client = { patch: async <T>(): Promise<T> => null as T };
+
+    await expect(
+      renameDriveItem(client, { driveId: "d1", path: "a.xlsx", newName: "b.xlsx", etag: "e" }),
+    ).resolves.toEqual({ kind: "renamed", etag: undefined });
+  });
 });
 
 describe("readDriveItemEtag", () => {
@@ -48,5 +70,19 @@ describe("readDriveItemEtag", () => {
       etag: '"{GUID},3"',
     });
     expect(calls[0]).toBe("/drives/d1/root:/a/b.xlsx:?$select=eTag");
+  });
+
+  it("reports an item found with no etag rather than throwing, for each shape that can mean that", async () => {
+    // Three distinct shapes, not one. The middle two are what the real client
+    // hands back for an empty and a null response body; a guard written only
+    // against the first threw on both.
+    for (const body of [{}, undefined, null]) {
+      const client = { get: async <T>(): Promise<T> => body as T };
+
+      await expect(readDriveItemEtag(client, { driveId: "d1", path: "a/b.xlsx" })).resolves.toEqual({
+        kind: "found",
+        etag: undefined,
+      });
+    }
   });
 });

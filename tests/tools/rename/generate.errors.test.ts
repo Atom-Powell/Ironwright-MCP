@@ -5,6 +5,7 @@ import {
   MISNAMED_PATH,
   contextWith,
   etagGraphClient,
+  noEtag,
   snapshotWhereTargetIsOccupied,
   snapshotWithMisnamedFile,
   snapshotWithMisnamedFilePerClient,
@@ -46,7 +47,7 @@ describe("exclusions rather than attempts", () => {
   });
 
   it("excludes a candidate whose item carries no etag rather than writing it unguarded", async () => {
-    const graph = etagGraphClient({ [MISNAMED_PATH]: null });
+    const graph = etagGraphClient({ [MISNAMED_PATH]: noEtag("item_without_etag") });
     const context = contextWith(graph, snapshotWithMisnamedFile());
 
     const output = outputOf(

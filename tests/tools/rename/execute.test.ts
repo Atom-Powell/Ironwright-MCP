@@ -151,7 +151,7 @@ describe("execute_rename_plan confirmed run", () => {
   });
 
   it("falls back to a metadata read when the PATCH response carries no etag, and charges for it", async () => {
-    const graph = renamingGraphClient({ etagOnPatchResponse: false });
+    const graph = renamingGraphClient({ patchResponse: "item_without_etag" });
     const context = createFakeToolContext({ graph });
     await context.store.savePlan("example", planWith([ITEM_A]));
 
@@ -163,5 +163,46 @@ describe("execute_rename_plan confirmed run", () => {
     expect(output.reversalEntriesNotRefreshed).toBe(0);
     const reversal = await context.store.getPlan("example", REVERSAL_ID);
     expect(reversal?.items[0]?.etag).not.toBe(ITEM_A.etag);
+  });
+
+  // The two below cover the way a PATCH most plausibly carries no etag: Graph
+  // answers 204 with no body at all, which the Graph client hands back as
+  // `undefined`, not as an empty object. The fallback branch above existed for
+  // exactly this case and was unreachable for it, because reading `.eTag` off
+  // `undefined` threw first and the PATCH error boundary reported the item as
+  // failed although the file had been renamed.
+  it("treats a PATCH answered with an empty body as a rename and reaches the fallback read", async () => {
+    const graph = renamingGraphClient({ patchResponse: "empty_body" });
+    const context = createFakeToolContext({ graph });
+    await context.store.savePlan("example", planWith([ITEM_A]));
+
+    const output = outputOf(
+      await runExecuteRenamePlan({ profileId: "example", planId: PLAN_ID, confirm: true }, context, () => REVERSAL_ID),
+    );
+
+    expect(output.results[0]?.outcome).toBe("renamed");
+    expect(output.counts.failed).toBe(0);
+    expect(output.graphOperationsIssued).toBe(2);
+    expect(output.reversalEntriesNotRefreshed).toBe(0);
+    const reversal = await context.store.getPlan("example", REVERSAL_ID);
+    expect(reversal?.items[0]?.etag).not.toBe(ITEM_A.etag);
+  });
+
+  it("reports a rename whose empty PATCH body and unreadable follow-up left the reversal entry stale", async () => {
+    const graph = renamingGraphClient({ patchResponse: "empty_body", etagLookupStatus: 404 });
+    const context = createFakeToolContext({ graph });
+    await context.store.savePlan("example", planWith([ITEM_A]));
+
+    const output = outputOf(
+      await runExecuteRenamePlan({ profileId: "example", planId: PLAN_ID, confirm: true }, context, () => REVERSAL_ID),
+    );
+
+    // Renamed, and the reversal entry openly stale, is the honest account of
+    // this situation. Reporting it as failed, which is what the crash produced,
+    // told an operator the opposite of what had happened to their file.
+    expect(output.results[0]?.outcome).toBe("renamed");
+    expect(output.reversalEntriesNotRefreshed).toBe(1);
+    const reversal = await context.store.getPlan("example", REVERSAL_ID);
+    expect(reversal?.items[0]?.etag).toBe(ITEM_A.etag);
   });
 });

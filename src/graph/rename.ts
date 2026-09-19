@@ -21,8 +21,20 @@ export type EtagLookup = { kind: "found"; etag: string | undefined } | { kind: "
  * An empty string is treated as absent. Graph does not return one, but an
  * empty etag is not a usable If-Match precondition either way, so collapsing
  * the two here means no caller downstream has to test for both.
+ *
+ * The null and undefined guard is not defensive padding. `createGraphClient`'s
+ * `request()` returns `undefined as T` for a zero-length response body, and a
+ * 204 passes its success check, so a PATCH Graph answers with no body at all
+ * reaches this function as `undefined` rather than as an object missing its
+ * `eTag`. Reading a property off that threw, and the executor's PATCH error
+ * boundary caught the throw and reported an item as `failed` although the file
+ * HAD been renamed, leaving its reversal entry on the stale pre-rename etag
+ * with nothing counted anywhere. Both fakes modelled an absent etag as `{}`,
+ * the one shape this function already handled, so the fakes and the code
+ * agreed with each other and neither agreed with the real client.
  */
 function etagOf(item: unknown): string | undefined {
+  if (item === null || item === undefined) return undefined;
   const value = (item as { eTag?: unknown }).eTag;
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }

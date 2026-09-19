@@ -69,7 +69,7 @@ describe("per-item refusals", () => {
   it("leaves a reversal entry on its stale etag when no fresh one could be read, and counts it", async () => {
     // The PATCH answers with no etag and the follow-up read answers 404, which
     // is what someone renaming the file again between the two looks like.
-    const graph = renamingGraphClient({ etagOnPatchResponse: false, etagLookupStatus: 404 });
+    const graph = renamingGraphClient({ patchResponse: "item_without_etag", etagLookupStatus: 404 });
     const context = createFakeToolContext({ graph });
     await context.store.savePlan("example", planWith([ITEM_A]));
 
@@ -84,7 +84,7 @@ describe("per-item refusals", () => {
   });
 
   it("says in its prose that an unrefreshed reversal entry will refuse rather than undo", async () => {
-    const graph = renamingGraphClient({ etagOnPatchResponse: false, etagLookupStatus: 404 });
+    const graph = renamingGraphClient({ patchResponse: "item_without_etag", etagLookupStatus: 404 });
     const context = createFakeToolContext({ graph });
     await context.store.savePlan("example", planWith([ITEM_A]));
 
@@ -103,7 +103,7 @@ describe("per-item refusals", () => {
     // outcome the fixture above exercises. Either way, the rename itself
     // already happened and must not be reported as failed on account of a
     // problem discovered only after it landed.
-    const graph = renamingGraphClient({ etagOnPatchResponse: false, etagLookupStatus: 500 });
+    const graph = renamingGraphClient({ patchResponse: "item_without_etag", etagLookupStatus: 500 });
     const context = createFakeToolContext({ graph });
     await context.store.savePlan("example", planWith([ITEM_A]));
 
