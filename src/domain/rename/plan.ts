@@ -160,8 +160,19 @@ function candidateFrom(artifact: ArtifactFinding): RenameCandidate | undefined {
   // Skipped rather than refused, because unlike the two shapes below it names
   // no contradiction: there is simply nothing to rename.
   if (matched === undefined) return undefined;
-  // A file found by the Microsoft Search cross-check lives in another library.
-  // Putting it right is a move, which is phase 6b.
+  // A file found by the Microsoft Search cross-check lives in another library,
+  // and putting it right is a move, which is phase 6b.
+  //
+  // Unreachable by construction, like the occupied-path branch below: `misnamed`
+  // and a `library` cannot occur together. `computeState` in
+  // `src/domain/reconcile/match.ts` sets `locationCorrect` to
+  // `parsed.file.library === undefined && actualFolder === parsedFolder`, and
+  // returns `misnamed` only when `locationCorrect` is true, so a match carrying
+  // a library is always `misplaced` or `misnamed_and_misplaced` and never
+  // reaches here. Retained anyway, and deliberately rather than by oversight:
+  // this is a write path, and a guard whose absence would turn a cross-library
+  // finding into a same-library rename is not the guard to remove on the
+  // strength of a negative nobody can prove.
   if (matched.library !== undefined) return undefined;
 
   // expectedPath is the expected FOLDER, not a full file path; expectedName is
@@ -358,6 +369,11 @@ export function pairMisnamedArtifacts(report: ReconciliationReport): RenamePairi
   }
 
   for (const duplicate of report.duplicates) {
+    // The library half of this condition is unreachable by construction, for
+    // the same reason `candidateFrom`'s own library guard is: a duplicate's
+    // `state` is the loser's state from the same `computeState`, which cannot
+    // return `misnamed` for a file carrying a library. It is kept for the same
+    // reason too.
     if (duplicate.state !== "misnamed" || duplicate.library !== undefined) continue;
     collisions.push(excludedFromDuplicate(report, duplicate));
   }

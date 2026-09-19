@@ -48,7 +48,15 @@ describe("collisions", () => {
 });
 
 describe("shapes this function refuses rather than guesses at", () => {
-  it("skips a misnamed artifact found in another library, since moving it is not a rename", () => {
+  // Not a live cross-library case, and the shape below is one the engine
+  // cannot produce: `computeState` makes `locationCorrect` false for any file
+  // carrying a library, and only a `locationCorrect` file is reported as
+  // `misnamed`, so a library-qualified match is always `misplaced` or
+  // `misnamed_and_misplaced`. What this pins is the guard's behavior if that
+  // contract is ever broken: a rename plan must not form for a file in another
+  // library, because renaming it in place would leave it where it does not
+  // belong while reporting the slot as put right.
+  it("forms no rename for a misnamed artifact carrying a library, a contract the engine does not break today", () => {
     const foreign = misnamed("CLIENTA", "wrong.xlsx", "2026-01_CLIENTA_MonthlyTraining.xlsx");
     const matched = foreign.matched;
     if (matched === undefined) throw new Error("fixture lost its match");
