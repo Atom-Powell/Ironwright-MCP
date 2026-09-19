@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import { UnsafeKeyError } from "../../src/store/keys.js";
-import type { InventoryRecord, StateStore, StoredPlan } from "../../src/store/types.js";
+import { MAX_PLAN_JSON_CHARS, PlanTooLargeError } from "../../src/store/types.js";
+import type { InventoryRecord, RenamePlanItem, StateStore, StoredPlan } from "../../src/store/types.js";
 
 export function record(overrides: Partial<InventoryRecord> = {}): InventoryRecord {
   return {
@@ -321,6 +322,46 @@ export function stateStoreConformance(create: () => StateStore): void {
 
     const stored = await store.getPlan("example", plan.planId);
     expect(stored?.items[0]?.etag).toBe("e1");
+  });
+
+  it("refuses to save a plan whose items serialize past MAX_PLAN_JSON_CHARS, the same for every implementation", async () => {
+    // Both StateStore implementations must enforce the same character cap:
+    // a caller cannot tell which one is behind it, and a plan the memory
+    // store would silently accept while the Table store refused it is
+    // exactly the drift that promise exists to rule out. This is also the
+    // band a generator's own coarser item-count pre-check cannot see, since a
+    // count well under that pre-check's limit can still serialize past this
+    // cap.
+    const store = create();
+    const items: RenamePlanItem[] = Array.from({ length: 150 }, (_, index) => {
+      const client = `CLIENT${String(index).padStart(4, "0")}`;
+      return {
+        path: `2026/${client}/01-January/wrong-name-for-this-client.xlsx`,
+        currentName: "wrong-name-for-this-client.xlsx",
+        targetName: `2026-01_${client}_MonthlyTraining.xlsx`,
+        targetPath: `2026/${client}/01-January/2026-01_${client}_MonthlyTraining.xlsx`,
+        etag: '"{11111111-1111-1111-1111-111111111111},1"',
+        client,
+      };
+    });
+    const plan: StoredPlan = {
+      planId: "rnm-2026-09-18-oversize",
+      profileId: "example",
+      kind: "rename",
+      driveId: "d1",
+      createdAt: "2026-09-18T12:00:00Z",
+      items,
+      excluded: [],
+    };
+
+    // The fixture must actually cross the cap for this test to mean anything.
+    // Asserted rather than assumed, so a future change to the item shape that
+    // shrinks it below the cap fails loudly here instead of quietly no longer
+    // testing the refusal at all.
+    expect(JSON.stringify(items).length).toBeGreaterThan(MAX_PLAN_JSON_CHARS);
+
+    await expect(store.savePlan("example", plan)).rejects.toThrow(PlanTooLargeError);
+    await expect(store.getPlan("example", plan.planId)).resolves.toBeUndefined();
   });
 
   it("does not let a caller mutate a stored plan through the object the store handed back", async () => {
