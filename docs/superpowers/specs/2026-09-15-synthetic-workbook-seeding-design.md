@@ -1,13 +1,23 @@
 # Synthetic tracking workbook seeding
 
 Date: 2026-09-15
-Status: designed, not implemented
+Status: Implemented, and overtaken in one section. The seeder builds the workbook and prints the
+expected report, and both served the live sittings from 2026-09-16 onward. "The Graph sequence"
+below no longer describes what the code does; see the amendment there. (Corrected 2026-09-22; this
+line read "designed, not implemented" until then.)
 
 ## Why this exists
 
 The live tenant sitting gates three unverified claims at once: that delta bounds the Graph request
 count the way phase 2a argues, that the Excel session layer can open a real workbook at all, and
-that `reconcile_workbook_vs_repository` returns a report. `npm run seed-library` already builds the
+that `reconcile_workbook_vs_repository` returns a report.
+
+**Amended 2026-09-22. The middle claim was answered no, and that is what rewrote this document's
+Graph half.** The sitting on 2026-09-16 found the Graph Excel API refuses this server's app-only
+tokens at every application permission tested, so there is no Excel session layer to verify;
+`src/graph/excel.ts` was deleted by phase 2b-2 and the workbook is read by downloading the bytes.
+The other two claims were both answered yes, on 2026-09-16 and 2026-09-17 respectively. Everything
+in this document upstream of "The Graph sequence" still describes what the seeder does. `npm run seed-library` already builds the
 repository side of that sitting. The workbook side has no tooling: the runbook in
 `docs/OPEN-ITEMS.md` tells the operator to place a tracking workbook by hand with a table matching
 the example profile's mapping.
@@ -156,6 +166,18 @@ The blank generator names its single worksheet `Sheet1`, and the range and table
 that name. Both modules take the name from one exported constant rather than repeating the literal,
 because a disagreement between them would fail only against a live tenant.
 
+**VOID, amended 2026-09-22. This sequence no longer exists and could not run if it did.** Four of
+these five calls address the Graph Excel API's `/workbook/` surface, which refuses this server's
+app-only tokens, and the seeder authenticates app-only as the grant issuer like everything else
+here. What shipped instead assembles the whole workbook in memory, table and number format
+included, through `scripts/seed/blank-workbook.ts`, and uploads it with **one content PUT**. This
+script was the last caller still depending on that surface, and phase 2b-2 removed the dependency
+rather than leaving a seeder that only works if Microsoft changes its mind. The failure-attribution
+reasoning below, about which call is the first to suspect when the bytes are malformed, is
+therefore void with the sequence it reasons about: there is one call, and a failure names it.
+`scripts/seed/workbook.ts` carries the current description in its own header comment. Original text
+follows.
+
 Against the seeder's own Graph client, five calls after that folder exists:
 
 1. `PUT` the blank bytes to the workbook path from `profile.identity.workbookPath`.
@@ -177,6 +199,14 @@ two workbook calls have already succeeded, so Graph could open the file, and the
 request itself, its address, its header row, or a table already there.
 
 ### Not through the server's Excel layer
+
+**Amended 2026-09-22. The conclusion holds and its reason is gone.** `src/graph/excel.ts` no longer
+exists: phase 2b-2 deleted it with its tests, because leaving an unreachable capability in place
+would read as a working one. The seeder still uses its own client, and still writes, but the
+guarantee that the server cannot write to the customer's live operational authority is now
+structural in a stronger way than a non-persistent session gave. The server downloads a copy of the
+workbook and parses the bytes, and a downloaded copy cannot write back at all. Original text
+follows.
 
 None of this goes through `src/graph/excel.ts`. That module opens a non-persistent session and
 therefore structurally cannot write, which is a locked decision in the Decision Record: the server
@@ -248,6 +278,7 @@ PR #10 wires. So this can be built and merged in either order, and the sitting n
 ## Out of scope
 
 No update path for an existing workbook. No drift-free mode and no drift flag. No change to
-`src/graph/excel.ts` or to any part of the server. No second profile: this targets the example
+`src/graph/excel.ts` or to any part of the server. (That module was deleted by phase 2b-2; noted
+2026-09-22.) No second profile: this targets the example
 profile's mapping, and a profile with a different table name or column set is the operator's to
 write and the seeder's to read, not something this design generalizes over ahead of a caller.

@@ -42,6 +42,10 @@ different API, different output, different field. It removes `searchCrossCheckIn
 reports, which cannot exist until this slice ships, so it is strictly second in value as well as
 independent in code.
 
+**It became phase 2c and shipped on 2026-09-17, verified live.** Noted 2026-09-22. `$batch` below
+did not: phase 6a deferred it a second time and issues renames sequentially, so it still has no
+caller.
+
 **Moved to phase 6: the `$batch` builder.** It was deferred out of phase 2a because a delta-driven
 inventory has no use for it, and nothing here needs it either: reading a table is one call and
 reading a worksheet's used range is one call. Its real caller is the write tools, where renaming two
@@ -199,6 +203,14 @@ Error paths are CI gates in the `.errors.test.ts` files the suite already isolat
 - A duplicate client, asserting the engine still refuses the whole report.
 
 ## Live verification
+
+**Amended 2026-09-22. This section is void, and it is the section the banner exists because of.**
+The sitting it describes ran on 2026-09-16 and is what invalidated this document's Graph half: the
+Excel calls never reached an endpoint that would accept them, so there was nothing here to verify.
+The fixture it asks for was built anyway and still serves, in a changed form; the seeder creates
+the tracking workbook itself rather than leaving it to be placed by hand, and it no longer does so
+through the Excel API either. What this slice's surviving pure half feeds, `readWorkbookGrid`, was
+verified live on 2026-09-17 under phase 2b-2's own reader. Original text follows.
 
 The tenant sitting that phase 2a is waiting on now needs one more fixture: a synthetic tracking
 workbook in the site, with a table matching the example profile's mapping. The seeder builds folders

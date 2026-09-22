@@ -1,7 +1,9 @@
 # Design: server application teardown
 
 Date: 2026-09-13
-Status: Approved (design only)
+Status: Implemented. `--delete-server-app`, `--force-orphan` and the purge step all ship, and the
+teardown path has run against a live tenant. (Corrected 2026-09-22; this line read "Approved
+(design only)" until then.)
 Extends: `2026-09-11-repository-reconciliation-mcp-design.md`, which settles the two-phase setup and
 the grant-issuer model. This addendum closes the teardown hole recorded in `docs/OPEN-ITEMS.md`:
 the setup command can create a server application and grant it site access, and can undo neither.
@@ -175,6 +177,15 @@ The cases that matter:
 Unlike phase 2a's request-count claim, this one needs no separate trip. The next live setup run
 creates an application that has to come back out, so create, scan, tear down is one sitting and
 teardown is exercised against a real tenant as a side effect of verifying phase 2a.
+
+**Amended 2026-09-22. It did not work out that way, and one of the two questions is still open.**
+Teardown was not a side effect of any single sitting. The 2026-09-16 and 2026-09-17 sittings both
+ended with the applications left standing, and the tenant was torn down only after the phase 6a
+sitting on 2026-09-19, by `npm run setup -- --delete-bootstrap --confirm`, which reported both the
+delete and the purge. So the purge path has now reported success against a real tenant. **Whether
+deleting a registration also removes its service principal was never separately checked**, so the
+caveat in Scope above stands exactly as written: if a service principal survives, this mode needs a
+step and the existing rollback has the same gap. `docs/OPEN-ITEMS.md` carries it.
 
 ## The documentation correction, no code
 

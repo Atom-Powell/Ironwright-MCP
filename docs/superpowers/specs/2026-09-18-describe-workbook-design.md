@@ -200,6 +200,13 @@ from its schema.
 
 ## Verification before merge
 
+**It ran on 2026-09-18 and passed, and the rediscovery below is what it returned.** Noted
+2026-09-22. Both modes ran against the live site through the MCP transport and a per-request
+`McpServer`, and the tool rediscovered a workbook mapping this repository independently knows is
+correct without being told any of it. The sitting also found a request-count defect no fixture
+could reach, since a download costs two counted Graph requests and the shared fake charged one.
+`docs/OPEN-ITEMS.md` carries the dated record and what the sitting does not establish.
+
 The usual rule applies: covered by fakes until it has run against a tenant, and the branch does not
 merge until it has.
 

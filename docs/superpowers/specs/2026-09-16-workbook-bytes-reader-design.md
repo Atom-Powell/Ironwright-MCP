@@ -1,7 +1,9 @@
 # Design: reading the workbook from its bytes
 
 Date: 2026-09-16
-Status: Approved (design only)
+Status: Implemented. Verified live on 2026-09-17, which supplied the engine its second input and
+reached the MVP checkpoint. (Corrected 2026-09-22; this line read "Approved (design only)" until
+then.)
 Replaces: the Graph half of `2026-09-14-workbook-snapshot-design.md`, which is superseded and
 carries a banner saying so. That document still governs everything downstream of the grid.
 Extends: `2026-09-11-repository-reconciliation-mcp-design.md`, whose Excel paragraph is amended.
@@ -26,7 +28,8 @@ behavior, and the `WorkbookSnapshot` it feeds keeps its shape. Everything in thi
 upstream of that call, with one exception recorded below, the row offset.
 
 Out of scope: the reconciliation engine, the profile schema, the tool layer, and the Microsoft
-Search cross-check, which remains phase 2c and unstarted.
+Search cross-check, which remains phase 2c and unstarted. (Phase 2c shipped on 2026-09-17 and was
+verified live; noted 2026-09-22.)
 
 ## Architecture
 
@@ -187,6 +190,14 @@ without one, `t="e"` error, a table starting at a sheet-row offset, `fullCalcOnL
 without formulas in the mapped range, a missing table name, an empty range, and each limit above.
 
 ## What this phase does not prove
+
+**Amended 2026-09-22. Both paragraphs below have since been overtaken, and neither was wrong when
+written.** `reconcile_workbook_vs_repository` answered against a real library on 2026-09-17, so
+phase 4a is no longer verified against fakes; and phase 2c shipped that same day, so a report no
+longer carries `searchCrossCheckIncluded: false` unconditionally. What this phase still does not
+prove is unchanged and worth keeping: a live run proves the plumbing, not the engine, because the
+seeder's predicted report runs the same engine over the same plan and the two agree by construction
+on anything the engine gets wrong. Original text follows.
 
 It does not prove the composed tool returns a correct report against a tenant. That needs a live
 run, and the sitting on 2026-09-16 could not reach step 7. Until `reconcile_workbook_vs_repository`

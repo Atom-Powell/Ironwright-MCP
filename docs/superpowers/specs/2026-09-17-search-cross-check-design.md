@@ -1,7 +1,8 @@
 # Design: the Microsoft Search cross-check
 
 Date: 2026-09-17
-Status: Approved (design only)
+Status: Implemented. Verified live on 2026-09-17. (Corrected 2026-09-22; this line read "Approved
+(design only)" until then.)
 Phase: 2c, the last outstanding piece of phase 2.
 Extends: `2026-09-11-repository-reconciliation-mcp-design.md`, whose justification for this
 cross-check is amended below rather than inherited.
@@ -115,6 +116,15 @@ remedy differs for each:
 - A search failed for one or more libraries.
 - A library held more pages of results than the page cap allows, so it was not searched
   exhaustively.
+
+**Amended 2026-09-22: four reasons shipped, not three.** `CrossCheckSkipReason` in
+`src/scan/cross-check.ts` is `no-region`, `search-failed`, `library-not-addressable` and
+`page-cap-reached`. The fourth is the one this spec could not have anticipated, and the live
+sitting is what produced it: a drive's `webUrl` from `listDrives` is percent encoded while a search
+hit's is not, so the path conversion's literal prefix strip failed for any library whose name
+contains a space, and `Shared Documents` is the default library name. A library this cross-check
+cannot address by path is now named as its own reason rather than silently contributing no hits to
+a check that reported itself complete.
 
 A failing search never fails the reconcile. A report without a cross-check is still worth having;
 one that silently claims a cross-check it did not complete is not.

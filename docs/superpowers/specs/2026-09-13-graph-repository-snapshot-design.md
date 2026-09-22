@@ -1,7 +1,8 @@
 # Design: the Graph layer and the repository snapshot
 
 Date: 2026-09-13
-Status: Approved (design only)
+Status: Implemented. Verified live on 2026-09-16. (Corrected 2026-09-22; this line read
+"Approved (design only)" until then, five phases after the slice shipped.)
 Extends: `2026-09-11-repository-reconciliation-mcp-design.md`, which settles the architecture,
 the Graph-access priorities, and the state store. This addendum settles what that spec's phase 2
 left open or got wrong: how phase 2 is sliced, which HTTP client the Graph layer uses, how the
@@ -29,11 +30,30 @@ manager, and the `WorkbookSnapshot`.
 
 Deferred to phase 6: the `conflictBehavior` helper, which nothing reads until a write tool exists.
 
+**Amended 2026-09-22. Three of those four deferrals went somewhere other than phase 2b, and one
+went nowhere at all.** The Excel session manager was never built, because a live run on 2026-09-16
+proved the Graph Excel API refuses this server's app-only tokens at every application permission
+tested; `src/graph/excel.ts` was written, then deleted with its tests by phase 2b-2, and the
+`WorkbookSnapshot` is supplied instead by downloading the `.xlsx` and parsing the bytes. The
+Microsoft Search cross-check became phase 2c and shipped on 2026-09-17. `$batch` moved to phase 6,
+where phase 6a then deferred it again and issued renames sequentially, so it still has no caller
+and remains the one item on this list that nothing has replaced. `conflictBehavior` is likewise
+still owed, held for 6b or 6c with the move tools.
+
 A consequence that has to be stated rather than discovered. Every snapshot this slice produces
 carries `searchCrossCheckIncluded: false`, so any reconciliation run against it is a degraded
 scan by the engine's own definition: a correctly named file sitting outside the expected taxonomy
 is invisible to it. The field exists for exactly this and the report already says so. Nobody
 should read a 2a-era report as complete.
+
+**Amended 2026-09-22.** Two halves of that paragraph aged differently. Phase 2c retired the blanket
+claim: a snapshot now sets the flag from whether the cross-check completed, so a report is no
+longer necessarily degraded and carries one of four distinguishable reasons when it is. The other
+half was wrong when written rather than overtaken, and phase 2c's own spec says so: a correctly
+named file sitting outside the taxonomy but inside the scanned library is NOT invisible to a
+delta-driven scan, and the matcher already resolves it to `misplaced`. What was actually invisible
+is a file filed into a different document library of the same site, which is the narrower gap 2c
+closed.
 
 ## Decision: plain `fetch`, not the Graph JS SDK
 
@@ -242,6 +262,14 @@ bounded request count, then a file added, renamed, moved and deleted by hand wit
 each, confirming the snapshot tracks every one. That sequence is the actual evidence for the
 call-count claim, and its numbers belong in `docs/OPEN-ITEMS.md` alongside the record of what is
 verified live versus only against fakes.
+
+**This ran on 2026-09-16 and passed.** A cold scan enumerated 144 files and 122 folders in 4 Graph
+requests, and an immediate re-scan cost 3, reusing the persisted `deltaLink` with no resync,
+against a tree a recursive walk would have cost at least 122 requests. The `as unknown as
+TableClientLike` cast, recorded above as the one line no fake could check, held against the real
+`@azure/data-tables` client on Azurite. The phase's central claim is a measurement rather than a
+design argument from that date onward. The dated record is in `docs/OPEN-ITEMS.md`, including what
+the sitting does not establish.
 
 ## Amendments this requires
 

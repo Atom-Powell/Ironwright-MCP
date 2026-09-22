@@ -1,7 +1,9 @@
 # Design: wiring the reconciliation tool
 
 Date: 2026-09-14
-Status: Approved (design only)
+Status: Implemented. Verified live on 2026-09-17, when `reconcile_workbook_vs_repository` returned
+a correct report against a real SharePoint library for the first time. (Corrected 2026-09-22; this
+line read "Approved (design only)" until then.)
 Extends: `2026-09-11-repository-reconciliation-mcp-design.md`, which settles the tool set, the
 transport, the safety model and the phase sequence. This addendum settles what phase 4 left open:
 how a tool call reaches real code at all, how a `profileId` becomes a `Profile`, where the
@@ -35,6 +37,25 @@ returns.
 **Still out of scope, and visible in every report this slice produces: the Microsoft Search
 cross-check.** Phase 2c has not been written. `searchCrossCheckIncluded` stays `false` and the tool
 says so in words, not only in a boolean.
+
+**Amended 2026-09-22. All four stubs are now wired, and both of the design questions were answered
+in the opposite direction to the guess above.** Phase 4b wired `inventory_tree`,
+`query_repository` and `validate_structure` on 2026-09-18; phase 4c wired `describe_workbook` the
+same day, which closed phase 4.
+
+`describe_workbook` does NOT propose a mapping. 4c settled that it proposes no `columns` map at
+all and says in its own output that it did not, because those keys are the profile author's
+vocabulary and the tool has not seen the deliverables. It reports header text, inferred type,
+distinct count and bounded samples instead, which is the evidence a human needs, and a mapping it
+invented would be a plausible artifact harder to audit than no artifact.
+
+`validate_structure` answered its question by narrowing: it checks conformance, not completeness.
+Which folders a client requires is a workbook fact it deliberately does not read, so completeness
+stays with `reconcile`, which holds the evidence.
+
+The Search cross-check shipped as phase 2c on 2026-09-17. `searchCrossCheckIncluded` is now set
+from whether the cross-check completed, so a report is no longer degraded by default, and when it
+is the snapshot carries one of four distinguishable reasons rather than a bare `false`.
 
 ## Decision: the handler contract, and why the context is required
 
@@ -225,6 +246,9 @@ and assuming it is exactly the kind of assumption that ships as a runtime failur
 error. If it is not exempt, the fallback is a discriminated output schema whose error branch is
 valid.
 
+**Settled by observation, and recorded in `docs/OPEN-ITEMS.md` under its own heading.** It is
+exempt. The fallback was not needed and no discriminated output schema exists.
+
 Each failure names what an operator can act on, and nothing else:
 
 - An unknown `profileId` names the configured ids.
@@ -248,7 +272,11 @@ Two of these are stated in the text block in words rather than left as fields, b
 - **The Search cross-check did not run.** Without it a correctly named file outside the expected
   taxonomy is invisible, so every misplaced finding is unreliable and every missing finding is
   suspect. `RepositorySnapshot` already documents this; the tool is the first place a human reads
-  it.
+  it. **Amended 2026-09-22:** phase 2c replaced this unconditional sentence. The text block now
+  says nothing at all when the cross-check completed, and names which of four reasons applied when
+  it did not, because the remedy differs for each. The sentence's own claim about what is invisible
+  was also narrowed: the gap is a file in a different document library of the same site, not a file
+  outside the taxonomy, which a delta scan already resolves to `misplaced`.
 - **Findings were truncated**, with the exact count, when they were.
 
 ## Module layout
@@ -295,6 +323,16 @@ edit:
   validates against the declared `outputSchema`.
 
 ## Live verification
+
+**Amended 2026-09-22. It has since been verified, and the MVP checkpoint it gates was reached on
+2026-09-17.** `reconcile_workbook_vs_repository` returned a correct report against a real
+SharePoint library that day, `isError` false, 2003 ms, 3 Graph requests, with every count matching
+what the seeder predicted. One divergence was arranged deliberately and behaved: a `starter.xlsx`
+left in the library root, unknown to both the seeder and the engine, came back as a second
+unrecognized orphan. What the match does NOT establish is that the engine is correct, since the
+prediction runs the same engine over the same plan in memory and the two sides agree by
+construction on anything the engine gets wrong; it is plumbing evidence, which is what this
+sitting was for. The original framing follows.
 
 Nothing in this slice is verified against a tenant, and this slice does not change that. It composes
 three layers that are each verified against fakes only, so a report it produces is exactly as

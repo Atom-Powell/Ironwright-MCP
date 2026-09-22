@@ -328,6 +328,14 @@ empty result.
 
 ## Verification before merge
 
+**It ran on 2026-09-18 and passed.** Noted 2026-09-22. All three tools answered against the live
+site through the MCP transport: `inventory_tree` reproduced phase 2a's 4-request cold scan through
+the tool layer, `query_repository` returned all three questions at zero Graph requests and refused
+before any scan had run, and `validate_structure` matched the seeded tree. The sitting also found a
+cap defect no fixture could reach, which is the rule below earning its keep rather than an
+exception to it. `docs/OPEN-ITEMS.md` carries the dated record and what the sitting does not
+establish.
+
 This phase is covered by fakes until it has run against a tenant, and the branch does not merge
 until it has. The rule was adopted after phase 2b-1 was designed, built, reviewed across six tasks
 and merged without one call ever reaching the endpoint it was written for, and both phases since
@@ -354,6 +362,21 @@ Its current stub also carries a defect this phase records rather than fixes. Its
 schema was written in phase 1, before the identity decision hardened, and it promises reach the
 permission model forbids. 4c owns the correction, which is most likely replacing `siteUrl` with a
 `profileId` or dropping it and taking the granted site from configuration.
+
+**Amended 2026-09-22, after 4c shipped on 2026-09-18. It proposes no mapping, and the `siteUrl`
+guess above picked the wrong one of its own two options.** 4c settled that the tool proposes no
+`columns` map at all and states in its own output that it did not, because those keys are the
+profile author's vocabulary and the tool has not seen the deliverables. What it returns instead is
+the evidence a human writes a mapping from: header text verbatim, an inferred type, a distinct
+count and bounded samples per column. It also infers no `date` type, since a date in xlsx is a
+number carrying a number format and the cell decoder deliberately does not read styles.
+
+The `siteUrl` correction went the configuration route, not the `profileId` route.
+**`IW_SITE_URL` became required server configuration**, and the tool takes `library` and
+`workbookPath` and no site at all, which makes it structurally incapable of being pointed at a site
+the grant forbids. One consequence rode with it that a `profileId` input would not have bought: the
+profile registry now refuses at startup a profile whose `identity.siteUrl` disagrees with the
+granted site, instead of that mismatch surfacing later as a 403.
 
 ## What this phase does not prove
 

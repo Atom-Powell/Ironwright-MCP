@@ -1,7 +1,9 @@
 # Design: the reconciliation engine
 
 Date: 2026-09-13
-Status: Approved (design only)
+Status: Implemented. Pinned by the golden report over synthetic fixtures, and exercised against a
+live tenant through `reconcile_workbook_vs_repository` from 2026-09-17. (Corrected 2026-09-22;
+this line read "Approved (design only)" until then.)
 Extends: `2026-09-11-repository-reconciliation-mcp-design.md`, which settles the domain model,
 the profile schema, and the five artifact states. This addendum settles what that spec left
 open: the boundary between the engine and the Graph layer, the engine's public surface, the
@@ -56,6 +58,15 @@ expected taxonomy is invisible, so every `misplaced` finding is unreliable and e
 finding is suspect. When it is false the report says so, and the tools presenting the report
 must not describe it as complete. This is the parent spec's rule applied to data rather than
 messages: do not assert what has not been observed.
+
+**Amended 2026-09-22, after phase 2c shipped.** The flag survives and the rule above is unchanged.
+What changed is its scope and its resolution. The invisible case is narrower than this paragraph
+claims: a file outside the taxonomy but inside the scanned library resolves to `misplaced` on a
+delta-driven snapshot without any help from Search, and what Search actually recovers is a file
+filed into a different document library of the same site. And the flag is no longer a bare
+boolean at the point of explanation: when it is false the snapshot carries one of four
+distinguishable reasons, `no-region`, `search-failed`, `library-not-addressable` or
+`page-cap-reached`, because the remedy differs for each.
 
 ## Public surface
 
