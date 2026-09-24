@@ -88,6 +88,10 @@ export async function runExecuteRenamePlan(
       return noPlanStored(args.planId, args.profileId, "generate_rename_plan");
     }
     if (plan.kind !== "rename") return wrongPlanKind(plan, "rename");
+    // Validated before anything is applied. Checked after the loop instead, a
+    // malformed row would be refused only once every rename had landed, and
+    // the refusal would replace the per-item report of what was applied.
+    const excluded = renameExclusionsOf(plan).sort(comparePaths);
 
     const applied = await applyPlan(plan, {
       confirm: args.confirm,
@@ -97,7 +101,6 @@ export async function runExecuteRenamePlan(
       makeReversalPlanId,
     });
     const results = applied.results.map((entry) => resultFor(entry.item, RENAME_OUTCOME[entry.outcome]));
-    const excluded = renameExclusionsOf(plan).sort(comparePaths);
 
     const output: ExecuteRenamePlanOutput = {
       planId: plan.planId,

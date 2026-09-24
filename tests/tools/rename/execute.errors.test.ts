@@ -217,4 +217,30 @@ describe("refusals before anything is attempted", () => {
     expect(result.content.map((c) => ("text" in c ? c.text : "")).join("")).toContain("execute_move_plan");
     expect(graph.calls).toEqual([]);
   });
+
+  it("refuses a rename plan carrying a move-only exclusion reason before any rename is attempted", async () => {
+    const graph = renamingGraphClient();
+    const context = createFakeToolContext({ graph });
+    await context.store.savePlan(
+      "example",
+      planWith(
+        [ITEM_A],
+        [
+          {
+            path: ITEM_B.path,
+            currentName: ITEM_B.currentName,
+            targetName: ITEM_B.targetName,
+            client: ITEM_B.client,
+            reason: "in_another_library",
+            library: "Archive",
+          },
+        ],
+      ),
+    );
+
+    const result = await runExecuteRenamePlan({ profileId: "example", planId: PLAN_ID, confirm: true }, context, () => REVERSAL_ID);
+
+    expect(result.isError).toBe(true);
+    expect(graph.calls).toEqual([]);
+  });
 });
