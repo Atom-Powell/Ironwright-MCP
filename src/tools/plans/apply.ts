@@ -1,4 +1,4 @@
-import { relocateDriveItem, type RelocateOutcome } from "../../graph/relocate.js";
+import { EmptyRelocationError, relocateDriveItem, type RelocateOutcome } from "../../graph/relocate.js";
 import { readDriveItemEtag } from "../../graph/rename.js";
 import type { RenamePlanItem, StoredPlan } from "../../store/types.js";
 import type { ToolContext } from "../context.js";
@@ -88,9 +88,13 @@ export async function applyPlan(
   // reverse: a dry run changes nothing, so it has nothing to roll back.
   // Written before the first write, so a crash mid-apply still leaves
   // something to roll back with. It necessarily over-covers at this point,
-  // listing inverses for writes that have not happened; replaying one of
-  // those finds nothing at the source path and reports it, which is how the
-  // over-coverage corrects itself through the same machinery.
+  // listing inverses for writes that have not happened. Such an entry keeps
+  // the forward item's pre-write etag, so replaying it is refused on that
+  // precondition: Graph checks If-Match before existence and answers 412
+  // whether the path is empty or, as the 2026-09-24 sitting's step 6
+  // measured, holds a different file. The refusal is reported as
+  // precondition_refused, which is how the over-coverage corrects itself
+  // through the same machinery without touching whatever sits there.
   let reversal: StoredPlan | undefined;
   if (confirm) {
     reversal = {
@@ -124,22 +128,36 @@ export async function applyPlan(
     // that follows a success, so a failure refreshing the reversal entry or
     // saving it overwrote an already-observed "renamed" with "failed", the
     // report contradicting what the function itself had just seen happen.
+    //
+    // An item that changes neither name nor folder is settled as failed
+    // here, before the counter moves, rather than left for relocateDriveItem
+    // to refuse: that refusal happens before any request, so counting it
+    // would report a Graph operation this call never issued.
     let written: RelocateOutcome | "failed";
-    try {
-      graphOperationsIssued += 1;
-      written = await relocateDriveItem(context.graph, {
-        driveId: plan.driveId,
-        path: item.path,
-        etag: item.etag,
-        ...relocationFor(item),
-      });
-    } catch (error) {
-      // Recorded and continued rather than rethrown. Rethrowing would
-      // discard the report, which is the operator's only account of which
-      // writes already applied; the reversal log alone does not say which
-      // of its entries are live.
-      console.error(`${toolName} could not apply "${item.path}" under plan "${plan.planId}"`, error);
+    const relocation = relocationFor(item);
+    if (relocation.newName === undefined && relocation.newParentPath === undefined) {
+      console.error(
+        `${toolName} could not apply "${item.path}" under plan "${plan.planId}"`,
+        new EmptyRelocationError(item.path),
+      );
       written = "failed";
+    } else {
+      try {
+        graphOperationsIssued += 1;
+        written = await relocateDriveItem(context.graph, {
+          driveId: plan.driveId,
+          path: item.path,
+          etag: item.etag,
+          ...relocation,
+        });
+      } catch (error) {
+        // Recorded and continued rather than rethrown. Rethrowing would
+        // discard the report, which is the operator's only account of which
+        // writes already applied; the reversal log alone does not say which
+        // of its entries are live.
+        console.error(`${toolName} could not apply "${item.path}" under plan "${plan.planId}"`, error);
+        written = "failed";
+      }
     }
 
     let outcome: AppliedOutcome;
@@ -160,9 +178,11 @@ export async function applyPlan(
       // stays live and meaningful.
       outcome = "not_found";
     } else if (written.kind === "name_conflict") {
-      // A file arrived at the target between generating and executing. Graph
-      // refused under conflictBehavior fail, so nothing was replaced and this
-      // item is not in the reversal log's live set.
+      // Another file held the target name when the write was attempted, and
+      // Graph refused rather than replace it, so nothing was replaced and
+      // this item is not in the reversal log's live set. When that file
+      // arrived is not observable here: the plan-time scan may simply
+      // predate it.
       outcome = "target_name_taken";
     } else {
       // The write is done. This outcome is final; the bookkeeping below has
