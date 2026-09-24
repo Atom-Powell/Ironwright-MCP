@@ -26,6 +26,11 @@ describe("requireExactRoles refusals", () => {
     expect((error as UnexpectedTokenRolesError).missing).toEqual([]);
     expect((error as Error).message).toContain("Files.Read.All");
     expect((error as Error).message).not.toContain("header.");
+    // The error has no context: at startup the process then exits, and while
+    // running the inner provider keeps the refused token cached until it
+    // expires, so no claim about when the fix takes effect is true everywhere.
+    expect((error as Error).message).toMatch(/Remove every permission except Sites\.Selected from the server application in Entra\.$/);
+    expect((error as Error).message).not.toMatch(/restart/i);
   });
 
   it("refuses a token missing the expected role", async () => {

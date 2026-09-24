@@ -135,7 +135,13 @@ describe("describeToolFailure", () => {
     );
 
     expect(message).toContain("Files.Read.All");
-    expect(message).toContain("Nothing was read or changed");
+    expect(message).toContain("reconcile_workbook_vs_repository stopped when its Graph token was refused");
+    // A token can rotate mid-call, after a scan has read pages or a plan tool
+    // has fetched ETags, so this function cannot observe that nothing was read.
+    expect(message).not.toMatch(/nothing was read/i);
+    expect(message).not.toMatch(/did not run/i);
+    expect(message).toContain("up to about an hour");
+    expect(message).toContain("immediately if the server is restarted");
     expect(message).not.toContain("server log");
   });
 

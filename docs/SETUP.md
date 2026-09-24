@@ -260,10 +260,13 @@ on every new token it obtains, the server reads its own token's application role
 token that carries anything other than exactly `Sites.Selected`. Adding a permission such as
 `Files.Read.All` to the server application would otherwise widen it to every site in the tenant
 without a sign. At startup a mismatch stops the process with a message naming the extra or missing
-permissions; while running, every tool call fails with the same explanation and nothing is read or
-changed. Remove the extra permission from the server application in Entra and the next token is
-accepted, with no restart needed. If Entra cannot be reached at startup, the server logs a warning
-and starts anyway, and the check runs on the first token it does obtain.
+permissions. Remove the extra permission from the server application in Entra and start it again.
+While running, a tool call that is handed a refused token stops there with the same explanation,
+though it may already have read from Graph with the token before it. Once the extra permission is
+removed, the change takes effect when the server's current token expires, up to about an hour, or
+immediately on restart, because the refused token stays cached until then. If Entra cannot be
+reached at startup, the server logs a warning and starts anyway, and the check runs on the first
+token it does obtain.
 
 `Sites.Selected` is two grants, not one, and the second is worthless without the first.
 

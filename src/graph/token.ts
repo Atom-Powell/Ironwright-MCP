@@ -158,10 +158,13 @@ function describeRoleMismatch(args: { found: string[] | undefined; extra: string
   const parts: string[] = [];
   if (args.extra.length > 0) parts.push(`permissions beyond Sites.Selected: ${args.extra.join(", ")}`);
   if (args.missing.length > 0) parts.push(`missing: ${args.missing.join(", ")}`);
+  // No sentence about when the fix takes effect: this error has no context.
+  // At startup the process exits on it, and while running the inner provider
+  // keeps the refused token cached until it expires. The callers that know
+  // which of those applies say it.
   return (
     `The server application's Graph token carries ${parts.join("; ")}. ${refusal} Remove every permission ` +
-    "except Sites.Selected from the server application in Entra; the server checks its next token again, " +
-    "so no restart is needed."
+    "except Sites.Selected from the server application in Entra."
   );
 }
 

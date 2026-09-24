@@ -78,10 +78,19 @@ in a new `src/server/identity.ts`, so it can be tested; `main.ts` runs on import
 
 `describeToolFailure` in `src/tools/errors.ts` gains a case for `UnexpectedTokenRolesError`. The
 message says the server refused to call Microsoft Graph because its own token carries permissions
-other than `Sites.Selected`, names them, and says nothing was read or changed; the operator
-removes the extra permissions from the server application in Entra and the server recovers on its
-next token without a restart. It does not fall through to the generic Graph-failure text, which
-would send the operator to the server log for a problem already fully described.
+other than `Sites.Selected` and names them. It does not fall through to the generic Graph-failure
+text, which would send the operator to the server log for a problem already fully described.
+
+Amended 2026-09-24, whole-branch review. This section first said the message "says nothing was
+read or changed" and that the server recovers on its next token without a restart. Both were
+wrong. A token can rotate mid-call, after a scan has read delta pages or a plan tool has fetched
+ETags with the token before it, so `describeToolFailure` cannot observe that nothing was read, and
+a message may not assert what its function cannot observe. And the inner provider keeps the
+refused token cached until it expires, so removing the permission does not take effect on the next
+call. The message now says `<tool> stopped when its Graph token was refused`, followed by the
+error's own text, and then that the change takes effect when the server's current token expires,
+up to about an hour, or immediately if the server is restarted. The error's own message no longer
+carries any sentence about recovery, because it has no context: at startup the process exits on it.
 
 ## Testing
 

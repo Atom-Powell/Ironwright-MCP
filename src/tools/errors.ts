@@ -113,11 +113,15 @@ export function describeToolFailure(error: unknown, subject: FailureSubject): st
 
   if (error instanceof UnexpectedTokenRolesError) {
     // Stated in full here rather than pointing at the server log: the error
-    // already carries everything the operator needs, and nothing was read or
-    // changed, because the token was refused before any Graph request.
+    // already carries everything the operator needs. It says only that the
+    // tool stopped, never that nothing was read or changed: a token can rotate
+    // mid-call, after a scan has read pages or a plan tool has fetched ETags,
+    // and this function cannot observe which. The timing is stated here rather
+    // than in the error because only a running server's caller knows the inner
+    // provider keeps the refused token cached until it expires.
     return (
-      `${subject.tool} did not run: ${error.message} Nothing was read or changed, so there is nothing to ` +
-      "check or roll back."
+      `${subject.tool} stopped when its Graph token was refused: ${error.message} The change takes effect when ` +
+      "the server's current token expires, up to about an hour, or immediately if the server is restarted."
     );
   }
 
