@@ -6,7 +6,7 @@ import type { Profile } from "../../domain/profile/schema.js";
 import type { GraphClient } from "../../graph/client.js";
 import { readDriveItemEtag } from "../../graph/rename.js";
 import { readWorkbookSnapshot } from "../../scan/workbook.js";
-import type { ExcludedPlanItem, RenamePlanItem, StoredPlan } from "../../store/types.js";
+import type { ExcludedPlanItem, PlanExclusionReason, RenamePlanItem, StoredPlan } from "../../store/types.js";
 import type { ToolContext } from "../context.js";
 import { describeToolFailure, type FailureSubject } from "../errors.js";
 import { periodFromDate } from "../reconciliation/run.js";
@@ -90,7 +90,7 @@ export async function runGenerateRenamePlan(
     }
 
     const items: RenamePlanItem[] = [];
-    const excluded: ExcludedPlanItem[] = collisions.map((collision) => ({
+    const excluded: ExcludedPlanItem<PlanExclusionReason>[] = collisions.map((collision) => ({
       path: collision.path,
       currentName: collision.currentName,
       targetName: collision.targetName,
@@ -117,6 +117,7 @@ export async function runGenerateRenamePlan(
       items.push({ ...candidate, etag: lookup.etag });
     }
 
+    const sortedExcluded = [...excluded].sort(comparePaths);
     const plan: StoredPlan = {
       planId: makePlanId(),
       profileId: args.profileId,
@@ -124,7 +125,7 @@ export async function runGenerateRenamePlan(
       driveId: scan.result.driveId,
       createdAt: context.now().toISOString(),
       items: [...items].sort(comparePaths),
-      excluded: [...excluded].sort(comparePaths),
+      excluded: sortedExcluded,
     };
     await context.store.savePlan(args.profileId, plan);
 
@@ -144,9 +145,9 @@ export async function runGenerateRenamePlan(
       })),
       itemCount: plan.items.length,
       itemsOmitted: Math.max(0, plan.items.length - MAX_PLAN_ITEMS_LISTED),
-      excluded: plan.excluded.slice(0, MAX_PLAN_ITEMS_LISTED),
-      excludedCount: plan.excluded.length,
-      excludedOmitted: Math.max(0, plan.excluded.length - MAX_PLAN_ITEMS_LISTED),
+      excluded: sortedExcluded.slice(0, MAX_PLAN_ITEMS_LISTED),
+      excludedCount: sortedExcluded.length,
+      excludedOmitted: Math.max(0, sortedExcluded.length - MAX_PLAN_ITEMS_LISTED),
       workbookReadGraphRequestsByThisCall,
       // Counted, not bracketed. The request counter lives on a process-level
       // client a concurrent call also moves, so a bracket around this loop
@@ -176,7 +177,7 @@ export async function runGenerateRenamePlan(
   }
 }
 
-function excludedFrom(candidate: RenameCandidate, reason: ExcludedPlanItem["reason"]): ExcludedPlanItem {
+function excludedFrom(candidate: RenameCandidate, reason: PlanExclusionReason): ExcludedPlanItem<PlanExclusionReason> {
   return {
     path: candidate.path,
     currentName: candidate.currentName,

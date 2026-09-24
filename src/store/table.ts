@@ -300,8 +300,8 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
         // faithfully throws instead of coming back as a valid-looking plan
         // with nothing to do.
         const kind = requiredPlanString(entity, "kind", planId);
-        if (kind !== "rename") {
-          throw new MalformedPlanEntityError(planId, "kind", `is "${kind}", not "rename"`);
+        if (kind !== "rename" && kind !== "move") {
+          throw new MalformedPlanEntityError(planId, "kind", `is "${kind}", not "rename" or "move"`);
         }
 
         return {

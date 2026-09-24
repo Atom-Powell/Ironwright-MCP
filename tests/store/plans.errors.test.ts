@@ -124,4 +124,12 @@ describe("malformed stored plan entities", () => {
     await expect(store.getPlan("example", planId)).rejects.toBeInstanceOf(MalformedPlanEntityError);
     await expect(store.getPlan("example", planId)).rejects.toThrow(/kind/);
   });
+
+  it("names both accepted kinds when it refuses an unknown one", async () => {
+    const plans = new FakeTableClient();
+    await plans.upsertEntity({ ...validEntity(), kind: "reversal" });
+    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory: new FakeTableClient(), plans });
+
+    await expect(store.getPlan("example", planId)).rejects.toThrow(/not "rename" or "move"/);
+  });
 });

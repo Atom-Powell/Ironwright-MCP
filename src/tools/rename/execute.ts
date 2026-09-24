@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { readDriveItemEtag, renameDriveItem } from "../../graph/rename.js";
-import type { RenamePlanItem, StoredPlan } from "../../store/types.js";
+import type { ExcludedPlanItem, PlanExclusionReason, RenamePlanItem, StoredPlan } from "../../store/types.js";
 import type { ToolContext } from "../context.js";
 import { describeToolFailure, type FailureSubject } from "../errors.js";
 import { newPlanId } from "./ids.js";
@@ -224,7 +224,8 @@ export async function runExecuteRenamePlan(
       results.push(resultFor(item, outcome));
     }
 
-    const excluded = [...plan.excluded].sort(comparePaths);
+    // Narrowed properly in the next commit, which refuses a plan of any other kind first.
+    const excluded = [...plan.excluded].sort(comparePaths) as ExcludedPlanItem<PlanExclusionReason>[];
     const output: ExecuteRenamePlanOutput = {
       planId: plan.planId,
       profileId: plan.profileId,

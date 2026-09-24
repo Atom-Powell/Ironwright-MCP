@@ -100,12 +100,25 @@ export type PlanExclusionReason =
   | "no_etag_available"
   | "file_not_found_at_plan_time";
 
+/**
+ * Reasons only a move plan records. `in_another_library` means the Microsoft
+ * Search cross-check found the file in a different document library of the
+ * same site, and this server does not yet move files between libraries.
+ * `target_folder_absent` means the folder the file belongs in does not exist,
+ * and this slice creates no folders, since a folder's reversal is a delete.
+ */
+export type MoveOnlyExclusionReason = "in_another_library" | "target_folder_absent";
+
+export type MoveExclusionReason = PlanExclusionReason | MoveOnlyExclusionReason;
+
+export type PlanKind = "rename" | "move";
+
 export interface RenamePlanItem {
   /** Library-relative, no leading slash. The file as it stands now. */
   path: string;
   currentName: string;
   targetName: string;
-  /** Library-relative path this item occupies once renamed. Always the same folder as `path`. */
+  /** Library-relative path this item occupies once applied. The same folder as `path` for a rename, another folder for a move. */
   targetPath: string;
   /**
    * The `If-Match` precondition, and where it came from depends on which kind
@@ -129,12 +142,18 @@ export interface RenamePlanItem {
   client: string;
 }
 
-export interface ExcludedPlanItem {
+/**
+ * Generic over its reason so each tool's output can state the narrower set its
+ * own plans carry, while a stored plan holds the union.
+ */
+export interface ExcludedPlanItem<R extends string = MoveExclusionReason> {
   path: string;
   currentName: string;
   targetName: string;
   client: string;
-  reason: PlanExclusionReason;
+  reason: R;
+  /** The library the file was found in, present only for `in_another_library`. */
+  library?: string;
 }
 
 /**
@@ -146,7 +165,7 @@ export interface ExcludedPlanItem {
 export interface StoredPlan {
   planId: string;
   profileId: string;
-  kind: "rename";
+  kind: PlanKind;
   driveId: string;
   createdAt: string;
   items: RenamePlanItem[];
