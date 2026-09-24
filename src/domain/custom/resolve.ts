@@ -101,6 +101,30 @@ function normalizeFolder(raw: string): string {
   return raw.replace(/^\/+/, "").replace(/\/+$/, "");
 }
 
+type RenameForm =
+  | { form: "setName"; value: string }
+  | { form: "replace"; value: { find: string; with: string } }
+  | { form: "addPrefix"; value: string }
+  | { form: "addSuffix"; value: string };
+
+/**
+ * The single definition of which rename forms a rename object carries: a key
+ * counts only when its value is not undefined. A caller building the object
+ * field by field can leave unset keys behind, and testing key presence with
+ * `in` would then read a form nobody set, or throw on it.
+ */
+function presentForms(rename: CustomRename): RenameForm[] {
+  const fields = rename as Partial<Record<(typeof RENAME_FORMS)[number], unknown>>;
+  return RENAME_FORMS.filter((form) => fields[form] !== undefined).map(
+    (form) => ({ form, value: fields[form] }) as RenameForm,
+  );
+}
+
+/** The one form a validated rename carries; stepProblem has already refused any other count. */
+function renameForm(rename: CustomRename | undefined): RenameForm | undefined {
+  return rename === undefined ? undefined : presentForms(rename)[0];
+}
+
 /**
  * Checks a step's shape before any file is read. The tool schema cannot
  * express "exactly one rename form" without a refinement, so the rule lives
@@ -111,16 +135,13 @@ function stepProblem(step: CustomStep): string | undefined {
     return "the step has neither moveTo nor rename, so it would change nothing";
   }
   if (step.rename === undefined) return undefined;
-  const rename = step.rename as Record<string, unknown>;
-  const forms = RENAME_FORMS.filter((form) => rename[form] !== undefined);
-  if (forms.length !== 1) {
+  const forms = presentForms(step.rename);
+  const [only] = forms;
+  if (forms.length !== 1 || only === undefined) {
     return `rename must carry exactly one of setName, replace, addPrefix or addSuffix; it carries ${String(forms.length)}`;
   }
-  if ("replace" in step.rename && step.rename.replace.find === "") return "replace.find is empty";
-  if ("setName" in step.rename && step.rename.setName === "") return "setName is empty";
-  if ("addPrefix" in step.rename && step.rename.addPrefix === "") return "addPrefix is empty";
-  if ("addSuffix" in step.rename && step.rename.addSuffix === "") return "addSuffix is empty";
-  return undefined;
+  if (only.form === "replace") return only.value.find === "" ? "replace.find is empty" : undefined;
+  return only.value === "" ? `${only.form} is empty` : undefined;
 }
 
 type FolderLookup = { found: true; folder: string } | { found: false; nearestExisting: string; children: string[] };
@@ -211,12 +232,19 @@ function select(selector: CustomSelector, folder: string, files: readonly Snapsh
  * form that names the whole file, and the extension check catches it.
  */
 function targetNameFor(name: string, rename: CustomRename | undefined): string {
-  if (rename === undefined) return name;
+  const form = renameForm(rename);
+  if (form === undefined) return name;
   const { stem, extension } = splitName(name);
-  if ("setName" in rename) return rename.setName;
-  if ("replace" in rename) return stem.split(rename.replace.find).join(rename.replace.with) + extension;
-  if ("addPrefix" in rename) return rename.addPrefix + name;
-  return stem + rename.addSuffix + extension;
+  switch (form.form) {
+    case "setName":
+      return form.value;
+    case "replace":
+      return stem.split(form.value.find).join(form.value.with) + extension;
+    case "addPrefix":
+      return form.value + name;
+    case "addSuffix":
+      return stem + form.value + extension;
+  }
 }
 
 interface Candidate {
@@ -311,7 +339,7 @@ export function resolveCustomPlan(steps: readonly CustomStep[], snapshot: Snapsh
   // collide; refusing names the step, which an exclusion per file would not.
   for (const [index, step] of steps.entries()) {
     const matched = perStep[index] ?? 0;
-    if (step.rename !== undefined && "setName" in step.rename && matched > 1) {
+    if (renameForm(step.rename)?.form === "setName" && matched > 1) {
       return {
         ok: false,
         refusal: { kind: "ambiguous_set_name", step: index + 1, matched },

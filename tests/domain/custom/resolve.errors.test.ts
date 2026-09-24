@@ -415,3 +415,106 @@ describe("resolveCustomPlan exclusions", () => {
     });
   });
 });
+
+describe("resolveCustomPlan rename forms carried with unset keys", () => {
+  it("treats a form whose key is present but undefined as absent, applying the one form that is set", () => {
+    const rename = { setName: "q.pdf", replace: undefined } as unknown as CustomRename;
+    const result = resolveCustomPlan([step({ selector: JAN_2025, rename })], snapshot);
+
+    expect(result).toEqual({
+      ok: true,
+      items: [
+        {
+          path: "Client A/2025/Jan report.pdf",
+          currentName: "Jan report.pdf",
+          targetName: "q.pdf",
+          targetPath: "Client A/2025/q.pdf",
+          step: 1,
+        },
+      ],
+      exclusions: [],
+      perStep: [1],
+    });
+  });
+
+  it("applies addSuffix when addPrefix is present but undefined, never writing undefined into the name", () => {
+    const rename = { addPrefix: undefined, addSuffix: " v2" } as unknown as CustomRename;
+    const result = resolveCustomPlan([step({ selector: JAN_2025, rename })], snapshot);
+
+    expect(result).toEqual({
+      ok: true,
+      items: [
+        {
+          path: "Client A/2025/Jan report.pdf",
+          currentName: "Jan report.pdf",
+          targetName: "Jan report v2.pdf",
+          targetPath: "Client A/2025/Jan report v2.pdf",
+          step: 1,
+        },
+      ],
+      exclusions: [],
+      perStep: [1],
+    });
+    expect(JSON.stringify(result)).not.toContain("undefined");
+  });
+});
+
+describe("resolveCustomPlan binding exclusion rules", () => {
+  it("excludes a case-only extension change as extension_would_change", () => {
+    const result = resolveCustomPlan(
+      [step({ selector: { folder: "/Client A/2025", nameEquals: "notes.docx" }, rename: { setName: "notes.DOCX" } })],
+      snapshot,
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      items: [],
+      exclusions: [
+        {
+          path: "Client A/2025/notes.docx",
+          currentName: "notes.docx",
+          targetName: "notes.DOCX",
+          reason: "extension_would_change",
+          steps: [1],
+        },
+      ],
+      perStep: [1],
+    });
+  });
+
+  it("counts a path as occupied even when this same plan moves its file away", () => {
+    const result = resolveCustomPlan(
+      [
+        step({ selector: JAN_2025, moveTo: "/Archive/2025" }),
+        step({
+          selector: { folder: "/Client A/2025", nameEquals: "Feb report.pdf" },
+          rename: { setName: "Jan report.pdf" },
+        }),
+      ],
+      snapshot,
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      items: [
+        {
+          path: "Client A/2025/Jan report.pdf",
+          currentName: "Jan report.pdf",
+          targetName: "Jan report.pdf",
+          targetPath: "Archive/2025/Jan report.pdf",
+          step: 1,
+        },
+      ],
+      exclusions: [
+        {
+          path: "Client A/2025/Feb report.pdf",
+          currentName: "Feb report.pdf",
+          targetName: "Jan report.pdf",
+          reason: "target_path_already_occupied",
+          steps: [2],
+        },
+      ],
+      perStep: [1, 1],
+    });
+  });
+});
