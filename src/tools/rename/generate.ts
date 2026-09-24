@@ -1,14 +1,14 @@
 import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { reconcile, type WorkbookSnapshot } from "../../domain/reconcile/index.js";
-import { pairMisnamedArtifacts, type RenameCandidate } from "../../domain/rename/plan.js";
+import { pairMisnamedArtifacts } from "../../domain/rename/plan.js";
 import type { Profile } from "../../domain/profile/schema.js";
 import type { GraphClient } from "../../graph/client.js";
-import { readDriveItemEtag } from "../../graph/rename.js";
 import { readWorkbookSnapshot } from "../../scan/workbook.js";
-import type { ExcludedPlanItem, PlanExclusionReason, RenamePlanItem, StoredPlan } from "../../store/types.js";
+import type { ExcludedPlanItem, PlanExclusionReason, StoredPlan } from "../../store/types.js";
 import type { ToolContext } from "../context.js";
 import { describeToolFailure, type FailureSubject } from "../errors.js";
+import { fetchPlanEtags } from "../plans/etags.js";
 import { periodFromDate } from "../reconciliation/run.js";
 import { newPlanId } from "./ids.js";
 import { MAX_PLAN_ITEMS, MAX_PLAN_ITEMS_LISTED, type GenerateRenamePlanOutput } from "./output.js";
@@ -89,7 +89,6 @@ export async function runGenerateRenamePlan(
       };
     }
 
-    const items: RenamePlanItem[] = [];
     const excluded: ExcludedPlanItem<PlanExclusionReason>[] = collisions.map((collision) => ({
       path: collision.path,
       currentName: collision.currentName,
@@ -98,24 +97,9 @@ export async function runGenerateRenamePlan(
       reason: collision.reason,
     }));
 
-    for (const candidate of candidates) {
-      // Fetched now rather than read from the inventory. The inventory's etag
-      // comes from a delta snapshot that may be hours old and is recorded as
-      // `item.eTag ?? ""`, so it can be empty; this fetch measures the window
-      // that matters, generate to execute, and has no empty-string hole. The
-      // same call confirms the file is still at that path under that name,
-      // because path addressing puts the filename in the URL.
-      const lookup = await readDriveItemEtag(context.graph, { driveId: scan.result.driveId, path: candidate.path });
-      if (lookup.kind === "not_found") {
-        excluded.push(excludedFrom(candidate, "file_not_found_at_plan_time"));
-        continue;
-      }
-      if (lookup.etag === undefined) {
-        excluded.push(excludedFrom(candidate, "no_etag_available"));
-        continue;
-      }
-      items.push({ ...candidate, etag: lookup.etag });
-    }
+    const fetched = await fetchPlanEtags(context.graph, scan.result.driveId, candidates);
+    const items = fetched.items;
+    excluded.push(...fetched.excluded);
 
     const sortedExcluded = [...excluded].sort(comparePaths);
     const plan: StoredPlan = {
@@ -175,14 +159,4 @@ export async function runGenerateRenamePlan(
       content: [{ type: "text" as const, text: describeToolFailure(error, subject) }],
     };
   }
-}
-
-function excludedFrom(candidate: RenameCandidate, reason: PlanExclusionReason): ExcludedPlanItem<PlanExclusionReason> {
-  return {
-    path: candidate.path,
-    currentName: candidate.currentName,
-    targetName: candidate.targetName,
-    client: candidate.client,
-    reason,
-  };
 }

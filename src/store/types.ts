@@ -136,7 +136,7 @@ export interface RenamePlanItem {
    * replaces it with the etag the rename's own PATCH response carried as each
    * rename lands. An entry that never gets replaced keeps the stale value and
    * is refused on replay, which is the safe direction. `reversalItemsFor` in
-   * `src/tools/rename/execute.ts` carries the full reasoning.
+   * `src/tools/plans/apply.ts` carries the full reasoning.
    */
   etag: string;
   client: string;

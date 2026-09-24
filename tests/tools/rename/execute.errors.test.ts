@@ -205,4 +205,16 @@ describe("refusals before anything is attempted", () => {
 
     expect(result.isError).toBe(true);
   });
+
+  it("refuses a move plan rather than applying it as a rename", async () => {
+    const graph = renamingGraphClient();
+    const context = createFakeToolContext({ graph });
+    await context.store.savePlan("example", { ...planWith([ITEM_A]), kind: "move" });
+
+    const result = await runExecuteRenamePlan({ profileId: "example", planId: "rnm-2026-09-18-a1b2c3d4", confirm: true }, context);
+
+    expect(result.isError).toBe(true);
+    expect(result.content.map((c) => ("text" in c ? c.text : "")).join("")).toContain("execute_move_plan");
+    expect(graph.calls).toEqual([]);
+  });
 });
