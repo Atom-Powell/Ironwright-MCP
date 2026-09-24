@@ -67,7 +67,12 @@ Cross-site is out of reach on the same grant, since `Sites.Selected` trims Searc
 one granted site. Amended 2026-09-19: phase 6a issues renames sequentially and deferred `$batch`
 again, so it still has no caller. The measurement that decides when batching earns its complexity
 now exists rather than being guessed at: a rename costs exactly one Graph operation, the plan-time
-etag fetch costs one per candidate, and an excluded item costs none.
+etag fetch costs one per candidate, and an excluded item costs none. Amended 2026-09-24 by phase
+6b-1's probes: a same-library move is one PATCH addressing the target folder by
+`parentReference.path` written RAW, since Graph refuses a percent-encoded folder with the same
+generic 400 an absent folder gets; one PATCH moves and renames together; and every move sends
+`conflictBehavior: fail`, which makes 6b-1 `conflictBehavior`'s first caller. Under it, an
+occupied target name answers 409 `nameAlreadyExists` and nothing is replaced.
 
 **Reading the workbook. Rewritten 2026-09-16 by a live tenant run; the previous entry is void.**
 The Graph Excel API is unreachable from this server. `/workbook/` calls are refused with 403
@@ -148,7 +153,7 @@ path rather than a separate one.
 | `generate_rename_plan` | plan | Reviewable persisted plan |
 | `execute_rename_plan` | write | Dry run by default, ETag preconditions |
 | `generate_move_plan` | plan | Reviewable persisted plan |
-| `execute_move_plan` | write | Async cross-library moves polled to a terminal state |
+| `execute_move_plan` | write | Same-library moves; cross-library is phase 6b-2 |
 | `replicate_template` | write | Validates the source client internally before replicating |
 
 There are three kinds, not two. A plan generator writes a plan, so `readOnlyHint` is false for
@@ -208,7 +213,7 @@ registry, so a tool added later inherits every check.
 
 ## Build Sequence
 
-The spec carries the full phase descriptions. Status as of 2026-09-19:
+The spec carries the full phase descriptions. Status as of 2026-09-24:
 
 1. **Foundation.** Complete and merged. Stateless transport, all ten tools registered as honest
    stubs behind the contract test, the pure profile schema, the two-layer write gate, and a
@@ -362,8 +367,26 @@ The spec carries the full phase descriptions. Status as of 2026-09-19:
      recorded, without naming which of "changed" or "absent" caused it, since 412 alone cannot
      tell the two apart and telling them apart would cost a GET per refusal.
      `docs/OPEN-ITEMS.md` carries the dated record, including what the sitting did not establish.
-   - **6b and 6c.** Held rather than started: the move tools, `replicate_template`, `$batch`, and
-     `conflictBehavior`, in the order 6a's own design spec lays out.
+   - **6b-1: the same-library move write path. Complete and verified live on 2026-09-24.**
+     `generate_move_plan` and `execute_move_plan`, per
+     `docs/superpowers/specs/2026-09-22-move-write-path-design.md`, built by generalizing 6a rather
+     than duplicating it: one Graph verb, `relocateDriveItem`, that renames, moves, or both in one
+     PATCH; one executor, `applyPlan` in `src/tools/plans/apply.ts`, with each execute tool a thin
+     wrapper that refuses the other's plan kind before any write; and one stored plan entity whose
+     `kind` is `"rename"` or `"move"`. The pure pairing is `src/domain/move/plan.ts`, sharing its
+     collision rules with the rename pairing through `src/domain/plans/collisions.ts`. A file found
+     in another library, as a winner or as a losing copy, is excluded naming that library; a target
+     folder that does not exist is excluded rather than created. An occupied target name at
+     execution is now its own outcome, `target_name_taken`, in both execute tools, where a rename
+     used to report it as a generic failure. Two probes came first, and the second overturned the
+     plan: a move's target folder must be written raw, not percent-encoded. The live sitting ran the
+     spec's steps and passed, including a mixed run that returned `moved`, `precondition_refused`
+     and `target_name_taken` in one plan, and a rename regression through the shared executor.
+     `docs/OPEN-ITEMS.md` carries the dated record and what the sitting did not establish.
+   - **6b-2 and 6c.** Held rather than started: cross-library moves, which begin with a live probe
+     of how Graph moves an item between drives; `replicate_template`, the plausible first caller for
+     folder creation; and `$batch`. Phase 6d, operator-authored plans, is designed in
+     `docs/superpowers/specs/2026-09-23-custom-plans-design.md` and builds on 6b-1's executor.
    Then **Copilot Studio integration and governance**, then the **evaluation suite**, whose
    questions are already written in `docs/EVALUATION-QUESTIONS.md`. They exist early on purpose, so
    phase 3 has a concrete target rather than inventing its own test afterward.

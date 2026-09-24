@@ -284,7 +284,7 @@ Ten tools, inside the recommended 25 to 30 ceiling for a single agent.
 | `generate_rename_plan` | plan | Produces a persisted, reviewable plan |
 | `execute_rename_plan` | write | Dry run by default; `confirm: true` for a live pass |
 | `generate_move_plan` | plan | Produces a persisted, reviewable plan |
-| `execute_move_plan` | write | Async cross-library moves polled to a terminal state |
+| `execute_move_plan` | write | Same-library moves; cross-library is phase 6b-2 |
 | `replicate_template` | write | Validates the source client internally before replicating |
 
 The `plan` kind is a third category on purpose. A plan generator performs no repository

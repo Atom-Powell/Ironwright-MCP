@@ -159,14 +159,11 @@ two defects this introduced and then fixed on the same branch: the first version
 nothing whatsoever, because the API that replaced that property defers its callback and
 `process.exit` does not wait for it.
 
-**Before a write tool needs a cross-field constraint.** `generate_move_plan` still has no
-refinement enforcing that `scopeValue` is present when `scope` is `client` or `deliverable`. The
-cause this item used to name, that `ToolDefinition.inputSchema` is a `z.ZodRawShape` which
-structurally forbids an object-level refinement, is gone: phase 4b widened the field to
-`z.ZodTypeAny`. What blocks it now is the installed SDK, which advertises an empty input schema
-for any tool carrying a top-level refinement; that defect, the version it was measured against,
-and the two routes still open are recorded under "The MCP SDK cannot advertise a refined input
-schema" below.
+**CLOSED 2026-09-24 by phase 6b-1: a write tool no longer needs a cross-field constraint.**
+`generate_move_plan` dropped the stub's `scope` and `scopeValue` for the optional `clients` array
+`generate_rename_plan` already takes, so the one rule that needed an object-level refinement no
+longer exists. The SDK defect that blocked it is unchanged and still recorded under "The MCP SDK
+cannot advertise a refined input schema" below, for the next tool that needs such a rule.
 
 ## Known minor issues
 
@@ -1424,10 +1421,10 @@ bare `.shape` property, which a `ZodEffects` keeps on `.innerType()` instead of 
 A top-level refinement is therefore now banned by the contract test, and a characterization test
 in `tests/mcp/build-server.test.ts` pins the observed behavior, so a future SDK version that fixes
 this will fail that test and say so, rather than the fix going unnoticed. Two routes are still
-open for phase 6, which needs a cross-field constraint on `generate_move_plan` because nothing
-enforces that `scopeValue` is present when `scope` is `client` or `deliverable`: enforce the
-constraint inside the handler's own parse rather than in the advertised schema, or advertise the
-plain object and parse call-time input with the refined one. This is recorded as a defect of the
+open for the next tool that needs a cross-field constraint: enforce the constraint inside the
+handler's own parse rather than in the advertised schema, or advertise the plain object and parse
+call-time input with the refined one. Phase 6 turned out not to need either: phase 6b-1 dropped
+`generate_move_plan`'s `scope` and `scopeValue`, the pair that motivated this entry, on 2026-09-24. This is recorded as a defect of the
 installed SDK version, not a permanent property of the protocol, which is why the version is
 named rather than left implicit.
 
@@ -2200,6 +2197,64 @@ A third finding is worth recording because of where it was: two places claimed t
 ordering regression "by position", and under that exact regression only one of the two tests failed.
 The branch that fixed a documented-but-never-printed log corrected a documented-but-never-run
 assertion before merging.
+
+## The phase 6b-1 live sitting, 2026-09-24: the first move this server has made
+
+Run against the sandbox tenant through the MCP transport, from source, with the plan store on
+Azurite. The server application's grant was widened to `write` in place with `set-site-role.ts`
+and restored to `read` at the end; every change the sitting seeded was undone and a fresh plan
+afterward matched the pre-sitting baseline exactly.
+
+**Two probes came first and one overturned the plan.** The first measured the six questions in
+the 6b-1 spec. The second measured how `parentReference.path` must be written, and found that the
+natural guess, percent-encoding it the way Graph returns it, is refused with the same generic 400
+an absent folder gets, while raw folder names containing a space, `#`, `%`, `&`, `'`, `+`, `;`,
+commas and non-ASCII letters all land. The plan's code assumed the encoded form; it was corrected
+before implementation. Had it not been, every move into a folder with a space in its name would
+have been reported as a failure indistinguishable from a missing folder.
+
+**Both `in_another_library` paths fired on real data before anything was seeded.** The library
+still holds the phase 2c sitting's `Archive` residue: Client01's February report exists only in
+`Archive`, so it wins its slot as a misplaced artifact, and Client02's has a copy there beside the
+local original, so the copy is a losing duplicate. Both were excluded naming `Archive`. The second
+is the shape the Task 5 review found silently dropped by the plan's own code; this is the live
+evidence the fix was needed.
+
+**The loop.** Five cases were seeded: a correctly named file in the previous month's folder, a
+vendor-token file in the previous month's folder, a third file whose target month folder was
+renamed away, and a misnamed file in the right folder for the rename regression.
+
+1. `generate_move_plan` planned two moves and excluded the absent-folder file as
+   `target_folder_absent`, spending two etag lookups for two candidates and none on the three
+   exclusions. Four Graph requests for the workbook, three for the scan.
+2. The dry run named exactly the plan's two files and issued zero Graph operations.
+3. The confirmed run moved both with two Graph operations. The vendor-token file was moved and
+   renamed by one PATCH. Listing the folders afterward, and a fresh plan finding nothing to move,
+   confirmed both.
+4. The reversal plan moved both back, restoring the second file's folder and its original name in
+   one write, and the listing confirmed it.
+5. With the absent folder restored, a three-item plan was generated. One file was then renamed away
+   and back, changing its ETag without moving it, and another file was renamed into the third
+   item's target path. Executing gave one `moved`, one `precondition_refused` and one
+   `target_name_taken`. The occupant kept its place and the refused file stayed in its source
+   folder, so `conflictBehavior: fail` held against real Graph.
+6. That mixed run's reversal log over-covers by design. Replaying it moved back only the item that
+   had moved and refused the other two on their stale ETags. One of those two entries pointed at a
+   path that by then held a different file, the occupant, and the stale precondition is exactly
+   what stopped the rollback from moving it.
+7. `generate_rename_plan` and `execute_rename_plan` ran end to end through the refactored executor:
+   three renames, three `renamed`, then rolled back with three `renamed`. The rename path verified
+   on 2026-09-19 did not regress.
+
+### What this sitting did NOT establish
+
+- **Cross-library moves.** Out of this slice by design. Phase 6b-2 begins with its own probe.
+- **A folder name the probes did not try.** The characters above were measured; others were not.
+  A move into such a folder that Graph refuses is reported as `failed`, never applied wrongly.
+- **The empty-body PATCH case**, again: every PATCH returned a body carrying an `eTag`.
+- **A real Azure Table Storage account.** Azurite again, the instance left running since the 6a
+  sitting.
+- **Scale and concurrency.** Three items at most, one caller at a time.
 
 ## The phase 6a live sitting, 2026-09-19: the first write this server has made
 
