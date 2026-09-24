@@ -216,7 +216,8 @@ export const EXECUTE_MOVE_PLAN_OUTPUT_SCHEMA = {
         "this executor always sends If-Match, and a stale precondition against an absent path answers 412 before " +
         "Graph ever reports the path missing, so a 404 cannot reach this outcome today. It is kept as a label " +
         "rather than removed, since a branch on a write path is not removed on the strength of a negative nobody " +
-        "can prove. failed means Graph answered with something other than those, and the server log carries it. " +
+        "can prove. failed means Graph answered with something other than those, or this server did not send " +
+        "the write at all, for example because its own token was refused; the server log carries the reason. " +
         "A target folder deleted after the plan was generated is reported as failed, because Graph answers it " +
         "with a generic 400 that names no cause. May be a prefix; see resultCount.",
     ),

@@ -1,5 +1,6 @@
 import { EmptyRelocationError, relocateDriveItem, type RelocateOutcome } from "../../graph/relocate.js";
 import { readDriveItemEtag } from "../../graph/rename.js";
+import { UnexpectedTokenRolesError } from "../../graph/token.js";
 import type { RenamePlanItem, StoredPlan } from "../../store/types.js";
 import type { ToolContext } from "../context.js";
 
@@ -151,6 +152,11 @@ export async function applyPlan(
           ...relocation,
         });
       } catch (error) {
+        // A token refused for its roles is refused inside the client before
+        // any request is sent, so this item issued no Graph operation and is
+        // taken back off the count. Any other rejection may have reached
+        // Graph, so it stays counted.
+        if (error instanceof UnexpectedTokenRolesError) graphOperationsIssued -= 1;
         // Recorded and continued rather than rethrown. Rethrowing would
         // discard the report, which is the operator's only account of which
         // writes already applied; the reversal log alone does not say which
@@ -196,8 +202,14 @@ export async function applyPlan(
           // "does", and this project has paid once for designing against
           // an API surface nobody had called.
           graphOperationsIssued += 1;
-          const lookup = await readDriveItemEtag(context.graph, { driveId: plan.driveId, path: item.targetPath });
-          fresh = lookup.kind === "found" ? lookup.etag : undefined;
+          try {
+            const lookup = await readDriveItemEtag(context.graph, { driveId: plan.driveId, path: item.targetPath });
+            fresh = lookup.kind === "found" ? lookup.etag : undefined;
+          } catch (error) {
+            // The same rule as the PATCH above: a refused token sent nothing.
+            if (error instanceof UnexpectedTokenRolesError) graphOperationsIssued -= 1;
+            throw error;
+          }
         }
         if (fresh === undefined) {
           reversalEntriesNotRefreshed += 1;
