@@ -145,6 +145,41 @@ phase 2a and phase 2a does not close it.
 
 ## Carried into later phases
 
+**CLOSED 2026-09-24 by the token role guard, branch `token-role-guard`.** The item read:
+**The server should refuse to start if its own token carries any role other than
+`Sites.Selected`.** Found 2026-09-24 by the competitive refresh: a Microsoft Q&A moderator answered,
+as by design, that an application holding `Sites.Selected` plus `Files.Read.All` or
+`User.Read.All` could read sites it was never granted. Setup already reads the grant issuer's
+roles claim (`appRolesFromAccessToken` in `src/setup/steps.ts`), but the running server never
+checks its own, so someone adding a permission to the server application in Entra would widen
+it silently. The 2026-09-24 token check found `["Sites.Selected"]` only, so nothing is wrong
+today; the item is that nothing would say so if it changed. Scheduled 2026-09-24 as its own
+small slice ahead of phase 6d, since it needs no Azure resources. Built as
+`requireExactRoles` in `src/graph/token.ts`, checking every newly minted token, and
+`checkStartupIdentity` in `src/server/identity.ts`, run before the port is bound. Verified live
+on 2026-09-24 in the passing direction only: the server started against the sandbox with no
+warning and `inventory_tree` answered through the guard at 3 Graph requests. The refusal path was
+deliberately not exercised live, since that would mean granting the server application a broad
+permission with admin consent; it is covered by unit tests only.
+
+**Report the server version in `/health` and the startup log (phase 5b).** From the same refresh:
+a peer server's users asked for a way to see which version is running (Lokka #52), because it
+was hardcoded rather than read from `package.json`. Worth doing with 5b's telemetry, once there
+is a deployment to ask; nothing to build before then.
+
+**Bound the startup identity check with a timeout (phase 5b).** Found 2026-09-24 by the token role
+guard's whole-branch review. `checkStartupIdentity` now asks Entra for a token before the port is
+bound, and it has no timeout of its own: it relies on the `fetch` defaults. A token endpoint that
+accepts the connection and never answers would hold startup open, and could keep the server past a
+Container Apps startup probe, which would restart it for a reason no log line names. Worth a
+bounded timeout when 5b sets up the probes; a timeout that expires would take the existing
+"could not obtain a token" path, which logs a warning and starts anyway.
+
+**Read the Google Drive MCP server with `dry_run` and a restore token before planning phase 6d.**
+A search result during the refresh described one, the nearest thing to a reversal log found
+outside this project, but its name and repository were not recorded. Find it and read its plan
+and undo design first; research only.
+
 **CLOSED 2026-09-18 by phase 5a, `1c79bbf`, "build: compile the server without the setup
 command for production", carried through a timeout fix in `4acce7c`.** A production image
 built with `npm ci --omit=dev && npm run build` would fail, because the build compiled

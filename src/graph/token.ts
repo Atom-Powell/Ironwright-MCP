@@ -1,3 +1,4 @@
+import { appRolesFromAccessToken } from "./roles.js";
 
 export interface TokenProvider {
   getToken(): Promise<string>;
@@ -110,6 +111,90 @@ export function clientCredentialsTokenProvider(
         // permanent for the life of the process.
         inFlight = undefined;
       }
+    },
+  };
+}
+
+/**
+ * The one application role the server's own token may carry. Anything more
+ * defeats the least-privilege boundary the Decision Record rests on: a Microsoft
+ * Q&A moderator answered, as by design, that an application holding
+ * Sites.Selected alongside Files.Read.All or User.Read.All could read sites it
+ * was never granted.
+ */
+export const SERVER_TOKEN_ROLES = ["Sites.Selected"] as const;
+
+/**
+ * A token was minted whose application roles are not the expected set, so the
+ * server refused to use it. `found` is undefined when the token could not be
+ * read at all, which is refused rather than trusted: a check that fails open is
+ * not a check.
+ */
+export class UnexpectedTokenRolesError extends Error {
+  readonly found: string[] | undefined;
+  readonly extra: string[];
+  readonly missing: string[];
+
+  constructor(args: { found: string[] | undefined; extra: string[]; missing: string[] }) {
+    super(describeRoleMismatch(args));
+    this.name = "UnexpectedTokenRolesError";
+    this.found = args.found;
+    this.extra = args.extra;
+    this.missing = args.missing;
+  }
+}
+
+function describeRoleMismatch(args: { found: string[] | undefined; extra: string[]; missing: string[] }): string {
+  const refusal = "The server refused to use it, and made no Microsoft Graph request with it.";
+  if (args.found === undefined) {
+    return `The server application's Graph token could not be read, so its permissions could not be checked. ${refusal}`;
+  }
+  if (args.found.length === 0) {
+    return (
+      "The server application's Graph token carries no application permissions, so its Sites.Selected " +
+      `permission is probably not admin-consented. ${refusal}`
+    );
+  }
+  const parts: string[] = [];
+  if (args.extra.length > 0) parts.push(`permissions beyond Sites.Selected: ${args.extra.join(", ")}`);
+  if (args.missing.length > 0) parts.push(`missing: ${args.missing.join(", ")}`);
+  // No sentence about when the fix takes effect: this error has no context.
+  // At startup the process exits on it, and while running the inner provider
+  // keeps the refused token cached until it expires. The callers that know
+  // which of those applies say it.
+  return (
+    `The server application's Graph token carries ${parts.join("; ")}. ${refusal} Remove every permission ` +
+    "except Sites.Selected from the server application in Entra."
+  );
+}
+
+/**
+ * Checks every token the inner provider mints before anything uses it. The
+ * inner provider owns caching and refresh; this remembers only the last token
+ * it approved, so a reused token costs nothing and a newly minted one, which
+ * the inner provider produces roughly hourly, is checked again. That is what
+ * catches a permission added while the server is running.
+ */
+export function requireExactRoles(provider: TokenProvider, expected: readonly string[]): TokenProvider {
+  const wanted = new Set(expected);
+  let approved: string | undefined;
+
+  return {
+    async getToken(): Promise<string> {
+      const token = await provider.getToken();
+      if (token === approved) return token;
+
+      const found = appRolesFromAccessToken(token);
+      if (found === undefined) throw new UnexpectedTokenRolesError({ found, extra: [], missing: [...expected] });
+      const have = new Set(found);
+      const extra = found.filter((role) => !wanted.has(role)).sort();
+      const missing = expected.filter((role) => !have.has(role));
+      if (found.length === 0 || extra.length > 0 || missing.length > 0) {
+        throw new UnexpectedTokenRolesError({ found, extra, missing });
+      }
+
+      approved = token;
+      return token;
     },
   };
 }

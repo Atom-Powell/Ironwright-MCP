@@ -1,6 +1,7 @@
 import type { GraphClient } from "../graph/client.js";
 import type { SiteDrive } from "../graph/drive.js";
 import { searchDriveItems, type SearchHit } from "../graph/search.js";
+import { UnexpectedTokenRolesError } from "../graph/token.js";
 import type { RepositoryFile } from "../domain/reconcile/index.js";
 import type { Profile } from "../domain/profile/schema.js";
 
@@ -275,7 +276,9 @@ function toRepositoryFile(hit: SearchHit, library: SiteDrive & { webUrl: string 
  * A failure anywhere in here is caught and reported through `reason`, never
  * thrown: a reconciliation report without a cross-check is still worth
  * having, and a thrown exception here would take down the whole report over
- * one degraded check.
+ * one degraded check. The one exception is an `UnexpectedTokenRolesError`,
+ * which is not a degraded check but a server refusing its own credential, and
+ * propagates.
  */
 export async function crossCheckOtherLibraries(
   client: Pick<GraphClient, "post">,
@@ -324,7 +327,11 @@ export async function crossCheckOtherLibraries(
         const file = toRepositoryFile(hit, searched);
         if (file !== undefined) files.push(file);
       }
-    } catch {
+    } catch (error) {
+      // A refused token is not a degraded search: it refuses every other Graph
+      // call this tool makes too, and "search-failed" would send the operator
+      // to investigate a network or Graph failure that did not happen.
+      if (error instanceof UnexpectedTokenRolesError) throw error;
       failed = true;
     }
   }

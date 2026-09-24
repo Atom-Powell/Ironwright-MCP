@@ -35,6 +35,9 @@ used for development.
   record of what is verified against a live tenant versus only against fakes.
 - `docs/SETUP.md` is the per-tenant operational procedure.
 - `docs/superpowers/plans/` holds executed implementation plans, kept as history.
+- `competitive-landscape-refresh-2026-09-24.md` is the current competitive picture: MCP
+  marketplaces, adjacent products and user feedback, citation-audited. It corrects parts of the
+  older `competitive-landscape.md`.
 - `Pain-Points.txt` is the de-identified original problem statement, and the two research
   documents carry the architecture and competitive analysis behind the locked decisions.
 
@@ -116,7 +119,13 @@ latency reason.
 
 **Identity.** Entra confidential client scoped via `Sites.Selected`, never tenant-wide
 `Sites.ReadWrite.All`. This is the real least-privilege boundary, because Copilot Studio's DLP
-governance is per-server rather than per-tool and cannot substitute for it.
+governance is per-server rather than per-tool and cannot substitute for it. Enforced at runtime
+since 2026-09-24: the server refuses any Graph token whose roles claim is not exactly
+`Sites.Selected`, on every newly minted token and once at startup, and starts anyway only when
+no token can be obtained at all, because Entra is unreachable or refuses the client id or secret,
+never on a mismatch. An application holding `Sites.Selected` alongside a
+broader permission can read sites it was never granted, so the boundary is only real if it is
+checked where the token is used.
 
 **Name.** The product is officially Ironwright MCP. Settled 2026-09-15, closing the last item
 that was carried as open. Use that spelling in prose, with the repo staying `Ironwright-MCP`. The

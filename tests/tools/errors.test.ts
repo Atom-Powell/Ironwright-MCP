@@ -4,7 +4,7 @@ import { UnknownProfileError } from "../../src/profiles/registry.js";
 import { LibraryNotFoundError } from "../../src/graph/drive.js";
 import { WorkbookFileError, WorkbookMappingError, WorkbookUnreadableError } from "../../src/workbook/errors.js";
 import { GraphRequestError } from "../../src/graph/errors.js";
-import { TokenRequestError } from "../../src/graph/token.js";
+import { TokenRequestError, UnexpectedTokenRolesError } from "../../src/graph/token.js";
 
 const SUBJECT = {
   tool: "reconcile_workbook_vs_repository",
@@ -126,6 +126,23 @@ describe("describeToolFailure", () => {
 
     expect(message).toContain("client id and secret");
     expect(message).not.toContain("signed-in operator has");
+  });
+
+  it("explains a refused token role set without sending the operator to the log", () => {
+    const message = describeToolFailure(
+      new UnexpectedTokenRolesError({ found: ["Sites.Selected", "Files.Read.All"], extra: ["Files.Read.All"], missing: [] }),
+      SUBJECT,
+    );
+
+    expect(message).toContain("Files.Read.All");
+    expect(message).toContain("reconcile_workbook_vs_repository stopped when its Graph token was refused");
+    // A token can rotate mid-call, after a scan has read pages or a plan tool
+    // has fetched ETags, so this function cannot observe that nothing was read.
+    expect(message).not.toMatch(/nothing was read/i);
+    expect(message).not.toMatch(/did not run/i);
+    expect(message).toContain("up to about an hour");
+    expect(message).toContain("immediately if the server is restarted");
+    expect(message).not.toContain("server log");
   });
 
   it("reports an unrecognized error by its own message rather than inventing a category", () => {

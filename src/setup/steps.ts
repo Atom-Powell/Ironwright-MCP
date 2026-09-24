@@ -1,3 +1,5 @@
+import { appRolesFromAccessToken } from "../graph/roles.js";
+
 // Microsoft Graph's own application id, identical in every tenant. The service
 // principal object that represents Graph inside a tenant has a different,
 // per-tenant object id, so it has to be looked up by this value rather than
@@ -186,33 +188,7 @@ export function siteIdPathFromUrl(siteUrl: string): string {
   return path === "" ? url.host : `${url.host}:${path}`;
 }
 
-/**
- * Reads the roles claim out of an application access token. The signature is
- * deliberately not validated: this token was just minted for this command by
- * Entra, and the claim is used only to tell two failure causes apart, never to
- * make an access decision.
- *
- * An empty array and `undefined` mean different things. An empty array is a
- * readable token that carries no roles, which is direct evidence that admin
- * consent is missing. `undefined` means the token could not be read at all, so
- * nothing can be concluded from it.
- */
-export function appRolesFromAccessToken(token: string): string[] | undefined {
-  const segments = token.split(".");
-  const payload = segments[1];
-  if (segments.length !== 3 || payload === undefined || payload === "") return undefined;
-
-  try {
-    const decoded: unknown = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
-    if (typeof decoded !== "object" || decoded === null) return undefined;
-    const roles = (decoded as { roles?: unknown }).roles;
-    if (roles === undefined) return [];
-    if (!Array.isArray(roles)) return undefined;
-    return roles.filter((role): role is string => typeof role === "string");
-  } catch {
-    return undefined;
-  }
-}
+export { appRolesFromAccessToken } from "../graph/roles.js";
 
 /**
  * Checked before a normal run creates anything. A bootstrap application whose

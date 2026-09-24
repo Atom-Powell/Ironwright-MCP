@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { crossCheckOtherLibraries } from "../../src/scan/cross-check.js";
 import { loadProfile } from "../../src/domain/profile/load.js";
 import type { GraphClient } from "../../src/graph/client.js";
+import { UnexpectedTokenRolesError } from "../../src/graph/token.js";
 
 const RAW_PROFILE = JSON.parse(readFileSync(new URL("../../examples/profiles/example.json", import.meta.url), "utf8"));
 
@@ -96,6 +97,22 @@ describe("crossCheckOtherLibraries failures", () => {
     expect(result.complete).toBe(false);
     expect(result.reason).toBe("search-failed");
     expect(result.files).toEqual([]);
+  });
+
+  it("propagates a token refused for its roles rather than reporting it as search-failed", async () => {
+    // search-failed sends the operator to investigate a Graph or network
+    // failure. A refused token is neither, and it refuses every other call in
+    // the same tool too, so it must reach the tool's own message instead.
+    const refusal = new UnexpectedTokenRolesError({
+      found: ["Sites.Selected", "Files.Read.All"],
+      extra: ["Files.Read.All"],
+      missing: [],
+    });
+    const client = fakeClient({ scripts: { [ARCHIVE_DRIVE.webUrl!]: refusal } });
+
+    await expect(
+      crossCheckOtherLibraries(client, profileWithRegion(), [OWN_DRIVE, ARCHIVE_DRIVE], OWN_DRIVE.id),
+    ).rejects.toBe(refusal);
   });
 
   it("skips a hit whose driveId does not match the library actually being searched", async () => {
