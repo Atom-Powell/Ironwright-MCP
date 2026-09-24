@@ -217,6 +217,18 @@ export interface StoredPlan {
  */
 export const MAX_PLAN_JSON_CHARS = 32000;
 
+/**
+ * The one measurement both store implementations compare against
+ * `MAX_PLAN_JSON_CHARS`, and the one `generate_custom_plan` estimates with
+ * before it spends any lookup, so the estimate cannot drift from the check it
+ * predicts. `steps` is stringified only when present, so a rename or move
+ * plan, which carries none, contributes nothing for it.
+ */
+export function storedPlanJsonChars(plan: Pick<StoredPlan, "items" | "excluded" | "steps">): number {
+  const steps = plan.steps === undefined ? 0 : JSON.stringify(plan.steps).length;
+  return JSON.stringify(plan.items).length + JSON.stringify(plan.excluded).length + steps;
+}
+
 export class PlanTooLargeError extends Error {
   readonly planId: string;
   readonly chars: number;
@@ -224,8 +236,9 @@ export class PlanTooLargeError extends Error {
   constructor(planId: string, chars: number) {
     super(
       `Plan "${planId}" serializes to ${String(chars)} characters, more than the ` +
-        `${String(MAX_PLAN_JSON_CHARS)} a single stored plan holds. Generate a narrower plan by naming fewer ` +
-        "clients. Refused rather than truncated, because a plan missing items a reviewer saw is worse than no plan at all.",
+        `${String(MAX_PLAN_JSON_CHARS)} a single stored plan holds. Generate a narrower plan with fewer items: ` +
+        "fewer clients for a rename or move plan, narrower steps for a custom plan. Refused rather than truncated, " +
+        "because a plan missing items a reviewer saw is worse than no plan at all.",
     );
     this.name = "PlanTooLargeError";
     this.planId = planId;

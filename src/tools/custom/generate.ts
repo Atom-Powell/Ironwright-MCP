@@ -1,7 +1,13 @@
 import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { resolveCustomPlan, type CustomStep } from "../../domain/custom/resolve.js";
-import type { ExcludedPlanItem, StoredPlan } from "../../store/types.js";
+import {
+  resolveCustomPlan,
+  stepShapeRefusal,
+  type CustomStep,
+  type ResolvedExclusion,
+  type ResolvedItem,
+} from "../../domain/custom/resolve.js";
+import { MAX_PLAN_JSON_CHARS, storedPlanJsonChars, type ExcludedPlanItem, type StoredPlan } from "../../store/types.js";
 import type { ToolContext } from "../context.js";
 import { describeToolFailure, type FailureSubject } from "../errors.js";
 import { comparePaths } from "../plans/apply.js";
@@ -119,6 +125,61 @@ function dateBoundProblem(steps: Input["steps"]): string | undefined {
 }
 
 /**
+ * Stands in for each item's ETag in the size estimate, since the real ones are
+ * fetched only after the estimate passes. A driveItem eTag has the shape
+ * `"{GUID},N"`: 42 characters with a one-digit version, and 44 once
+ * JSON.stringify escapes its two quotation marks. 48 leaves room for a version
+ * of up to five digits, so the estimate leans toward over-counting rather than
+ * admitting a plan the store then refuses after every lookup was spent.
+ */
+const ESTIMATED_ETAG = "e".repeat(48);
+
+/**
+ * Estimates what `savePlan` will measure, through the store's own
+ * measurement, before any ETag is fetched. It counts every resolved item as a
+ * planned item with a placeholder ETag. An item the lookup later excludes is
+ * stored in a slightly different shape and a real ETag's length varies, which
+ * is why this is an estimate and the store's own check still runs at save time.
+ */
+function estimatedStoredChars(
+  items: readonly ResolvedItem[],
+  exclusions: readonly ResolvedExclusion[],
+  steps: readonly CustomStep[],
+): number {
+  return storedPlanJsonChars({
+    items: items.map((item) => ({
+      path: item.path,
+      currentName: item.currentName,
+      targetName: item.targetName,
+      targetPath: item.targetPath,
+      client: "",
+      etag: ESTIMATED_ETAG,
+      step: item.step,
+    })),
+    excluded: exclusions.map((e) => ({
+      path: e.path,
+      currentName: e.currentName,
+      targetName: e.targetName,
+      reason: e.reason,
+      steps: e.steps,
+      client: "",
+    })),
+    steps: [...steps],
+  });
+}
+
+function tooLargeToStoreText(estimate: number, perStep: readonly number[]): string {
+  const counts = perStep.map((count, index) => `step ${String(index + 1)}: ${String(count)}`).join(", ");
+  return (
+    `This plan would be too large to store: its stored size is estimated at about ${String(estimate)} ` +
+    `characters, more than the ${String(MAX_PLAN_JSON_CHARS)} a single stored plan holds. The estimate grows ` +
+    "with each file's path and name length, so long paths reach that limit with fewer files. " +
+    `Files matched per step: ${counts}. Narrow the steps or split the work into smaller plans. ` +
+    "No ETag was fetched. No plan was saved."
+  );
+}
+
+/**
  * Generates a reviewable plan from operator-written steps and persists it.
  * The resolver does all the selecting and every refusal and exclusion; this
  * handler adds only what needs I/O: the scan it resolves against, the
@@ -133,11 +194,24 @@ export async function runGenerateCustomPlan(
   const args = InputObject.parse(input);
   const subject: FailureSubject = { tool: "generate_custom_plan", profileId: args.profileId };
 
-  // Checked before the profile or the scan, since it depends on the request
-  // alone and a request that cannot be resolved correctly should cost nothing.
+  // The parsed rename is one object with four optional keys rather than
+  // CustomRename's union of one-key objects. The shape check below and the
+  // resolver count a form as present only when its value is not undefined and
+  // refuse any count but one, so this cast hands them nothing they do not
+  // already check.
+  const steps = args.steps as CustomStep[];
+
+  // Both checked before the profile or the scan, since they depend on the
+  // request alone and a request that cannot be resolved correctly should cost
+  // nothing. The shape check is the resolver's own, so its refusal reads
+  // exactly as the resolver's would.
   const dateProblem = dateBoundProblem(args.steps);
   if (dateProblem !== undefined) {
     return { isError: true, content: [{ type: "text" as const, text: dateProblem }] };
+  }
+  const shapeRefusal = stepShapeRefusal(steps);
+  if (shapeRefusal !== undefined) {
+    return { isError: true, content: [{ type: "text" as const, text: refusalText(shapeRefusal) }] };
   }
 
   try {
@@ -147,14 +221,21 @@ export async function runGenerateCustomPlan(
 
     const scan = await context.scans.run(profile);
 
-    // The parsed rename is one object with four optional keys rather than
-    // CustomRename's union of one-key objects. The resolver counts a form as
-    // present only when its value is not undefined and refuses any count but
-    // one, so this cast hands it nothing it does not already check.
-    const steps = args.steps as CustomStep[];
     const resolution = resolveCustomPlan(steps, scan.result.snapshot);
     if (!resolution.ok) {
       return { isError: true, content: [{ type: "text" as const, text: refusalText(resolution.refusal) }] };
+    }
+
+    // Estimated before any lookup rather than left to savePlan, which would
+    // refuse only after every lookup had been spent. The 100-file cap does
+    // not bound the stored size on its own, since long paths fill the store's
+    // limit with fewer files.
+    const estimate = estimatedStoredChars(resolution.items, resolution.exclusions, steps);
+    if (estimate > MAX_PLAN_JSON_CHARS) {
+      return {
+        isError: true,
+        content: [{ type: "text" as const, text: tooLargeToStoreText(estimate, resolution.perStep) }],
+      };
     }
 
     // Carried by path because fetchPlanEtags returns its own item shape and

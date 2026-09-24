@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { RepositoryFile } from "../../../src/domain/reconcile/index.js";
+import { MAX_PLAN_JSON_CHARS } from "../../../src/store/types.js";
 import { runGenerateCustomPlan } from "../../../src/tools/custom/generate.js";
 import type { GenerateCustomPlanOutput } from "../../../src/tools/custom/output.js";
+import { scanCoordinatorStub } from "../fake-context.js";
 import { file, textOf } from "../rename/fixtures.js";
 import { FEB_2025, FOLDERS, JAN_2025, PLAN_ID, customContext, customGraph, customSnapshot } from "./fixtures.js";
 
@@ -59,6 +61,51 @@ describe("generate_custom_plan refusals", () => {
     expect(text).toContain("step 2: 40");
     expect(text).toContain("No ETag was fetched");
     expect(text).toContain("No plan was saved.");
+  });
+
+  it("refuses a plan of fewer than 100 files whose long paths would make it too large to store, before any lookup", async () => {
+    // 60 files, well under the 100-file cap, each with a 150-character name,
+    // so the stored items alone run past MAX_PLAN_JSON_CHARS.
+    const long = "x".repeat(150);
+    const bulk = Array.from({ length: 60 }, (_v, i) => file(`Bulk/${String(i).padStart(3, "0")} ${long}.pdf`));
+    const text = await refusedWith([{ selector: { folder: "/Bulk" }, moveTo: "/Archive" }], bulk);
+
+    expect(text).toContain("too large to store");
+    expect(text).toContain("estimate");
+    expect(text).toContain(String(MAX_PLAN_JSON_CHARS));
+    expect(text).toContain("step 1: 60");
+    expect(text).not.toContain("naming fewer clients");
+    expect(text).toContain("No ETag was fetched");
+    expect(text).toContain("No plan was saved.");
+  });
+
+  it("refuses a malformed step before the profile lookup or any scan", async () => {
+    const graph = customGraph();
+    const context = {
+      ...customContext(graph),
+      scans: scanCoordinatorStub(() => {
+        throw new Error("the scan must not run for a request refused on its shape alone");
+      }),
+    };
+
+    const result = await runGenerateCustomPlan(
+      {
+        profileId: "no-such-profile",
+        steps: [
+          { selector: { folder: "/Client A/2025" }, moveTo: "/Archive" },
+          { selector: { folder: "/Client A/2026" }, rename: { addPrefix: "a ", addSuffix: " b" } },
+        ],
+      },
+      context,
+      () => PLAN_ID,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toBe(
+      "Step 2 is not valid: rename must carry exactly one of setName, replace, addPrefix or addSuffix; it carries 2. " +
+        "No plan was saved.",
+    );
+    expect(graph.lookups).toEqual([]);
   });
 
   it("refuses a request where nothing matched, naming each step's zero", async () => {

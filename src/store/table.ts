@@ -8,7 +8,7 @@ import {
   planInventoryChanges,
 } from "./keys.js";
 import type { CustomStep } from "../domain/custom/resolve.js";
-import { MalformedPlanEntityError, MAX_PLAN_JSON_CHARS, PlanTooLargeError } from "./types.js";
+import { MalformedPlanEntityError, MAX_PLAN_JSON_CHARS, PlanTooLargeError, storedPlanJsonChars } from "./types.js";
 import type {
   ApplyResult,
   ExcludedPlanItem,
@@ -279,9 +279,9 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
       // Present only on a custom plan, the same as `reverses` below: absent
       // rather than an empty-array placeholder, so a rename or move plan's
       // entity carries no steps key at all and contributes nothing to the
-      // size total.
+      // size total, which `storedPlanJsonChars` measures the same way.
       const steps = plan.steps === undefined ? undefined : JSON.stringify(plan.steps);
-      const total = items.length + excluded.length + (steps?.length ?? 0);
+      const total = storedPlanJsonChars(plan);
       if (total > MAX_PLAN_JSON_CHARS) throw new PlanTooLargeError(plan.planId, total);
 
       await clients.plans.upsertEntity(

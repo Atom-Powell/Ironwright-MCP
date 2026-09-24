@@ -144,6 +144,27 @@ function stepProblem(step: CustomStep): string | undefined {
   return only.value === "" ? `${only.form} is empty` : undefined;
 }
 
+/**
+ * The checks that depend on the request alone: the step count, and each
+ * step's shape. Exported so a caller can refuse a malformed request before
+ * spending a scan on it; `resolveCustomPlan` runs the same function first, so
+ * the two can never disagree about what is malformed or how it is worded.
+ */
+export function stepShapeRefusal(steps: readonly CustomStep[]): CustomRefusal | undefined {
+  if (steps.length === 0 || steps.length > MAX_CUSTOM_PLAN_STEPS) {
+    return {
+      kind: "invalid_step",
+      step: 0,
+      detail: `the plan has ${String(steps.length)} steps; it must have between 1 and ${String(MAX_CUSTOM_PLAN_STEPS)}`,
+    };
+  }
+  for (const [index, step] of steps.entries()) {
+    const detail = stepProblem(step);
+    if (detail !== undefined) return { kind: "invalid_step", step: index + 1, detail };
+  }
+  return undefined;
+}
+
 type FolderLookup = { found: true; folder: string } | { found: false; nearestExisting: string; children: string[] };
 
 /**
@@ -270,25 +291,8 @@ interface Candidate {
  * of the same site, and nothing here writes outside the scanned library.
  */
 export function resolveCustomPlan(steps: readonly CustomStep[], snapshot: Snapshot): CustomResolution {
-  if (steps.length === 0 || steps.length > MAX_CUSTOM_PLAN_STEPS) {
-    return {
-      ok: false,
-      refusal: {
-        kind: "invalid_step",
-        step: 0,
-        detail: `the plan has ${String(steps.length)} steps; it must have between 1 and ${String(MAX_CUSTOM_PLAN_STEPS)}`,
-      },
-    };
-  }
-
-  for (const [index, step] of steps.entries()) {
-    const detail = stepProblem(step);
-    if (detail !== undefined)
-      return {
-        ok: false,
-        refusal: { kind: "invalid_step", step: index + 1, detail },
-      };
-  }
+  const shapeRefusal = stepShapeRefusal(steps);
+  if (shapeRefusal !== undefined) return { ok: false, refusal: shapeRefusal };
 
   // The root is always present even though the index never lists it.
   const casing = new Map<string, string>([["", ""]]);

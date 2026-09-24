@@ -38,7 +38,8 @@ describe("stored plan size", () => {
     const plan = planWithItems(300);
 
     await expect(store.savePlan("example", plan)).rejects.toBeInstanceOf(PlanTooLargeError);
-    await expect(store.savePlan("example", plan)).rejects.toThrow(/naming fewer clients/);
+    await expect(store.savePlan("example", plan)).rejects.toThrow(/fewer clients for a rename or move plan/);
+    await expect(store.savePlan("example", plan)).rejects.toThrow(/narrower steps for a custom plan/);
   });
 
   it("accepts a plan comfortably inside the cap", async () => {
