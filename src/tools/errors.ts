@@ -1,6 +1,6 @@
 import { GraphRequestError } from "../graph/errors.js";
 import { LibraryNotFoundError } from "../graph/drive.js";
-import { TokenRequestError } from "../graph/token.js";
+import { TokenRequestError, UnexpectedTokenRolesError } from "../graph/token.js";
 import { WorkbookFileError, WorkbookMappingError, WorkbookUnreadableError } from "../workbook/errors.js";
 import { UnknownProfileError } from "../profiles/registry.js";
 
@@ -108,6 +108,16 @@ export function describeToolFailure(error: unknown, subject: FailureSubject): st
     return (
       `${error.message} This could be ${wrongFile}, or it could be a workbook download that was truncated or ` +
       "corrupted in transit. Open the file at that path to see which."
+    );
+  }
+
+  if (error instanceof UnexpectedTokenRolesError) {
+    // Stated in full here rather than pointing at the server log: the error
+    // already carries everything the operator needs, and nothing was read or
+    // changed, because the token was refused before any Graph request.
+    return (
+      `${subject.tool} did not run: ${error.message} Nothing was read or changed, so there is nothing to ` +
+      "check or roll back."
     );
   }
 

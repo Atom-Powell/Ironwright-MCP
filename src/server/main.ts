@@ -5,7 +5,8 @@ import { buildServer } from "../mcp/build-server.js";
 import { loadGraphCredentials, loadGrantedSiteUrl, loadShutdownDeadlineMs, loadStoreConnectionString } from "../config.js";
 import { loadProfileDirectory } from "../profiles/registry.js";
 import { createGraphClient } from "../graph/client.js";
-import { clientCredentialsTokenProvider } from "../graph/token.js";
+import { clientCredentialsTokenProvider, requireExactRoles, SERVER_TOKEN_ROLES } from "../graph/token.js";
+import { checkStartupIdentity } from "./identity.js";
 import { createMemoryStateStore } from "../store/memory.js";
 import { ensureTables, tableStateStoreFromConnectionString } from "../store/table.js";
 import { createScanCoordinator } from "../scan/coordinator.js";
@@ -35,7 +36,13 @@ async function main(): Promise<void> {
     storeKind = "azure-table";
   }
 
-  const graph = createGraphClient({ tokenProvider: clientCredentialsTokenProvider(credentials) });
+  // Every Graph request passes through the guard, so a permission added to the
+  // server application while it runs is refused within one token lifetime.
+  const tokenProvider = requireExactRoles(clientCredentialsTokenProvider(credentials), SERVER_TOKEN_ROLES);
+  // Before the port is bound, with the other configuration checks: a role
+  // mismatch rejects out of main() into the handler at the bottom of this file.
+  await checkStartupIdentity(tokenProvider, (line) => console.error(line));
+  const graph = createGraphClient({ tokenProvider });
   const now = (): Date => new Date();
 
   // Built once and shared by every per-request server. See src/tools/context.ts.
