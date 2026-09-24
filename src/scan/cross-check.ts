@@ -3,7 +3,7 @@ import type { SiteDrive } from "../graph/drive.js";
 import { searchDriveItems, type SearchHit } from "../graph/search.js";
 import { UnexpectedTokenRolesError } from "../graph/token.js";
 import type { RepositoryFile } from "../domain/reconcile/index.js";
-import type { Profile } from "../domain/profile/schema.js";
+import { isLibraryProfile, type AnyProfile } from "../domain/profile/library.js";
 
 /**
  * The operator's remedy differs for each, which is the whole reason this is a
@@ -11,11 +11,17 @@ import type { Profile } from "../domain/profile/schema.js";
  * searchRegion on the profile, "search-failed" means investigate a Graph
  * search request that actually failed, "library-not-addressable" means a
  * listed library came back with no webUrl to search it by, which is a
- * listing-shape problem rather than a failed request, and "page-cap-reached"
+ * listing-shape problem rather than a failed request, "page-cap-reached"
  * means the site has more matching files in one library than this cross-check
- * is willing to page through.
+ * is willing to page through, and "library-profile" means the profile is
+ * library-only and has no naming template for this cross-check to search for.
  */
-export type CrossCheckSkipReason = "no-region" | "search-failed" | "library-not-addressable" | "page-cap-reached";
+export type CrossCheckSkipReason =
+  | "no-region"
+  | "search-failed"
+  | "library-not-addressable"
+  | "page-cap-reached"
+  | "library-profile";
 
 export interface CrossCheckResult {
   files: RepositoryFile[];
@@ -34,12 +40,15 @@ export interface CrossCheckResult {
  * `reason` is `undefined` for the one caller, the reconciliation tool, whose
  * own provenance can in principle report the cross-check incomplete without
  * having recorded why (see its own comment on `searchCrossCheckSkipReason`).
- * That caller must not upgrade "I do not know why" into any of the four known
- * causes, so this function gives it a fifth, honest sentence to say instead of
+ * That caller must not upgrade "I do not know why" into any of the five known
+ * causes, so this function gives it a sixth, honest sentence to say instead of
  * inventing one at the call site. `crossCheckOtherLibraries` itself always
- * names one of the four reasons whenever it does not complete, so this branch
+ * names one of the five reasons whenever it does not complete, so this branch
  * is unreached from the scan CLI, which reads `reason` straight off that
- * function's own result.
+ * function's own result. The reconciliation tool itself can never observe
+ * "library-profile" either: it refuses a library-only profile through
+ * `ProfileRegistry.get` before a scan ever runs, so that reason reaches this
+ * function only from the scan CLI's own call site.
  */
 export function describeCrossCheckSkipReason(reason: CrossCheckSkipReason | undefined): string {
   switch (reason) {
@@ -63,22 +72,28 @@ export function describeCrossCheckSkipReason(reason: CrossCheckSkipReason | unde
         "The Microsoft Search cross-check did not search a library exhaustively, because it returned " +
         "more matching files than the page cap allows. The scope is too large for one pass."
       );
+    case "library-profile":
+      return (
+        "The Microsoft Search cross-check did not run because the profile is library-only and has no " +
+        "naming template, so there is nothing for the cross-check to search for."
+      );
     default:
       return "The Microsoft Search cross-check did not complete, for a reason this scan did not record.";
   }
 }
 
 /**
- * True only for the one reason that means no Graph request was ever sent:
- * `crossCheckOtherLibraries` checks for a missing `searchRegion` and returns
- * before attempting any library, so "no-region" is the sole case where nothing
- * was learned about any library. Every other reason, an unrecorded one
- * included, means an attempt reached at least one library, which is why an
- * operator's next step differs by exactly this split rather than by which of
- * the five sentences above fired.
+ * True only for the two reasons that mean no Graph request was ever sent:
+ * `crossCheckOtherLibraries` checks for a library-only profile first and a
+ * missing `searchRegion` second, and returns before attempting any library
+ * either way, so "library-profile" and "no-region" are the sole cases where
+ * nothing was learned about any library. Every other reason, an unrecorded
+ * one included, means an attempt reached at least one library, which is why
+ * an operator's next step differs by exactly this split rather than by which
+ * of the six sentences above fired.
  */
 export function crossCheckNeverAttempted(reason: CrossCheckSkipReason | undefined): boolean {
-  return reason === "no-region";
+  return reason === "no-region" || reason === "library-profile";
 }
 
 /**
@@ -282,10 +297,15 @@ function toRepositoryFile(hit: SearchHit, library: SiteDrive & { webUrl: string 
  */
 export async function crossCheckOtherLibraries(
   client: Pick<GraphClient, "post">,
-  profile: Profile,
+  profile: AnyProfile,
   drives: readonly SiteDrive[],
   ownDriveId: string,
 ): Promise<CrossCheckResult> {
+  // A library profile has no naming template, and the search query is built
+  // from the template's literal extension, so there is nothing to search for.
+  // Checked before the region so the reason names the real cause.
+  if (isLibraryProfile(profile)) return { files: [], complete: false, reason: "library-profile" };
+
   const region = profile.identity.searchRegion;
   // Checked first and returned immediately, spending no Graph call at all:
   // a profile with no region cannot search, so there is nothing to attempt.

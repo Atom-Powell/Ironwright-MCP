@@ -1,6 +1,6 @@
 import type { GraphClient } from "../graph/client.js";
 import type { StateStore } from "../store/types.js";
-import type { Profile } from "../domain/profile/schema.js";
+import type { AnyProfile } from "../domain/profile/library.js";
 import { runScan, type ScanDependencies, type ScanResult } from "./run.js";
 
 export interface CoordinatedScan {
@@ -29,7 +29,7 @@ export interface SettledScan {
 }
 
 export interface ScanCoordinator {
-  run(profile: Profile): Promise<CoordinatedScan>;
+  run(profile: AnyProfile): Promise<CoordinatedScan>;
   /**
    * Awaits a scan already in flight for this profile, so a caller that reads
    * the store directly rather than scanning does not read an inventory a
@@ -38,7 +38,7 @@ export interface ScanCoordinator {
    * failing is that call's failure to report, and this one needs to know only
    * whether the inventory it is about to read can still be trusted.
    */
-  settle(profile: Profile): Promise<SettledScan>;
+  settle(profile: AnyProfile): Promise<SettledScan>;
   /**
    * How many scans this coordinator has started for this profile since the
    * process began, joins excluded. It exists so a reader can bracket its own
@@ -46,7 +46,7 @@ export interface ScanCoordinator {
    * read was in progress, which is the one window `settle` cannot close by
    * waiting, because there was nothing to wait for when it was called.
    */
-  scansStarted(profile: Profile): number;
+  scansStarted(profile: AnyProfile): number;
 }
 
 export interface ScanCoordinatorOptions {
@@ -95,7 +95,7 @@ export function createScanCoordinator(options: ScanCoordinatorOptions): ScanCoor
   const startedCounts = new Map<string, number>();
 
   return {
-    async run(profile: Profile): Promise<CoordinatedScan> {
+    async run(profile: AnyProfile): Promise<CoordinatedScan> {
       const held = inFlight.get(profile.profileId);
       if (held !== undefined) return { result: await held, joined: true };
 
@@ -114,7 +114,7 @@ export function createScanCoordinator(options: ScanCoordinatorOptions): ScanCoor
       }
     },
 
-    async settle(profile: Profile): Promise<SettledScan> {
+    async settle(profile: AnyProfile): Promise<SettledScan> {
       const held = inFlight.get(profile.profileId);
       if (held === undefined) return { awaited: false, failed: false };
 
@@ -130,7 +130,7 @@ export function createScanCoordinator(options: ScanCoordinatorOptions): ScanCoor
       }
     },
 
-    scansStarted(profile: Profile): number {
+    scansStarted(profile: AnyProfile): number {
       return startedCounts.get(profile.profileId) ?? 0;
     },
   };

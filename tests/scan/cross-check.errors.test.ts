@@ -195,4 +195,19 @@ describe("crossCheckOtherLibraries failures", () => {
     expect(result.complete).toBe(false);
     expect(result.reason).toBe("search-failed");
   });
+
+  it("skips a library profile with its own reason and spends no request", async () => {
+    let posts = 0;
+    const client = { post: () => { posts += 1; return Promise.reject(new Error("must not search")); } };
+    const library = {
+      kind: "library" as const,
+      profileId: "docs",
+      identity: { siteUrl: "https://contoso.sharepoint.com/sites/Example", library: "Docs", searchRegion: "NAM" },
+    };
+
+    const result = await crossCheckOtherLibraries(client, library, [], "drive-1");
+
+    expect(result).toEqual({ files: [], complete: false, reason: "library-profile" });
+    expect(posts).toBe(0);
+  });
 });

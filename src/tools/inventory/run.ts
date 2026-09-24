@@ -29,7 +29,7 @@ export async function runInventoryTree(input: unknown, context: ToolContext): Pr
   const subject: FailureSubject = { tool: "inventory_tree", profileId: args.profileId };
 
   try {
-    const profile = context.profiles.get(args.profileId);
+    const profile = context.profiles.getAny(args.profileId);
     subject.siteUrl = profile.identity.siteUrl;
     subject.library = profile.identity.library;
 

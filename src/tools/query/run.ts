@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { Profile } from "../../domain/profile/schema.js";
+import { isLibraryProfile, type AnyProfile } from "../../domain/profile/library.js";
 import {
   createFileParser,
   findEmptyFolders,
@@ -122,7 +122,7 @@ function compareDrivesNewestFirst(a: ScannedDrive, b: ScannedDrive): number {
  * on an in-flight scan costs this call no Graph request of its own, so the
  * property the tool advertises survives intact.
  */
-async function loadSnapshot(context: ToolContext, profile: Profile): Promise<{ snapshot: RepositorySnapshot; driveId: string }> {
+async function loadSnapshot(context: ToolContext, profile: AnyProfile): Promise<{ snapshot: RepositorySnapshot; driveId: string }> {
   // Taken before `settle` is awaited, not after. `settle`'s own `await` is a
   // microtask checkpoint: a scan can start inside it, either while this call
   // is waiting on one already in flight or in the gap after that scan clears
@@ -163,7 +163,12 @@ function emptyFolders(snapshot: RepositorySnapshot): Finding[] {
   }));
 }
 
-function namingViolations(profile: Profile, snapshot: RepositorySnapshot): Finding[] {
+function namingViolations(profile: AnyProfile, snapshot: RepositorySnapshot): Finding[] {
+  if (isLibraryProfile(profile)) {
+    // Unreachable: runQueryRepository refuses naming_violations for a
+    // library-only profile before answer() is ever called for it.
+    throw new Error(`namingViolations was called with library-only profile "${profile.profileId}".`);
+  }
   const parse = createFileParser(profile);
   return snapshot.files
     .filter((file) => file.library === undefined)
@@ -191,7 +196,12 @@ function isRecognizedEntry(entry: { file: RepositoryFile; parsed: ParsedFile }):
   return entry.parsed.recognized;
 }
 
-function recentReports(profile: Profile, snapshot: RepositorySnapshot): Finding[] {
+function recentReports(profile: AnyProfile, snapshot: RepositorySnapshot): Finding[] {
+  if (isLibraryProfile(profile)) {
+    // Unreachable: runQueryRepository refuses recent_reports for a
+    // library-only profile before answer() is ever called for it.
+    throw new Error(`recentReports was called with library-only profile "${profile.profileId}".`);
+  }
   const parse = createFileParser(profile);
   // The full sorted set, uncapped. `shapeQuery` applies RECENT_REPORTS_LIMIT
   // and reports it honestly; capping here would hide the true count from the
@@ -209,7 +219,7 @@ function recentReports(profile: Profile, snapshot: RepositorySnapshot): Finding[
     }));
 }
 
-function answer(question: Question, profile: Profile, snapshot: RepositorySnapshot): Finding[] {
+function answer(question: Question, profile: AnyProfile, snapshot: RepositorySnapshot): Finding[] {
   switch (question) {
     case "empty_folders":
       return emptyFolders(snapshot);
@@ -234,9 +244,26 @@ export async function runQueryRepository(input: unknown, context: ToolContext): 
   const subject: FailureSubject = { tool: "query_repository", profileId: args.profileId };
 
   try {
-    const profile = context.profiles.get(args.profileId);
+    const profile = context.profiles.getAny(args.profileId);
     subject.siteUrl = profile.identity.siteUrl;
     subject.library = profile.identity.library;
+
+    if (isLibraryProfile(profile) && args.question !== "empty_folders") {
+      // Both need the naming standard: naming_violations compares names to it,
+      // and recent_reports recognizes a report by parsing its name against it.
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text" as const,
+            text:
+              `Profile "${args.profileId}" is library-only, so "${args.question}" cannot be answered: it needs the ` +
+              "profile's filename standard, which a library-only profile does not have. empty_folders works. " +
+              "Nothing was read.",
+          },
+        ],
+      };
+    }
 
     const { snapshot, driveId } = await loadSnapshot(context, profile);
     const findings = answer(args.question, profile, snapshot);
