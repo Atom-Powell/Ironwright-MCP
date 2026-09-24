@@ -63,7 +63,9 @@ export function executeMovePlanText(output: ExecuteMovePlanOutput): string[] {
   }
 
   for (const item of output.excluded) {
-    lines.push(`  excluded at plan time: ${item.path} (${item.reason})`);
+    lines.push(
+      `  excluded at plan time: ${item.path} (${item.reason}${item.library === undefined ? "" : `, found in library "${item.library}"`})`,
+    );
   }
   if (output.excludedOmitted > 0) {
     lines.push(`  ...and ${String(output.excludedOmitted)} more exclusions, all of them counted above.`);
