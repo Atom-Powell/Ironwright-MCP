@@ -65,6 +65,32 @@ describe("applyPlan", () => {
     });
   });
 
+  it("sends exactly the new name, and nothing else, for a rename that keeps its folder", async () => {
+    // The body phase 6a verified live. A parentReference or a conflict
+    // behavior here would change what a rename asks Graph to do.
+    const graph = recordingGraph();
+    const context = createFakeToolContext({ graph });
+    const renamed = {
+      path: "2026/ACME/09-September/ACME Training Sept.xlsx",
+      currentName: "ACME Training Sept.xlsx",
+      targetName: "2026-09_ACME_MonthlyTraining.xlsx",
+      targetPath: "2026/ACME/09-September/2026-09_ACME_MonthlyTraining.xlsx",
+      etag: '"{GUID},1"',
+      client: "ACME",
+    };
+
+    const result = await applyPlan(plan("rename", [renamed]), {
+      confirm: true,
+      context,
+      profileId: "example",
+      toolName: "execute_rename_plan",
+      makeReversalPlanId: () => "rev-1",
+    });
+
+    expect(result.results[0]?.outcome).toBe("applied");
+    expect(graph.bodies).toStrictEqual([{ name: "2026-09_ACME_MonthlyTraining.xlsx" }]);
+  });
+
   it("writes a reversal of the same kind that returns each item to its original folder", async () => {
     const context = createFakeToolContext({ graph: recordingGraph() });
 
