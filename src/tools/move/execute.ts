@@ -1,6 +1,12 @@
 import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { RenamePlanItem } from "../../store/types.js";
+import {
+  MalformedPlanEntityError,
+  type ExcludedPlanItem,
+  type MoveExclusionReason,
+  type RenamePlanItem,
+  type StoredPlan,
+} from "../../store/types.js";
 import type { ToolContext } from "../context.js";
 import { describeToolFailure, type FailureSubject } from "../errors.js";
 import { applyPlan, comparePaths, type AppliedOutcome } from "../plans/apply.js";
@@ -8,6 +14,7 @@ import { noPlanStored, wrongPlanKind } from "../plans/refusals.js";
 import { newPlanId } from "../rename/ids.js";
 import {
   MAX_PLAN_ITEMS_LISTED,
+  MOVE_EXCLUSION_REASONS,
   type ExecuteMovePlanOutput,
   type MoveItemOutcome,
   type MoveItemResult,
@@ -37,6 +44,29 @@ const MOVE_OUTCOME: Record<AppliedOutcome, MoveItemOutcome> = {
   failed: "failed",
 };
 
+function isMoveExclusionReason(reason: string): reason is MoveExclusionReason {
+  return (MOVE_EXCLUSION_REASONS as readonly string[]).includes(reason);
+}
+
+/**
+ * The store checks only that a stored plan's excluded field is an array, so a
+ * reason outside the move set is typed out of existence here but not ruled out
+ * at runtime: a hand-edited row, or one written by a later version of this
+ * server, can carry one. Refused rather than passed through, because the
+ * output schema would reject it at the SDK and the operator would see a
+ * validation error instead of the cause, and refused before anything is
+ * applied, so that refusal never replaces a report of writes already made.
+ */
+function moveExclusionsOf(plan: StoredPlan): ExcludedPlanItem[] {
+  return plan.excluded.map((item) => {
+    const reason: string = item.reason;
+    if (!isMoveExclusionReason(reason)) {
+      throw new MalformedPlanEntityError(plan.planId, "excluded", `holds the reason "${reason}", which a move plan cannot carry`);
+    }
+    return { ...item, reason };
+  });
+}
+
 /**
  * Applies a move plan, or previews it, through the executor every plan kind
  * shares. It refuses a plan of any other kind before anything is attempted.
@@ -63,10 +93,10 @@ export async function runExecuteMovePlan(
       return noPlanStored(args.planId, args.profileId, "generate_move_plan");
     }
     if (plan.kind !== "move") return wrongPlanKind(plan, "move");
-    // Excluded items pass through unnarrowed: a move plan may carry every
-    // reason the store's own union declares, unlike a rename plan's narrower
-    // set, so there is no foreign-reason case here to refuse before applying.
-    const excluded = [...plan.excluded].sort(comparePaths);
+    // Validated before anything is applied, for the reason moveExclusionsOf
+    // gives. The store's union and the move set are the same today, so this
+    // guards the runtime value rather than the type.
+    const excluded = moveExclusionsOf(plan).sort(comparePaths);
 
     const applied = await applyPlan(plan, {
       confirm: args.confirm,
