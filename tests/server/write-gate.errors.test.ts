@@ -82,7 +82,7 @@ describe("write gate over the wire", () => {
   it("advertises write tools when writes are enabled", async () => {
     const names = await listToolNames(await startServer(true));
 
-    expect(names).toHaveLength(11);
+    expect(names).toHaveLength(12);
     expect(names).toContain("execute_rename_plan");
     expect(names).toContain("execute_move_plan");
     expect(names).toContain("replicate_template");

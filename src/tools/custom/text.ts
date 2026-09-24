@@ -1,5 +1,5 @@
 import type { CustomRefusal } from "../../domain/custom/resolve.js";
-import type { GenerateCustomPlanOutput } from "./output.js";
+import type { ExecuteCustomPlanOutput, GenerateCustomPlanOutput } from "./output.js";
 
 function perStepText(perStep: readonly number[]): string {
   return perStep.map((count, index) => `step ${String(index + 1)}: ${String(count)}`).join(", ");
@@ -76,5 +76,64 @@ export function generateCustomPlanText(output: GenerateCustomPlanOutput): string
       "lookup can spend more than one.",
   );
   lines.push("Review this plan, then apply it with execute_custom_plan. It runs as a dry run unless confirm is true.");
+  return lines;
+}
+
+/**
+ * Says what happened and nothing more, for the reason executeMovePlanText
+ * gives: a clean dry-run preview is not a guarantee, since it contacted Graph
+ * not at all and so never checked whether any file has changed since the
+ * plan was generated.
+ */
+export function executeCustomPlanText(output: ExecuteCustomPlanOutput): string[] {
+  const lines = output.dryRun
+    ? [
+        `Dry run of plan ${output.planId} against drive ${output.driveId}. Nothing was changed.`,
+        `${String(output.counts.wouldApply)} ${output.counts.wouldApply === 1 ? "item" : "items"} would be applied.`,
+        "This preview contacted Graph not at all, so it did not check whether any file has changed since the plan " +
+          "was generated. Those refusals can only appear in a confirmed run.",
+      ]
+    : [
+        `Applied plan ${output.planId} against drive ${output.driveId}.`,
+        `${String(output.counts.applied)} applied, ${String(output.counts.preconditionRefused)} refused because ` +
+          `the item there is not the one the plan recorded, ${String(output.counts.targetNameTaken)} refused ` +
+          `because another file already holds the target name, ${String(output.counts.notFound)} no longer at ` +
+          `the planned path, ${String(output.counts.failed)} failed.`,
+      ];
+
+  // Stated before the item listing rather than beside the reversal line at the
+  // end, for the reason executeMovePlanText gives: it changes what every line
+  // below it means, since these writes undo another plan's rather than apply
+  // new ones.
+  if (output.reverses !== undefined) {
+    lines.push(`This plan reverses plan ${output.reverses}.`);
+  }
+
+  for (const result of output.results) {
+    lines.push(`  ${result.path} -> ${result.targetPath} (${result.outcome})`);
+  }
+  if (output.resultsOmitted > 0) {
+    lines.push(`  ...and ${String(output.resultsOmitted)} more, all of them counted above.`);
+  }
+
+  for (const item of output.excluded) {
+    lines.push(`  excluded at plan time: ${item.path} (${item.reason}, ${stepsText(item.steps)})`);
+  }
+  if (output.excludedOmitted > 0) {
+    lines.push(`  ...and ${String(output.excludedOmitted)} more exclusions, all of them counted above.`);
+  }
+
+  if (output.reversalPlanId !== undefined) {
+    lines.push(`Reversal plan ${output.reversalPlanId}. Apply it with this same tool to roll this run back.`);
+  }
+  if (output.reversalEntriesNotRefreshed > 0) {
+    lines.push(
+      `${String(output.reversalEntriesNotRefreshed)} reversal ${output.reversalEntriesNotRefreshed === 1 ? "entry" : "entries"} ` +
+        "could not be given the file's new ETag, so replaying the reversal will refuse those items rather than " +
+        "undo them. Generate a fresh plan for those files.",
+    );
+  }
+  lines.push(`Graph operations issued: ${String(output.graphOperationsIssued)}.`);
+
   return lines;
 }

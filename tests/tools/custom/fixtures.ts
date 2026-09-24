@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import type { RepositoryFile, RepositorySnapshot } from "../../../src/domain/reconcile/index.js";
 import type { GraphClient } from "../../../src/graph/client.js";
 import { createProfileRegistry } from "../../../src/profiles/registry.js";
+import type { StoredPlan } from "../../../src/store/types.js";
 import type { ToolContext } from "../../../src/tools/context.js";
 import { createFakeToolContext, scanCoordinatorStub } from "../fake-context.js";
 import { etagGraphClient, file, scanResultFor, snapshot } from "../rename/fixtures.js";
@@ -70,3 +71,45 @@ export function customContext(graph: GraphClient, snapshotValue: RepositorySnaps
 export const MOVE_PDFS_STEPS = [
   { selector: { folder: "/Client A/2025", extensions: [".pdf"] }, moveTo: "/Archive/2025" },
 ];
+
+/**
+ * A stored custom plan for execute_custom_plan's own tests, built by hand
+ * rather than through runGenerateCustomPlan: those tests exercise the shared
+ * executor over a plan already on disk, the same way movePlanWith in
+ * tests/tools/move/fixtures.ts does for execute_move_plan.
+ */
+export function customPlanWith(items: StoredPlan["items"], excluded: StoredPlan["excluded"] = []): StoredPlan {
+  return {
+    planId: PLAN_ID,
+    profileId: "example",
+    kind: "custom",
+    driveId: "drive-1",
+    createdAt: "2026-09-24T12:00:00Z",
+    items,
+    excluded,
+  };
+}
+
+/** Both a move and a rename in one item, so the executor test proves it does both writes at once. */
+export const JAN_TARGET = "Archive/2025/Jan report renamed.pdf";
+export const FEB_TARGET = "Archive/2025/Feb report renamed.pdf";
+
+export const JAN_ITEM = {
+  path: JAN_2025,
+  currentName: "Jan report.pdf",
+  targetName: "Jan report renamed.pdf",
+  targetPath: JAN_TARGET,
+  etag: "etag-0",
+  client: "",
+  step: 1,
+};
+
+export const FEB_ITEM = {
+  path: FEB_2025,
+  currentName: "Feb report.pdf",
+  targetName: "Feb report renamed.pdf",
+  targetPath: FEB_TARGET,
+  etag: "etag-0",
+  client: "",
+  step: 1,
+};

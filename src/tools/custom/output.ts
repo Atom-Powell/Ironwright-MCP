@@ -41,6 +41,18 @@ export interface CustomExcludedItem {
   steps: number[];
 }
 
+const CUSTOM_EXCLUDED_ITEM = z.object({
+  path: z.string(),
+  currentName: z.string(),
+  targetName: z.string(),
+  reason: z.enum(CUSTOM_EXCLUSION_REASONS),
+  steps: z.array(z.number().int()),
+});
+
+// Exported so execute.ts's output builds the same shape generate.ts already
+// declares, rather than a second, separately maintained description of it.
+export const CUSTOM_EXCLUDED_ITEM_SCHEMA = CUSTOM_EXCLUDED_ITEM;
+
 export interface GenerateCustomPlanOutput {
   planId: string;
   profileId: string;
@@ -130,4 +142,186 @@ export const GENERATE_CUSTOM_PLAN_OUTPUT_SCHEMA = {
   scanSharedWithConcurrentCall: z
     .boolean()
     .describe("True when this call awaited a scan another call had already started, which is the only reason the scan cost can be zero."),
+} satisfies z.ZodRawShape;
+
+export const CUSTOM_ITEM_OUTCOMES = [
+  "applied",
+  "would_apply",
+  "precondition_refused",
+  "target_name_taken",
+  "not_found",
+  "failed",
+] as const;
+export type CustomItemOutcome = (typeof CUSTOM_ITEM_OUTCOMES)[number];
+
+export interface CustomItemResult {
+  path: string;
+  currentName: string;
+  targetName: string;
+  targetPath: string;
+  /**
+   * Which operator-written step produced this item. Absent on a reversal
+   * plan's run: `reversalItemsFor` in `src/tools/plans/apply.ts` swaps path,
+   * name and etag to build the inverse, but it does not carry `step` forward,
+   * since a reversal item was not produced by any of the operator's own
+   * steps.
+   */
+  step?: number;
+  outcome: CustomItemOutcome;
+}
+
+export interface ExecuteCustomPlanOutput {
+  planId: string;
+  profileId: string;
+  /**
+   * The drive this run addressed, taken from the plan, for the reason
+   * ExecuteMovePlanOutput's own field gives: this call writes to the plan's
+   * own drive regardless of what the profile's identity.library says now.
+   */
+  driveId: string;
+  /** The plan id this run undoes. Absent unless the plan executed is itself a reversal. */
+  reverses?: string;
+  dryRun: boolean;
+  results: CustomItemResult[];
+  resultCount: number;
+  resultsOmitted: number;
+  counts: {
+    applied: number;
+    wouldApply: number;
+    preconditionRefused: number;
+    targetNameTaken: number;
+    notFound: number;
+    failed: number;
+  };
+  excluded: CustomExcludedItem[];
+  excludedCount: number;
+  excludedOmitted: number;
+  /** Absent on a dry run, which changes nothing and therefore writes no reversal log. */
+  reversalPlanId?: string;
+  reversalEntriesNotRefreshed: number;
+  graphOperationsIssued: number;
+}
+
+export const EXECUTE_CUSTOM_PLAN_OUTPUT_SCHEMA = {
+  planId: z.string().describe("The plan this call applied or previewed."),
+  profileId: z.string().describe("The profile the plan belongs to."),
+  driveId: z
+    .string()
+    .describe(
+      "The drive every write in this run was addressed within, taken from the plan itself rather than from the " +
+        "profile. The profile's library name is not reported here on purpose: an older plan executed after the " +
+        "profile's library changed still writes to the drive the plan names, and reporting the new library's name " +
+        "beside those writes would name a library this call did not touch.",
+    ),
+  reverses: z
+    .string()
+    .optional()
+    .describe(
+      "The plan id this run undoes, present only when the plan executed is itself a reversal log. A rollback is a " +
+        "plan like any other, so without this field its report is shape-identical to a forward run's.",
+    ),
+  dryRun: z
+    .boolean()
+    .describe(
+      "True when nothing was changed. A dry run contacts Graph not at all, so it cannot tell whether the item at " +
+        "a path is still the one the plan recorded, or whether the target name is free: outcomes of " +
+        "precondition_refused, target_name_taken, not_found and failed can only appear in a confirmed run.",
+    ),
+  results: z
+    .array(
+      z.object({
+        path: z.string(),
+        currentName: z.string(),
+        targetName: z.string(),
+        targetPath: z.string(),
+        step: z
+          .number()
+          .int()
+          .optional()
+          .describe(
+            "Which operator-written step produced this item. Absent on a reversal plan's run, since a reversal " +
+              "item was not produced by any of the operator's own steps.",
+          ),
+        outcome: z.enum(CUSTOM_ITEM_OUTCOMES),
+      }),
+    )
+    .describe(
+      "One entry per item in the plan, sorted by path. applied means the file was changed as the plan recorded; " +
+        "would_apply means a dry run reached it and stopped; precondition_refused means Graph refused the write " +
+        "because the item at that path is not the one the plan recorded. Graph checks If-Match before existence, " +
+        "so this single outcome covers both a file that changed and a file that is no longer there, and this " +
+        "server deliberately does not pay the cost of a GET per refusal to tell the two apart. target_name_taken " +
+        "means another file held the target name when the write was attempted, and Graph refused rather than " +
+        "replace it. not_found is expected to stay zero: this executor always sends If-Match, and a stale " +
+        "precondition against an absent path answers 412 before Graph ever reports the path missing, so a 404 " +
+        "cannot reach this outcome today. It is kept as a label rather than removed, since a branch on a write " +
+        "path is not removed on the strength of a negative nobody can prove. failed means Graph answered with " +
+        "something other than those, or this server did not send the write at all, for example because its own " +
+        "token was refused; the server log carries the reason. A target folder deleted after the plan was " +
+        "generated is reported as failed, because Graph answers it with a generic 400 that names no cause. May " +
+        "be a prefix; see resultCount.",
+    ),
+  resultCount: z.number().int().describe("Items in the plan. Computed before the listing above is cut."),
+  resultsOmitted: z.number().int().describe("Items the listing above left out."),
+  counts: z
+    .object({
+      applied: z.number().int(),
+      wouldApply: z.number().int(),
+      preconditionRefused: z
+        .number()
+        .int()
+        .describe(
+          "Items Graph refused because the item at that path was not the one the plan recorded. Covers both a " +
+            "changed file and an absent one: Graph checks If-Match before existence, and telling the two apart " +
+            "would cost a GET per refusal this project deliberately does not pay.",
+        ),
+      targetNameTaken: z
+        .number()
+        .int()
+        .describe("Items Graph refused because another file already holds the target name. Nothing was replaced."),
+      notFound: z
+        .number()
+        .int()
+        .describe(
+          "Expected to be zero. This executor always sends If-Match, and Graph evaluates that precondition before " +
+            "existence, so a 404 cannot reach this executor today. The outcome is kept rather than removed, since " +
+            "a branch on a write path is not removed on the strength of a negative nobody can prove.",
+        ),
+      failed: z.number().int(),
+    })
+    .describe("Computed over every item in the plan, before the listing above is cut. Never abridged."),
+  excluded: z
+    .array(CUSTOM_EXCLUDED_ITEM_SCHEMA)
+    .describe(
+      "Items the plan recorded at generation time as ones it would not attempt, carried here so an operator " +
+        "reading this report does not have to hold the plan open beside it to learn why a file they expected to " +
+        "be changed was not. The reasons mean what generate_custom_plan's excluded description says.",
+    ),
+  excludedCount: z.number().int().describe("Excluded items in the plan. Computed before the listing above is cut."),
+  excludedOmitted: z.number().int().describe("Excluded items the listing above left out."),
+  reversalPlanId: z
+    .string()
+    .optional()
+    .describe(
+      "The plan id that undoes this run, written before the first write. Absent on a dry run, which changes " +
+        "nothing to reverse. Apply it with this same tool to roll back.",
+    ),
+  reversalEntriesNotRefreshed: z
+    .number()
+    .int()
+    .describe(
+      "Writes that succeeded but whose reversal entry could not be given the file's new ETag. Replaying the " +
+        "reversal will refuse those items on their own precondition rather than undo them, so they need a fresh " +
+        "plan. Zero is the normal result.",
+    ),
+  graphOperationsIssued: z
+    .number()
+    .int()
+    .describe(
+      "Graph operations this call issued: one per write attempt, plus one for each follow-up ETag read a missing " +
+        "PATCH response forced. Counted directly rather than measured against the shared Graph request counter, " +
+        "which a concurrent call also moves and which a retried operation can move more than once. Not a request " +
+        "count: a throttled PATCH retries and spends more than one request while counting as one operation here. " +
+        "Zero on a dry run, which contacts Graph not at all.",
+    ),
 } satisfies z.ZodRawShape;

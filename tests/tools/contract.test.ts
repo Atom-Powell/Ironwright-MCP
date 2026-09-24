@@ -108,6 +108,7 @@ const EXPECTED_TOOL_NAMES = [
   "generate_move_plan",
   "execute_move_plan",
   "generate_custom_plan",
+  "execute_custom_plan",
   "replicate_template",
 ];
 
