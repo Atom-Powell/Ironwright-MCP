@@ -106,4 +106,27 @@ describe("pairMisplacedArtifacts against a real reconcile() report", () => {
 
     expect(pairMisplacedArtifacts(report, snapshot.folderPaths)).toEqual({ candidates: [], exclusions: [] });
   });
+
+  it("reports a misplaced copy found in another library as an exclusion, not a silent drop", () => {
+    // The canonical file at its canonical path wins the slot as compliant.
+    // The same-named copy in "Archive" parses to the identical slot, loses to
+    // the winner already at the canonical path, and comes back as a
+    // DuplicateFinding carrying a library rather than as a second
+    // ArtifactFinding: a shape the rename pairing never sees, since a
+    // misnamed duplicate's own state cannot carry a library (see match.ts's
+    // computeState), but a misplaced one can.
+    const snapshot = repo([file(`${JUNE}/${CANONICAL}`), file(`${JUNE}/${CANONICAL}`, "Archive")]);
+    const report = reconcile(PROFILE, workbook(), snapshot, AS_OF);
+    expect(june(report)?.state).toBe("compliant");
+    expect(report.duplicates).toEqual([
+      expect.objectContaining({ path: `${JUNE}/${CANONICAL}`, state: "misplaced", library: "Archive" }),
+    ]);
+
+    const pairing = pairMisplacedArtifacts(report, snapshot.folderPaths);
+
+    expect(pairing.candidates).toEqual([]);
+    expect(pairing.exclusions).toEqual([
+      { path: `${JUNE}/${CANONICAL}`, currentName: CANONICAL, targetName: CANONICAL, client: CLIENT, reason: "in_another_library", library: "Archive" },
+    ]);
+  });
 });

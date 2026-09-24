@@ -106,9 +106,23 @@ export function pairMisplacedArtifacts(report: ReconciliationReport, folderPaths
   }
 
   for (const duplicate of report.duplicates) {
-    // A duplicate carrying a library lives in another library and is not this
-    // plan's to report, the same way the rename pairing skips one.
-    if (!MOVE_STATES.has(duplicate.state) || duplicate.library !== undefined) continue;
+    if (!MOVE_STATES.has(duplicate.state)) continue;
+    // Unlike the rename pairing, a library-qualified duplicate is reachable
+    // here: a same-named copy the Microsoft Search cross-check finds in
+    // another library loses its slot to a winner filed elsewhere, and comes
+    // back as a duplicate carrying that library rather than as an
+    // ArtifactFinding. It is a real misplaced copy sitting in the wrong
+    // library, not a file this plan has nothing to say about, so it is
+    // reported as an exclusion rather than dropped. duplicateCollision still
+    // supplies path, currentName, client from the duplicate and targetName
+    // from the slot's winner; only the reason and the library are overridden,
+    // since "in_another_library" names what is actually wrong here, not
+    // whichever collision duplicateCollision would have inferred from the
+    // winner's own state.
+    if (duplicate.library !== undefined) {
+      exclusions.push({ ...duplicateCollision(report, duplicate), reason: "in_another_library", library: duplicate.library });
+      continue;
+    }
     exclusions.push(duplicateCollision(report, duplicate));
   }
 
