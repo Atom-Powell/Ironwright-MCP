@@ -175,7 +175,8 @@ Container Apps startup probe, which would restart it for a reason no log line na
 bounded timeout when 5b sets up the probes; a timeout that expires would take the existing
 "could not obtain a token" path, which logs a warning and starts anyway.
 
-**Read the Google Drive MCP server with `dry_run` and a restore token before planning phase 6d.**
+**CLOSED 2026-09-24: read before planning phase 6d; findings in the 6d spec's amendments.** The
+item read: **Read the Google Drive MCP server with `dry_run` and a restore token before planning phase 6d.**
 A search result during the refresh described one, the nearest thing to a reversal log found
 outside this project, but its name and repository were not recorded. Find it and read its plan
 and undo design first; research only.
