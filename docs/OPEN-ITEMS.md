@@ -2245,7 +2245,7 @@ local original, so the copy is a losing duplicate. Both were excluded naming `Ar
 is the shape the Task 5 review found silently dropped by the plan's own code; this is the live
 evidence the fix was needed.
 
-**The loop.** Five cases were seeded: a correctly named file in the previous month's folder, a
+**The loop.** Four cases were seeded: a correctly named file in the previous month's folder, a
 vendor-token file in the previous month's folder, a third file whose target month folder was
 renamed away, and a misnamed file in the right folder for the rename regression.
 
