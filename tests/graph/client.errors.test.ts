@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createGraphClient } from "../../src/graph/client.js";
 import { GraphRequestError } from "../../src/graph/errors.js";
 import { defaultRetryPolicy } from "../../src/graph/retry.js";
-import { TokenRequestError } from "../../src/graph/token.js";
+import { requireExactRoles, SERVER_TOKEN_ROLES, TokenRequestError, UnexpectedTokenRolesError } from "../../src/graph/token.js";
 
 const TOKEN = { getToken: async () => "token-1" };
 
@@ -189,5 +189,53 @@ describe("createGraphClient failures", () => {
     // as a caller passing the wrong header.
     expect(seen[0]?.headers.get("authorization")).toBe("Bearer token-1");
     expect(seen[0]?.headers.get("accept")).toBe("application/json");
+  });
+
+  describe("a token refused for its roles", () => {
+    function refusedClient() {
+      const payload = Buffer.from(JSON.stringify({ roles: ["Sites.Selected", "Files.Read.All"] }), "utf8").toString("base64url");
+      let asked = 0;
+      let sleeps = 0;
+      let fetches = 0;
+      const client = createGraphClient({
+        tokenProvider: requireExactRoles(
+          {
+            getToken: async () => {
+              asked += 1;
+              return `header.${payload}.signature`;
+            },
+          },
+          SERVER_TOKEN_ROLES,
+        ),
+        retry: defaultRetryPolicy({
+          sleep: async () => {
+            sleeps += 1;
+          },
+          now: () => 0,
+        }),
+        fetchImpl: (async () => {
+          fetches += 1;
+          return new Response("{}", { status: 200 });
+        }) as typeof fetch,
+      });
+      return { client, counts: () => ({ asked, sleeps, fetches, requests: client.requests() }) };
+    }
+
+    // The refusal is a decided outcome, like a 401 from the token endpoint:
+    // the same inner provider hands back the same cached token, so a retry
+    // cannot change the answer and only adds seconds of backoff.
+    it("is not retried on GET and is not counted as a request", async () => {
+      const { client, counts } = refusedClient();
+
+      await expect(client.get("/drives/d1")).rejects.toBeInstanceOf(UnexpectedTokenRolesError);
+      expect(counts()).toEqual({ asked: 1, sleeps: 0, fetches: 0, requests: 0 });
+    });
+
+    it("is not retried on getBytes and is not counted as a request", async () => {
+      const { client, counts } = refusedClient();
+
+      await expect(client.getBytes("/drives/d1/items/i1/content")).rejects.toBeInstanceOf(UnexpectedTokenRolesError);
+      expect(counts()).toEqual({ asked: 1, sleeps: 0, fetches: 0, requests: 0 });
+    });
   });
 });

@@ -1,6 +1,6 @@
 import { GraphRequestError, GraphResponseTooLargeError } from "./errors.js";
 import { defaultRetryPolicy, isRetriableStatus, withRetry, type RetryPolicy } from "./retry.js";
-import { TokenRequestError, type TokenProvider } from "./token.js";
+import { TokenRequestError, UnexpectedTokenRolesError, type TokenProvider } from "./token.js";
 
 /**
  * `send` throws rather than returning a status for anything that never got a
@@ -10,11 +10,14 @@ import { TokenRequestError, type TokenProvider } from "./token.js";
  * each of which already carries a decided outcome that a second attempt cannot
  * change: a `GraphRequestError` is a Graph response with a final status, and a
  * `TokenRequestError` for 401 is the client id or secret being wrong, which
- * retrying does not fix.
+ * retrying does not fix. An `UnexpectedTokenRolesError` is the same kind of
+ * decided outcome: the inner provider hands back the same cached token until it
+ * expires, so a retry would be refused again and only add backoff.
  */
 function isRetriableTransportError(error: unknown): boolean {
   if (error instanceof GraphRequestError) return false;
   if (error instanceof TokenRequestError && error.status === 401) return false;
+  if (error instanceof UnexpectedTokenRolesError) return false;
   return true;
 }
 
@@ -111,7 +114,6 @@ export function createGraphClient(options: GraphClientOptions): GraphClient {
   }
 
   async function sendForBytes(url: string, withAuth: boolean): Promise<Response> {
-    requests += 1;
     // accept is not set to application/json here: this request wants the file,
     // not a Graph JSON envelope. redirect is manual rather than followed by
     // fetch itself, because the follow below must drop the bearer token before
@@ -119,6 +121,10 @@ export function createGraphClient(options: GraphClientOptions): GraphClient {
     const headers: Record<string, string> = withAuth
       ? { authorization: `Bearer ${await options.tokenProvider.getToken()}` }
       : {};
+    // Counted only once the token is in hand, as `send` does: a token that was
+    // never obtained, or was refused, sent nothing to Graph, and the count is
+    // the number of requests this server actually issued.
+    requests += 1;
     return fetchImpl(url, { method: "GET", headers, redirect: "manual" });
   }
 
