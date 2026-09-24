@@ -42,8 +42,9 @@ export function executeMovePlanText(output: ExecuteMovePlanOutput): string[] {
     : [
         `Applied plan ${output.planId} against drive ${output.driveId}.`,
         `${String(output.counts.moved)} moved, ${String(output.counts.preconditionRefused)} refused because ` +
-          `the item there is not the one the plan recorded, ${String(output.counts.notFound)} no longer at the ` +
-          `planned path, ${String(output.counts.failed)} failed.`,
+          `the item there is not the one the plan recorded, ${String(output.counts.targetNameTaken)} refused ` +
+          `because another file already holds the target name, ${String(output.counts.notFound)} no longer at ` +
+          `the planned path, ${String(output.counts.failed)} failed.`,
       ];
 
   // Stated before the item listing rather than beside the reversal line at the

@@ -39,6 +39,7 @@ const RENAME_OUTCOME: Record<AppliedOutcome, RenameItemOutcome> = {
   applied: "renamed",
   would_apply: "would_rename",
   precondition_refused: "precondition_refused",
+  target_name_taken: "target_name_taken",
   not_found: "not_found",
   failed: "failed",
 };
@@ -119,6 +120,7 @@ export async function runExecuteRenamePlan(
         renamed: countOf(results, "renamed"),
         wouldRename: countOf(results, "would_rename"),
         preconditionRefused: countOf(results, "precondition_refused"),
+        targetNameTaken: countOf(results, "target_name_taken"),
         notFound: countOf(results, "not_found"),
         failed: countOf(results, "failed"),
       },

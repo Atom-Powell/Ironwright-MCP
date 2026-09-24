@@ -15,11 +15,17 @@ import { driveItemPath } from "./paths.js";
  * "Invalid request" (measured 2026-09-24), which cannot be told apart from any
  * other malformed request, so it is rethrown rather than given an outcome of
  * its own. Plan generation excludes that case before it can reach here.
+ *
+ * An occupied target name answers 409 `nameAlreadyExists` under
+ * `conflictBehavior: fail` (measured 2026-09-24): nothing is replaced, and the
+ * incoming file stays where it was. Only that code is mapped; any other 409 is
+ * rethrown, since no other was measured.
  */
 export type RelocateOutcome =
   | { kind: "relocated"; etag: string | undefined }
   | { kind: "precondition_failed" }
-  | { kind: "not_found" };
+  | { kind: "not_found" }
+  | { kind: "name_conflict" };
 
 export class EmptyRelocationError extends Error {
   constructor(path: string) {
@@ -102,6 +108,9 @@ export async function relocateDriveItem(
   } catch (error) {
     if (error instanceof GraphRequestError && error.status === 412) return { kind: "precondition_failed" };
     if (error instanceof GraphRequestError && error.status === 404) return { kind: "not_found" };
+    if (error instanceof GraphRequestError && error.status === 409 && error.code === "nameAlreadyExists") {
+      return { kind: "name_conflict" };
+    }
     throw error;
   }
 }

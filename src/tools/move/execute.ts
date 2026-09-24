@@ -32,6 +32,7 @@ const MOVE_OUTCOME: Record<AppliedOutcome, MoveItemOutcome> = {
   applied: "moved",
   would_apply: "would_move",
   precondition_refused: "precondition_refused",
+  target_name_taken: "target_name_taken",
   not_found: "not_found",
   failed: "failed",
 };
@@ -93,6 +94,7 @@ export async function runExecuteMovePlan(
         moved: countOf(results, "moved"),
         wouldMove: countOf(results, "would_move"),
         preconditionRefused: countOf(results, "precondition_refused"),
+        targetNameTaken: countOf(results, "target_name_taken"),
         notFound: countOf(results, "not_found"),
         failed: countOf(results, "failed"),
       },

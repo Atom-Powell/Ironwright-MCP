@@ -3,7 +3,7 @@ import { readDriveItemEtag } from "../../graph/rename.js";
 import type { RenamePlanItem, StoredPlan } from "../../store/types.js";
 import type { ToolContext } from "../context.js";
 
-export type AppliedOutcome = "applied" | "would_apply" | "precondition_refused" | "not_found" | "failed";
+export type AppliedOutcome = "applied" | "would_apply" | "precondition_refused" | "not_found" | "target_name_taken" | "failed";
 
 export interface AppliedItem {
   item: RenamePlanItem;
@@ -159,6 +159,11 @@ export async function applyPlan(
       // this: that call is a GET carrying no precondition at all, so its 404
       // stays live and meaningful.
       outcome = "not_found";
+    } else if (written.kind === "name_conflict") {
+      // A file arrived at the target between generating and executing. Graph
+      // refused under conflictBehavior fail, so nothing was replaced and this
+      // item is not in the reversal log's live set.
+      outcome = "target_name_taken";
     } else {
       // The write is done. This outcome is final; the bookkeeping below has
       // its own error boundary specifically so it cannot change it.

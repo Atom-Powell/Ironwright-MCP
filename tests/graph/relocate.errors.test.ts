@@ -37,6 +37,18 @@ describe("relocateDriveItem failures", () => {
     );
   });
 
+  it("maps a 409 nameAlreadyExists to a name conflict", async () => {
+    await expect(
+      relocateDriveItem(failingClient(409, '{"error":{"code":"nameAlreadyExists","message":"Name already exists"}}'), MOVE),
+    ).resolves.toEqual({ kind: "name_conflict" });
+  });
+
+  it("rethrows a 409 carrying any other code, since only nameAlreadyExists was measured", async () => {
+    await expect(relocateDriveItem(failingClient(409, '{"error":{"code":"somethingElse"}}'), MOVE)).rejects.toBeInstanceOf(
+      GraphRequestError,
+    );
+  });
+
   it("reports an absent etag for each shape a bodiless response can take", async () => {
     for (const response of [{}, undefined, null]) {
       const client = { patch: async <T>(): Promise<T> => response as T };

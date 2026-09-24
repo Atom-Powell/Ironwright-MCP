@@ -3,7 +3,7 @@ import { runExecuteMovePlan } from "../../../src/tools/move/execute.js";
 import type { ExecuteMovePlanOutput } from "../../../src/tools/move/output.js";
 import { createFakeToolContext } from "../fake-context.js";
 import { planWith, ITEM_A } from "../rename/fixtures.js";
-import { AUG, MISPLACED_PATH, MOVE_ITEM, SEPT, movePlanWith, movingLibraryGraphClient } from "./fixtures.js";
+import { AUG, MISPLACED_PATH, MOVE_ITEM, SEPT, TARGET_PATH, movePlanWith, movingLibraryGraphClient } from "./fixtures.js";
 
 const PLAN_ID = "mov-2026-09-14-a1b2c3d4";
 const outputOf = (r: Awaited<ReturnType<typeof runExecuteMovePlan>>) => r.structuredContent as unknown as ExecuteMovePlanOutput;
@@ -40,6 +40,17 @@ describe("execute_move_plan failures", () => {
     const output = outputOf(await runExecuteMovePlan({ profileId: "example", planId: PLAN_ID, confirm: true }, context));
 
     expect(output.counts.failed).toBe(1);
+  });
+
+  it("reports a file that arrived at the target after planning as target_name_taken and replaces nothing", async () => {
+    const graph = movingLibraryGraphClient({ [MISPLACED_PATH]: "etag-0", [TARGET_PATH]: "occupant" }, [AUG, SEPT]);
+    const context = createFakeToolContext({ graph });
+    await context.store.savePlan("example", movePlanWith([MOVE_ITEM]));
+
+    const output = outputOf(await runExecuteMovePlan({ profileId: "example", planId: PLAN_ID, confirm: true }, context));
+
+    expect(output.counts.targetNameTaken).toBe(1);
+    expect(graph.paths()).toEqual([MISPLACED_PATH, TARGET_PATH].sort());
   });
 
   it("refuses an unknown plan id without contacting Graph", async () => {

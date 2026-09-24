@@ -152,7 +152,7 @@ function execOutput(overrides: Partial<ExecuteRenamePlanOutput> = {}): ExecuteRe
     results: [],
     resultCount: 0,
     resultsOmitted: 0,
-    counts: { renamed: 0, wouldRename: 0, preconditionRefused: 0, notFound: 0, failed: 0 },
+    counts: { renamed: 0, wouldRename: 0, preconditionRefused: 0, targetNameTaken: 0, notFound: 0, failed: 0 },
     excluded: [],
     excludedCount: 0,
     excludedOmitted: 0,
@@ -170,15 +170,21 @@ describe("executePlanText", () => {
   });
 
   it("uses the singular for exactly one would-be rename and the plural otherwise", () => {
-    expect(executePlanText(execOutput({ counts: { renamed: 0, wouldRename: 1, preconditionRefused: 0, notFound: 0, failed: 0 } }))[1]).toBe(
-      "1 rename would be attempted.",
-    );
-    expect(executePlanText(execOutput({ counts: { renamed: 0, wouldRename: 0, preconditionRefused: 0, notFound: 0, failed: 0 } }))[1]).toBe(
-      "0 renames would be attempted.",
-    );
-    expect(executePlanText(execOutput({ counts: { renamed: 0, wouldRename: 2, preconditionRefused: 0, notFound: 0, failed: 0 } }))[1]).toBe(
-      "2 renames would be attempted.",
-    );
+    expect(
+      executePlanText(
+        execOutput({ counts: { renamed: 0, wouldRename: 1, preconditionRefused: 0, targetNameTaken: 0, notFound: 0, failed: 0 } }),
+      )[1],
+    ).toBe("1 rename would be attempted.");
+    expect(
+      executePlanText(
+        execOutput({ counts: { renamed: 0, wouldRename: 0, preconditionRefused: 0, targetNameTaken: 0, notFound: 0, failed: 0 } }),
+      )[1],
+    ).toBe("0 renames would be attempted.");
+    expect(
+      executePlanText(
+        execOutput({ counts: { renamed: 0, wouldRename: 2, preconditionRefused: 0, targetNameTaken: 0, notFound: 0, failed: 0 } }),
+      )[1],
+    ).toBe("2 renames would be attempted.");
   });
 
   it("says on a dry run that it checked no preconditions", () => {
@@ -194,12 +200,15 @@ describe("executePlanText", () => {
     const lines = executePlanText(
       execOutput({
         dryRun: false,
-        counts: { renamed: 3, wouldRename: 0, preconditionRefused: 1, notFound: 2, failed: 4 },
+        counts: { renamed: 3, wouldRename: 0, preconditionRefused: 1, targetNameTaken: 0, notFound: 2, failed: 4 },
       }),
     );
 
     expect(lines[0]).toBe("Applied plan rnm-2026-09-18-a1b2c3d4 against drive drive-1.");
-    expect(lines[1]).toBe("3 renamed, 1 refused because the item there is not the one the plan recorded, 2 no longer at the planned path, 4 failed.");
+    expect(lines[1]).toBe(
+      "3 renamed, 1 refused because the item there is not the one the plan recorded, 0 refused because another " +
+        "file already holds the target name, 2 no longer at the planned path, 4 failed.",
+    );
   });
 
   it("lists each result as a from-arrow-to-outcome line", () => {

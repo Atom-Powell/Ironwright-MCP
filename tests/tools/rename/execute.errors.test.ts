@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { runExecuteRenamePlan } from "../../../src/tools/rename/execute.js";
 import { createFakeToolContext } from "../fake-context.js";
 import type { ExecuteRenamePlanOutput } from "../../../src/tools/rename/output.js";
+import { GraphRequestError } from "../../../src/graph/errors.js";
 import { MalformedPlanEntityError } from "../../../src/store/types.js";
 import type { StateStore } from "../../../src/store/types.js";
 import { ITEM_A, ITEM_B, planWith, renamingGraphClient, storeWithFailingSavePlan } from "./fixtures.js";
@@ -117,6 +118,33 @@ describe("per-item refusals", () => {
     expect(output.reversalEntriesNotRefreshed).toBe(1);
     const reversal = await context.store.getPlan("example", REVERSAL_ID);
     expect(reversal?.items[0]?.etag).toBe(ITEM_A.etag);
+  });
+
+  it("reports a rename onto a name another file took after planning as target_name_taken", async () => {
+    const graph = renamingGraphClient({ patchStatuses: { [ITEM_A.path]: 409 } });
+    // The renaming fake answers a failing status with an empty body, which carries no
+    // Graph error code; give it one so the verb can recognize nameAlreadyExists.
+    const original = graph.patch.bind(graph);
+    graph.patch = async <T>(path: string, body: unknown, headers?: Record<string, string>): Promise<T> => {
+      try {
+        return await original<T>(path, body, headers);
+      } catch (error) {
+        if (error instanceof GraphRequestError && error.status === 409) {
+          throw new GraphRequestError({ method: "PATCH", path, status: 409, body: '{"error":{"code":"nameAlreadyExists"}}' });
+        }
+        throw error;
+      }
+    };
+    const context = createFakeToolContext({ graph });
+    await context.store.savePlan("example", planWith([ITEM_A, ITEM_B]));
+
+    const output = outputOf(
+      await runExecuteRenamePlan({ profileId: "example", planId: "rnm-2026-09-18-a1b2c3d4", confirm: true }, context),
+    );
+
+    expect(output.counts.targetNameTaken).toBe(1);
+    expect(output.counts.renamed).toBe(1);
+    expect(output.counts.failed).toBe(0);
   });
 
   it("still reports a rename as renamed when saving the refreshed reversal entry fails", async () => {

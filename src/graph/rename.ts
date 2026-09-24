@@ -20,7 +20,8 @@ import { etagOf, relocateDriveItem } from "./relocate.js";
 export type RenameOutcome =
   | { kind: "renamed"; etag: string | undefined }
   | { kind: "precondition_failed" }
-  | { kind: "not_found" };
+  | { kind: "not_found" }
+  | { kind: "name_conflict" };
 
 export type EtagLookup = { kind: "found"; etag: string | undefined } | { kind: "not_found" };
 

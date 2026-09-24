@@ -113,7 +113,14 @@ export const GENERATE_MOVE_PLAN_OUTPUT_SCHEMA = {
 // Exported for Task 7's execute_move_plan output schema to reuse.
 export const MOVE_EXCLUDED_ITEM_SCHEMA = EXCLUDED_ITEM;
 
-export const MOVE_ITEM_OUTCOMES = ["moved", "would_move", "precondition_refused", "not_found", "failed"] as const;
+export const MOVE_ITEM_OUTCOMES = [
+  "moved",
+  "would_move",
+  "precondition_refused",
+  "target_name_taken",
+  "not_found",
+  "failed",
+] as const;
 export type MoveItemOutcome = (typeof MOVE_ITEM_OUTCOMES)[number];
 
 export interface MoveItemResult {
@@ -143,7 +150,14 @@ export interface ExecuteMovePlanOutput {
   results: MoveItemResult[];
   resultCount: number;
   resultsOmitted: number;
-  counts: { moved: number; wouldMove: number; preconditionRefused: number; notFound: number; failed: number };
+  counts: {
+    moved: number;
+    wouldMove: number;
+    preconditionRefused: number;
+    targetNameTaken: number;
+    notFound: number;
+    failed: number;
+  };
   excluded: MoveExcludedItem[];
   excludedCount: number;
   excludedOmitted: number;
@@ -194,7 +208,9 @@ export const EXECUTE_MOVE_PLAN_OUTPUT_SCHEMA = {
         "dry run reached it and stopped; precondition_refused means Graph refused the write because the item at " +
         "that path is not the one the plan recorded. Graph checks If-Match before existence, so this single " +
         "outcome covers both a file that changed and a file that is no longer there, and this server deliberately " +
-        "does not pay the cost of a GET per refusal to tell the two apart. not_found is expected to stay zero: " +
+        "does not pay the cost of a GET per refusal to tell the two apart. target_name_taken means another file " +
+        "took the target name after the plan was generated, and Graph refused rather than replace it. not_found " +
+        "is expected to stay zero: " +
         "this executor always sends If-Match, and a stale precondition against an absent path answers 412 before " +
         "Graph ever reports the path missing, so a 404 cannot reach this outcome today. It is kept as a label " +
         "rather than removed, since a branch on a write path is not removed on the strength of a negative nobody " +
@@ -216,6 +232,10 @@ export const EXECUTE_MOVE_PLAN_OUTPUT_SCHEMA = {
             "changed file and an absent one: Graph checks If-Match before existence, and telling the two apart " +
             "would cost a GET per refusal this project deliberately does not pay.",
         ),
+      targetNameTaken: z
+        .number()
+        .int()
+        .describe("Items Graph refused because another file already holds the target name. Nothing was replaced."),
       notFound: z
         .number()
         .int()
