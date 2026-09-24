@@ -8,6 +8,7 @@ import { generateRenamePlan } from "./definitions/generate-rename-plan.js";
 import { executeRenamePlan } from "./definitions/execute-rename-plan.js";
 import { generateMovePlan } from "./definitions/generate-move-plan.js";
 import { executeMovePlan } from "./definitions/execute-move-plan.js";
+import { generateCustomPlan } from "./definitions/generate-custom-plan.js";
 import { replicateTemplate } from "./definitions/replicate-template.js";
 
 export type { ToolAnnotations, ToolDefinition } from "./types.js";
@@ -22,6 +23,7 @@ export const ALL_TOOLS: ToolDefinition[] = [
   executeRenamePlan,
   generateMovePlan,
   executeMovePlan,
+  generateCustomPlan,
   replicateTemplate,
 ];
 
