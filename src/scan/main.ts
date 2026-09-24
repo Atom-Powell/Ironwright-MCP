@@ -1,7 +1,7 @@
 import { loadGraphCredentials, loadStoreConnectionString } from "../config.js";
 import { loadProfile } from "../domain/profile/load.js";
 import { createGraphClient } from "../graph/client.js";
-import { clientCredentialsTokenProvider } from "../graph/token.js";
+import { clientCredentialsTokenProvider, requireExactRoles, SERVER_TOKEN_ROLES } from "../graph/token.js";
 import { createMemoryStateStore } from "../store/memory.js";
 import { ensureTables, tableStateStoreFromConnectionString } from "../store/table.js";
 import type { StateStore } from "../store/types.js";
@@ -26,7 +26,11 @@ async function main(): Promise<void> {
     storeKind = "azure-table";
   }
 
-  const client = createGraphClient({ tokenProvider: clientCredentialsTokenProvider(credentials) });
+  // The same guard the server runs behind: this command uses the server
+  // application's own credentials, so a token carrying more than Sites.Selected
+  // is refused here too, and the catch below prints why.
+  const tokenProvider = requireExactRoles(clientCredentialsTokenProvider(credentials), SERVER_TOKEN_ROLES);
+  const client = createGraphClient({ tokenProvider });
   const result = await runScan({
     client,
     store,
