@@ -255,6 +255,16 @@ failing at the per-site grant with a rollback that deletes everything it just ma
 
 ## The permission model
 
+**The server refuses to run with more than `Sites.Selected`.** Before it opens its port, and again
+on every new token it obtains, the server reads its own token's application roles and refuses any
+token that carries anything other than exactly `Sites.Selected`. Adding a permission such as
+`Files.Read.All` to the server application would otherwise widen it to every site in the tenant
+without a sign. At startup a mismatch stops the process with a message naming the extra or missing
+permissions; while running, every tool call fails with the same explanation and nothing is read or
+changed. Remove the extra permission from the server application in Entra and the next token is
+accepted, with no restart needed. If Entra cannot be reached at startup, the server logs a warning
+and starts anyway, and the check runs on the first token it does obtain.
+
 `Sites.Selected` is two grants, not one, and the second is worthless without the first.
 
 The first grant is the application permission itself. The app registration this command

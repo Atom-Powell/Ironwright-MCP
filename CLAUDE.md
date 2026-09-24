@@ -119,7 +119,12 @@ latency reason.
 
 **Identity.** Entra confidential client scoped via `Sites.Selected`, never tenant-wide
 `Sites.ReadWrite.All`. This is the real least-privilege boundary, because Copilot Studio's DLP
-governance is per-server rather than per-tool and cannot substitute for it.
+governance is per-server rather than per-tool and cannot substitute for it. Enforced at runtime
+since 2026-09-24: the server refuses any Graph token whose roles claim is not exactly
+`Sites.Selected`, on every newly minted token and once at startup, and starts anyway only when
+Entra cannot be reached, never on a mismatch. An application holding `Sites.Selected` alongside a
+broader permission can read sites it was never granted, so the boundary is only real if it is
+checked where the token is used.
 
 **Name.** The product is officially Ironwright MCP. Settled 2026-09-15, closing the last item
 that was carried as open. Use that spelling in prose, with the repo staying `Ironwright-MCP`. The

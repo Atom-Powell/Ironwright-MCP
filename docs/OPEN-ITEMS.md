@@ -145,6 +145,7 @@ phase 2a and phase 2a does not close it.
 
 ## Carried into later phases
 
+**CLOSED 2026-09-24 by the token role guard, branch `token-role-guard`.** The item read:
 **The server should refuse to start if its own token carries any role other than
 `Sites.Selected`.** Found 2026-09-24 by the competitive refresh: a Microsoft Q&A moderator answered,
 as by design, that an application holding `Sites.Selected` plus `Files.Read.All` or
@@ -153,7 +154,13 @@ roles claim (`appRolesFromAccessToken` in `src/setup/steps.ts`), but the running
 checks its own, so someone adding a permission to the server application in Entra would widen
 it silently. The 2026-09-24 token check found `["Sites.Selected"]` only, so nothing is wrong
 today; the item is that nothing would say so if it changed. Scheduled 2026-09-24 as its own
-small slice ahead of phase 6d, since it needs no Azure resources.
+small slice ahead of phase 6d, since it needs no Azure resources. Built as
+`requireExactRoles` in `src/graph/token.ts`, checking every newly minted token, and
+`checkStartupIdentity` in `src/server/identity.ts`, run before the port is bound. Verified live
+on 2026-09-24 in the passing direction only: the server started against the sandbox with no
+warning and `inventory_tree` answered through the guard at 3 Graph requests. The refusal path was
+deliberately not exercised live, since that would mean granting the server application a broad
+permission with admin consent; it is covered by unit tests only.
 
 **Report the server version in `/health` and the startup log (phase 5b).** From the same refresh:
 a peer server's users asked for a way to see which version is running (Lokka #52), because it
