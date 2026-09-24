@@ -57,7 +57,7 @@ function isMoveExclusionReason(reason: string): reason is MoveExclusionReason {
  * validation error instead of the cause, and refused before anything is
  * applied, so that refusal never replaces a report of writes already made.
  */
-function moveExclusionsOf(plan: StoredPlan): ExcludedPlanItem[] {
+function moveExclusionsOf(plan: StoredPlan): ExcludedPlanItem<MoveExclusionReason>[] {
   return plan.excluded.map((item) => {
     const reason: string = item.reason;
     if (!isMoveExclusionReason(reason)) {

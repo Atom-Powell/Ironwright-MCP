@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-export type PlanIdPrefix = "rnm" | "mov" | "rev";
+export type PlanIdPrefix = "rnm" | "mov" | "cus" | "rev";
 
 /**
  * Eight hex characters rather than four.

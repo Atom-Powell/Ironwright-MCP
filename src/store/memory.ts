@@ -92,7 +92,11 @@ export function createMemoryStateStore(): StateStore {
       // the drift that promise exists to rule out.
       const items = JSON.stringify(plan.items);
       const excluded = JSON.stringify(plan.excluded);
-      const total = items.length + excluded.length;
+      // Present only on a custom plan, measured the same way the Table store
+      // measures it: stringified only when present, so an absent steps field
+      // contributes nothing to the total on either implementation.
+      const steps = plan.steps === undefined ? undefined : JSON.stringify(plan.steps);
+      const total = items.length + excluded.length + (steps?.length ?? 0);
       if (total > MAX_PLAN_JSON_CHARS) throw new PlanTooLargeError(plan.planId, total);
 
       // Cloned on the way in and out. Without it, a caller holding the object

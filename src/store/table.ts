@@ -7,6 +7,7 @@ import {
   MAX_TRANSACTION_SIZE,
   planInventoryChanges,
 } from "./keys.js";
+import type { CustomStep } from "../domain/custom/resolve.js";
 import { MalformedPlanEntityError, MAX_PLAN_JSON_CHARS, PlanTooLargeError } from "./types.js";
 import type {
   ApplyResult,
@@ -97,6 +98,17 @@ function requiredPlanJsonArray<T>(entity: TableEntityLike, field: string, planId
     throw new MalformedPlanEntityError(planId, field, "does not parse to an array");
   }
   return parsed as T[];
+}
+
+/**
+ * The same encoding as `requiredPlanJsonArray`, for a field only a custom
+ * plan's entity carries. `steps` is absent on a rename or move plan's entity,
+ * which is not malformed; it is malformed only when the column is present and
+ * fails the same JSON-array checks the required fields are held to.
+ */
+function optionalPlanJsonArray<T>(entity: TableEntityLike, field: string, planId: string): T[] | undefined {
+  if (entity[field] === undefined) return undefined;
+  return requiredPlanJsonArray<T>(entity, field, planId);
 }
 
 function toRecord(entity: TableEntityLike): InventoryRecord {
@@ -264,7 +276,12 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
     async savePlan(profileId, plan) {
       const items = JSON.stringify(plan.items);
       const excluded = JSON.stringify(plan.excluded);
-      const total = items.length + excluded.length;
+      // Present only on a custom plan, the same as `reverses` below: absent
+      // rather than an empty-array placeholder, so a rename or move plan's
+      // entity carries no steps key at all and contributes nothing to the
+      // size total.
+      const steps = plan.steps === undefined ? undefined : JSON.stringify(plan.steps);
+      const total = items.length + excluded.length + (steps?.length ?? 0);
       if (total > MAX_PLAN_JSON_CHARS) throw new PlanTooLargeError(plan.planId, total);
 
       await clients.plans.upsertEntity(
@@ -283,6 +300,7 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
           // empty string would be indistinguishable from a reversal of a plan
           // whose id is the empty string.
           ...(plan.reverses === undefined ? {} : { reverses: plan.reverses }),
+          ...(steps === undefined ? {} : { steps }),
         },
         "Replace",
       );
@@ -300,9 +318,11 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
         // faithfully throws instead of coming back as a valid-looking plan
         // with nothing to do.
         const kind = requiredPlanString(entity, "kind", planId);
-        if (kind !== "rename" && kind !== "move") {
-          throw new MalformedPlanEntityError(planId, "kind", `is "${kind}", not "rename" or "move"`);
+        if (kind !== "rename" && kind !== "move" && kind !== "custom") {
+          throw new MalformedPlanEntityError(planId, "kind", `is "${kind}", not "rename", "move" or "custom"`);
         }
+
+        const steps = optionalPlanJsonArray<CustomStep>(entity, "steps", planId);
 
         return {
           planId: requiredPlanString(entity, "planId", planId),
@@ -313,6 +333,7 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
           items: requiredPlanJsonArray<RenamePlanItem>(entity, "items", planId),
           excluded: requiredPlanJsonArray<ExcludedPlanItem>(entity, "excluded", planId),
           ...(typeof entity.reverses === "string" ? { reverses: entity.reverses } : {}),
+          ...(steps === undefined ? {} : { steps }),
         };
       } catch (error) {
         if (statusCodeOf(error) === 404) return undefined;
