@@ -145,6 +145,16 @@ phase 2a and phase 2a does not close it.
 
 ## Carried into later phases
 
+**The server should refuse to start if its own token carries any role other than
+`Sites.Selected`.** Found 2026-09-24 by the competitive refresh: a Microsoft Q&A moderator answered,
+as by design, that an application holding `Sites.Selected` plus `Files.Read.All` or
+`User.Read.All` could read sites it was never granted. Setup already reads the grant issuer's
+roles claim (`appRolesFromAccessToken` in `src/setup/steps.ts`), but the running server never
+checks its own, so someone adding a permission to the server application in Entra would widen
+it silently. The 2026-09-24 token check found `["Sites.Selected"]` only, so nothing is wrong
+today; the item is that nothing would say so if it changed. Belongs with phase 5b's startup and
+telemetry work, or sooner as a small slice.
+
 **CLOSED 2026-09-18 by phase 5a, `1c79bbf`, "build: compile the server without the setup
 command for production", carried through a timeout fix in `4acce7c`.** A production image
 built with `npm ci --omit=dev && npm run build` would fail, because the build compiled

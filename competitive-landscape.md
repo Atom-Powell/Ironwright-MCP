@@ -1,5 +1,7 @@
 # SharePoint/Graph MCP Server Landscape — Competitive Review & Lessons Learned
 
+*Refreshed and partly corrected on 2026-09-24 by `competitive-landscape-refresh-2026-09-24.md`, which should be read first.*
+
 *Compiled September 11, 2026, via targeted web research (no dedicated deep-research tool was available for this pass — see Caveats). Companion to `CLAUDE.md` and `Pain-Points.txt`.*
 
 ## Method and evidence tiers

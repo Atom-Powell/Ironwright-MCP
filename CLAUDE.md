@@ -35,6 +35,9 @@ used for development.
   record of what is verified against a live tenant versus only against fakes.
 - `docs/SETUP.md` is the per-tenant operational procedure.
 - `docs/superpowers/plans/` holds executed implementation plans, kept as history.
+- `competitive-landscape-refresh-2026-09-24.md` is the current competitive picture: MCP
+  marketplaces, adjacent products and user feedback, citation-audited. It corrects parts of the
+  older `competitive-landscape.md`.
 - `Pain-Points.txt` is the de-identified original problem statement, and the two research
   documents carry the architecture and competitive analysis behind the locked decisions.
 
