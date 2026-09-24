@@ -7,6 +7,7 @@ export const PLAN_EXCLUSION_REASONS = [
   "target_path_already_occupied",
   "slot_already_satisfied_by_another_file",
   "two_files_share_one_target_name",
+  "slot_won_by_file_in_another_library",
   "no_etag_available",
   "file_not_found_at_plan_time",
 ] as const satisfies readonly PlanExclusionReason[];
@@ -81,8 +82,11 @@ export const GENERATE_RENAME_PLAN_OUTPUT_SCHEMA = {
     )
     .describe(
       "Misnamed files this plan will NOT attempt, each with why. The first three reasons are name collisions this " +
-        "server cannot resolve without a conflict behavior it deliberately does not implement; the last two mean " +
-        "the file had no usable precondition when the plan was generated.",
+        "server cannot resolve without a conflict behavior it deliberately does not implement. " +
+        "slot_won_by_file_in_another_library means this file lost its slot to a file found in another library of " +
+        "the same site, and nothing occupies the canonical path in this library; which file to act on then is the " +
+        "operator's decision. no_etag_available and file_not_found_at_plan_time mean the file had no usable " +
+        "precondition when the plan was generated.",
     ),
   excludedCount: z.number().int().describe("Excluded items in the stored plan. Computed before the listing above is cut."),
   excludedOmitted: z.number().int().describe("Excluded items the listing above left out."),
@@ -255,7 +259,9 @@ export const EXECUTE_RENAME_PLAN_OUTPUT_SCHEMA = {
     .describe(
       "Items the plan recorded at generation time as ones it would not attempt, carried here so an operator " +
         "reading this report does not have to hold the plan open beside it to learn why a file they expected to " +
-        "be renamed was not.",
+        "be renamed was not. The reasons mean what generate_rename_plan's excluded description says, including " +
+        "slot_won_by_file_in_another_library: the file lost its slot to a file found in another library of the " +
+        "same site, and nothing occupies the canonical path in this library.",
     ),
   excludedCount: z.number().int().describe("Excluded items in the plan. Computed before the listing above is cut."),
   excludedOmitted: z.number().int().describe("Excluded items the listing above left out."),

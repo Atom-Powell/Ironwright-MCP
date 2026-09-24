@@ -14,11 +14,19 @@ import type { ArtifactFinding, DuplicateFinding, ReconciliationReport, Slot } fr
  * design deliberately holds back, so all three are recorded in the plan as
  * items that will not be attempted rather than being discovered as failures
  * during a write.
+ *
+ * `slot_won_by_file_in_another_library` is a fourth, and differs in kind: this
+ * file lost its slot to a file the Microsoft Search cross-check found in
+ * another library of the same site, and nothing occupies the canonical path in
+ * this library. It is reported rather than acted on because which file a plan
+ * should act on in that case is an open decision for the operator (see
+ * docs/OPEN-ITEMS.md), not because a collision was observed.
  */
 export type CollisionReason =
   | "target_path_already_occupied"
   | "slot_already_satisfied_by_another_file"
-  | "two_files_share_one_target_name";
+  | "two_files_share_one_target_name"
+  | "slot_won_by_file_in_another_library";
 
 export interface PlanCollision {
   path: string;
@@ -186,11 +194,18 @@ function winnerFor(report: ReconciliationReport, duplicate: DuplicateFinding): A
  * another library, so it is excluded the same way `candidateFrom` excludes a
  * foreign match: correcting it is a move, not a rename.
  *
- * The reason is chosen from two observations rather than a switch on the
+ * The reason is chosen from observations rather than a switch on the
  * winner's state, since a switch would have to enumerate every state that can
  * legally win a slot holding a "misnamed" loser, and miss one the way this
  * function's first version missed "misplaced":
  *
+ * - Is the winner in another library? Checked first, because every test below
+ *   compares the winner's library-relative path with this library's canonical
+ *   path, and a path relative to another library says nothing about what
+ *   occupies this one. Without this check a foreign winner at the same
+ *   relative path read as `target_path_already_occupied` for a path holding
+ *   nothing here: `slot_won_by_file_in_another_library`. Which file wins the
+ *   slot is unchanged; only the reason reported for the loser is.
  * - Does the winner's own matched path already equal the target this
  *   duplicate and the winner both converge on? If so, something is physically
  *   there today: `target_path_already_occupied`. This is only true for a
@@ -212,7 +227,9 @@ export function duplicateCollision(report: ReconciliationReport, duplicate: Dupl
   const targetPath = joinPath(winner.expectedPath, winner.expectedName);
 
   let reason: CollisionReason;
-  if (winner.matched.path === targetPath) {
+  if (winner.matched.library !== undefined) {
+    reason = "slot_won_by_file_in_another_library";
+  } else if (winner.matched.path === targetPath) {
     reason = "target_path_already_occupied";
   } else if (winner.state === "compliant") {
     reason = "slot_already_satisfied_by_another_file";

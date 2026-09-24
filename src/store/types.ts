@@ -88,8 +88,11 @@ export interface StateStore {
  * not yet at the canonical path either (misnamed or misplaced) and would
  * also land there once corrected, so this file and the winner are two files
  * contending for one name. None of the three is resolvable without
- * `conflictBehavior`, which this phase deliberately does not build. The last
- * two come from the plan-time etag fetch: a file with no etag has no usable
+ * `conflictBehavior`, which this phase deliberately does not build.
+ * `slot_won_by_file_in_another_library` means this file lost its slot to a
+ * file found in another library of the same site, and nothing occupies the
+ * canonical path in this library. The last two come from the plan-time etag
+ * fetch: a file with no etag has no usable
  * precondition, and silently sending no `If-Match` for it would turn the item
  * carrying the least information into the only unguarded write in the batch.
  */
@@ -97,6 +100,7 @@ export type PlanExclusionReason =
   | "target_path_already_occupied"
   | "slot_already_satisfied_by_another_file"
   | "two_files_share_one_target_name"
+  | "slot_won_by_file_in_another_library"
   | "no_etag_available"
   | "file_not_found_at_plan_time";
 

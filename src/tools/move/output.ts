@@ -83,7 +83,9 @@ export const GENERATE_MOVE_PLAN_OUTPUT_SCHEMA = {
       "Misplaced files this plan will NOT attempt, each with why. in_another_library names the library the file " +
         "was found in, which this server does not yet move files out of. target_folder_absent means the folder " +
         "the file belongs in does not exist, and this server creates no folders. The three collision reasons mean " +
-        "the canonical path is already spoken for. no_etag_available and file_not_found_at_plan_time mean the " +
+        "the canonical path is already spoken for. slot_won_by_file_in_another_library means this file lost its " +
+        "slot to a file found in another library of the same site, and nothing occupies the canonical path in " +
+        "this library; which file to act on then is the operator's decision. no_etag_available and file_not_found_at_plan_time mean the " +
         "file had no usable precondition when the plan was generated.",
     ),
   excludedCount: z.number().int().describe("Excluded items in the stored plan. Computed before the listing above is cut."),
@@ -252,7 +254,9 @@ export const EXECUTE_MOVE_PLAN_OUTPUT_SCHEMA = {
     .describe(
       "Items the plan recorded at generation time as ones it would not attempt, carried here so an operator " +
         "reading this report does not have to hold the plan open beside it to learn why a file they expected to " +
-        "be moved was not.",
+        "be moved was not. The reasons mean what generate_move_plan's excluded description says, including " +
+        "slot_won_by_file_in_another_library: the file lost its slot to a file found in another library of the " +
+        "same site, and nothing occupies the canonical path in this library.",
     ),
   excludedCount: z.number().int().describe("Excluded items in the plan. Computed before the listing above is cut."),
   excludedOmitted: z.number().int().describe("Excluded items the listing above left out."),

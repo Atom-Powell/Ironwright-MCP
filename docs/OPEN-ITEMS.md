@@ -14,6 +14,31 @@ what the phase still owes and it is the document every session loads. The rule i
 `CLAUDE.md`'s Working Agreement; it is repeated here because this file is where the first half
 gets done and is therefore where the second half gets forgotten, which it has been twice.
 
+## Decision required: which file should a plan act on when a slot's winner is in another library?
+
+Found by the phase 6b-1 whole-branch review, 2026-09-24. Open, and the operator's to make.
+
+**What the engine does today.** `matchArtifacts` ranks every candidate for a slot, including a copy
+the Microsoft Search cross-check found in another library of the same site. A file carrying a
+library is always `misplaced`, so it ties on rank with a local misplaced file and the tie falls to
+modification time, and it outranks a local `misnamed` file outright. The foreign file can therefore
+win the slot, and the local file is only reported, as a duplicate.
+
+**What a plan does with that.** Nothing moves or renames in that case. The foreign winner is
+excluded from a move plan as `in_another_library`, and the local loser is excluded from whichever
+plan would have acted on it as `slot_won_by_file_in_another_library`, which says that this file lost
+its slot to a file in another library and that nothing occupies the canonical path in this library.
+Before that reason existed the local file was reported as `target_path_already_occupied` or
+`two_files_share_one_target_name`, both false, because the check compared the foreign winner's
+library-relative path with this library's canonical path. The fix changed only the reason; which
+file wins a slot and which file becomes a candidate are unchanged, deliberately.
+
+**The choice.** Either prefer the local file for local remediation, so a same-library move or
+rename puts the local copy at the canonical path and the foreign copy is left to be reported, or
+leave the slot as it is and resolve it through cross-library moves in phase 6b-2, which would bring
+the foreign winner home. The first would change how a slot is resolved, which every read tool
+reports too, so it is a product decision rather than an implementation detail.
+
 ## Decisions required before the first live setup run
 
 **ANSWERED 2026-09-12 by the first live run: the per-site grant was refused.**
