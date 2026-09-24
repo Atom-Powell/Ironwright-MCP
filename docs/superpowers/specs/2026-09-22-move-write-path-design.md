@@ -191,8 +191,10 @@ committed.
   behavior change. It is therefore made as its own commit after the behavior-preserving refactor, not
   inside it, and the rename assertions it changes are changed there deliberately.
 - The operator prerequisite is met for this window: the grant issuer was stood back up on 2026-09-24
-  and the server application's grant widened to write. It stays widened through the 6b-1 sitting
-  unless the operator decides otherwise.
+  and the server application's grant widened to write for the probe, then restored to read the same
+  day. The grant issuer was left standing, its secret expiring 2026-10-01, so the sitting re-widens
+  the grant with one call rather than a new Global Administrator sign-in. A sitting after that date
+  starts with `--create-bootstrap` again.
 
 ## Verification before merge
 
