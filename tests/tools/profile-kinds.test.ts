@@ -39,6 +39,10 @@ describe("which tools accept a library-only profile", () => {
       const result = await tool.handler!(input, context);
 
       expect(result.isError, tool.name).toBe(true);
+      // Pinned to the reason, so a tool failing for any other cause, a
+      // malformed input among them, cannot pass as having refused the profile.
+      const text = result.content.map((entry) => ("text" in entry ? entry.text : "")).join(" ");
+      expect(text, tool.name).toContain("library-only");
       expect(context.graph.requests(), tool.name).toBe(0);
     }
   });

@@ -21,6 +21,18 @@ describe("execute_move_plan failures", () => {
     expect(graph.requests()).toBe(0);
   });
 
+  it("refuses a custom plan rather than applying it as a move", async () => {
+    const graph = movingLibraryGraphClient({}, []);
+    const context = createFakeToolContext({ graph });
+    await context.store.savePlan("example", { ...movePlanWith([{ ...MOVE_ITEM, step: 1 }]), kind: "custom" });
+
+    const result = await runExecuteMovePlan({ profileId: "example", planId: PLAN_ID, confirm: true }, context);
+
+    expect(result.isError).toBe(true);
+    expect(result.content.map((c) => ("text" in c ? c.text : "")).join("")).toContain("execute_custom_plan");
+    expect(graph.requests()).toBe(0);
+  });
+
   it("refuses only the item edited since planning and still reports the plan", async () => {
     const graph = movingLibraryGraphClient({ [MISPLACED_PATH]: "etag-edited" }, [AUG, SEPT]);
     const context = createFakeToolContext({ graph });
