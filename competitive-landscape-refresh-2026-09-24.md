@@ -105,6 +105,42 @@ with no one offering it, but it is not demand evidence either. This project has 
 on its own architecture; every confirming signal above is by analogy from other servers'
 failures. The first real signal will come from a pilot.
 
+## Head to head: Softeria's `ms-365-mcp-server`
+
+Softeria is the most adopted Microsoft 365 MCP server found, so it is the one an operator is most
+likely to try first. The two share a stack and little else: Softeria is a broad toolbox acting
+as a signed-in user, and Ironwright MCP is a narrow, unattended compliance engine for one library.
+Facts about Softeria are from its [README](https://github.com/softeria/ms-365-mcp-server),
+repository metadata and [`endpoints.json`](https://github.com/softeria/ms-365-mcp-server/blob/main/src/endpoints.json),
+read 2026-09-24. **Verified.**
+
+| | Softeria `ms-365-mcp-server` | Ironwright MCP |
+|---|---|---|
+| Scope | Most of Microsoft 365: mail, calendar, OneDrive, Excel, Teams, SharePoint, Planner, users | One SharePoint library against one tracking workbook |
+| Tools | 334, each one Graph endpoint: 156 GET, 109 POST, 36 PATCH, 31 DELETE, 2 PUT | 7 live, 10 planned, each a server-side job |
+| Identity | The signed-in user: device code, OAuth authorization code, on-behalf-of, or a supplied token; application permissions are left to a separate companion server | Its own application, app-only, never a user |
+| Least privilege | `Sites.Selected` available through an allowlist; default org mode requests broad SharePoint scopes, and tenant-wide search needs them | `Sites.Selected` on one granted site is the only mode |
+| Writes | Immediate per call; safety is a read-only flag and tool allowlists; no dry run, plan or rollback documented | Reviewable stored plan, dry run by default, ETag precondition per file, reversal log |
+| Inventory | Exposes the raw delta endpoint; the agent pages and assembles | Delta run on the server with the link persisted; questions served from a stored index |
+| Workbook | Excel API tools work, since a user token can reach them | Downloads the `.xlsx` and parses it, since the Excel API refuses app-only tokens |
+| Context economy | Tool presets, dynamic tool discovery, compact TOON output | Few tools and typed outputs with exact counts |
+| Maturity | 994 stars, 375 forks, MIT, v0.155.0 released 2026-09-22 | Pre-release, one sandbox tenant, Elastic License 2.0 |
+
+**Softeria is stronger at** breadth, adoption, release pace, setup (one `npx` command, multiple
+accounts, sovereign clouds), and keeping an agent's context small. Its user-delegated model also
+reaches the Excel API that app-only access cannot.
+
+**Ironwright MCP is stronger at** the job itself. Softeria has no reconciliation; an agent could
+approximate one only by paging raw delta results into its context, reading the workbook, and
+comparing in the conversation, which is the cost this project exists to remove. Its moves and
+renames apply immediately with nothing to review or undo. And its identity model centers on a
+signed-in person, where a hosted steward agent needs an unattended, site-scoped identity.
+
+They are complements more than rivals. The risk is an operator deciding that Softeria plus a
+careful prompt is good enough; the answer is the measured contrast between a 4-request scan and
+a single reconciliation call on one side, and one call per folder plus an in-context diff on the
+other.
+
 ## What this means for Ironwright MCP
 
 **The differentiation claim holds, under a wider check than before.** No MCP server, governance
@@ -167,6 +203,7 @@ MCP servers and directories: [official MCP Registry](https://registry.modelconte
 [Glama SharePoint search](https://glama.ai/mcp/servers?query=sharepoint),
 [XMV sharepoint-mcp](https://github.com/XMV-Solutions-GmbH/sharepoint-mcp),
 [Softeria ms-365-mcp-server](https://github.com/softeria/ms-365-mcp-server),
+[Softeria endpoints.json](https://github.com/softeria/ms-365-mcp-server/blob/main/src/endpoints.json),
 [Lokka](https://github.com/merill/lokka),
 [Markifact](https://www.markifact.com/sharepoint-onedrive-mcp),
 [PuntoBello on Work IQ's 35 tools](https://www.puntobello.ch/en/nello/mcp365_explorer_sharepoint_lists/),
