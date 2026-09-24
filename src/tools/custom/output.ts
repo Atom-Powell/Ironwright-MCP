@@ -49,8 +49,9 @@ const CUSTOM_EXCLUDED_ITEM = z.object({
   steps: z.array(z.number().int()),
 });
 
-// Exported so execute.ts's output builds the same shape generate.ts already
-// declares, rather than a second, separately maintained description of it.
+// Exported so both GENERATE_CUSTOM_PLAN_OUTPUT_SCHEMA and
+// EXECUTE_CUSTOM_PLAN_OUTPUT_SCHEMA declare this shape from this one
+// constant, rather than each carrying its own copy that could drift apart.
 export const CUSTOM_EXCLUDED_ITEM_SCHEMA = CUSTOM_EXCLUDED_ITEM;
 
 export interface GenerateCustomPlanOutput {
@@ -105,15 +106,7 @@ export const GENERATE_CUSTOM_PLAN_OUTPUT_SCHEMA = {
   itemCount: z.number().int().describe("Items in the stored plan. Computed before the listing above is cut."),
   itemsOmitted: z.number().int().describe("Items the listing above left out. Zero when the listing is complete."),
   excluded: z
-    .array(
-      z.object({
-        path: z.string(),
-        currentName: z.string(),
-        targetName: z.string(),
-        reason: z.enum(CUSTOM_EXCLUSION_REASONS),
-        steps: z.array(z.number().int()),
-      }),
-    )
+    .array(CUSTOM_EXCLUDED_ITEM_SCHEMA)
     .describe(
       "Selected files this plan will NOT change, each with why and the steps involved. matched_by_multiple_steps " +
         "means more than one step selected the file, so no single answer applies. no_change means the step would " +
