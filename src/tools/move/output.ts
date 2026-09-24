@@ -191,8 +191,8 @@ export const EXECUTE_MOVE_PLAN_OUTPUT_SCHEMA = {
     .boolean()
     .describe(
       "True when nothing was changed. A dry run contacts Graph not at all, so it cannot tell whether the item at " +
-        "a path is still the one the plan recorded: outcomes of precondition_refused and not_found can only " +
-        "appear in a confirmed run.",
+        "a path is still the one the plan recorded, or whether the target name is free: outcomes of " +
+        "precondition_refused, target_name_taken, not_found and failed can only appear in a confirmed run.",
     ),
   results: z
     .array(
@@ -211,7 +211,7 @@ export const EXECUTE_MOVE_PLAN_OUTPUT_SCHEMA = {
         "that path is not the one the plan recorded. Graph checks If-Match before existence, so this single " +
         "outcome covers both a file that changed and a file that is no longer there, and this server deliberately " +
         "does not pay the cost of a GET per refusal to tell the two apart. target_name_taken means another file " +
-        "took the target name after the plan was generated, and Graph refused rather than replace it. not_found " +
+        "held the target name when the write was attempted, and Graph refused rather than replace it. not_found " +
         "is expected to stay zero: " +
         "this executor always sends If-Match, and a stale precondition against an absent path answers 412 before " +
         "Graph ever reports the path missing, so a 404 cannot reach this outcome today. It is kept as a label " +
