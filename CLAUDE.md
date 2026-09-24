@@ -122,7 +122,8 @@ latency reason.
 governance is per-server rather than per-tool and cannot substitute for it. Enforced at runtime
 since 2026-09-24: the server refuses any Graph token whose roles claim is not exactly
 `Sites.Selected`, on every newly minted token and once at startup, and starts anyway only when
-Entra cannot be reached, never on a mismatch. An application holding `Sites.Selected` alongside a
+no token can be obtained at all, because Entra is unreachable or refuses the client id or secret,
+never on a mismatch. An application holding `Sites.Selected` alongside a
 broader permission can read sites it was never granted, so the boundary is only real if it is
 checked where the token is used.
 

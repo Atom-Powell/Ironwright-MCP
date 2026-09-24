@@ -167,6 +167,14 @@ a peer server's users asked for a way to see which version is running (Lokka #52
 was hardcoded rather than read from `package.json`. Worth doing with 5b's telemetry, once there
 is a deployment to ask; nothing to build before then.
 
+**Bound the startup identity check with a timeout (phase 5b).** Found 2026-09-24 by the token role
+guard's whole-branch review. `checkStartupIdentity` now asks Entra for a token before the port is
+bound, and it has no timeout of its own: it relies on the `fetch` defaults. A token endpoint that
+accepts the connection and never answers would hold startup open, and could keep the server past a
+Container Apps startup probe, which would restart it for a reason no log line names. Worth a
+bounded timeout when 5b sets up the probes; a timeout that expires would take the existing
+"could not obtain a token" path, which logs a warning and starts anyway.
+
 **Read the Google Drive MCP server with `dry_run` and a restore token before planning phase 6d.**
 A search result during the refresh described one, the nearest thing to a reversal log found
 outside this project, but its name and repository were not recorded. Find it and read its plan

@@ -264,9 +264,10 @@ permissions. Remove the extra permission from the server application in Entra an
 While running, a tool call that is handed a refused token stops there with the same explanation,
 though it may already have read from Graph with the token before it. Once the extra permission is
 removed, the change takes effect when the server's current token expires, up to about an hour, or
-immediately on restart, because the refused token stays cached until then. If Entra cannot be
-reached at startup, the server logs a warning and starts anyway, and the check runs on the first
-token it does obtain.
+immediately on restart, because the refused token stays cached until then. If no token can be
+obtained at startup at all, because Entra is unreachable or refuses the client id or secret, the
+server logs a warning and starts anyway, and the check runs on the first token it does obtain. It
+never starts anyway on a mismatch.
 
 `Sites.Selected` is two grants, not one, and the second is worthless without the first.
 
