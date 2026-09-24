@@ -16,7 +16,11 @@ The reason it exists is that every surveyed SharePoint MCP server, first-party a
 alike, is a thin per-call Graph wrapper: one tool, one Graph call. That shape reproduces the
 recursive enumeration cost, the ID-navigation overhead, and the stale-ID failures that caused
 the problem in the first place. This project is composite, server-orchestrated tools with a
-real reconciliation engine and deterministic plan-then-execute writes. If an implementation
+real reconciliation engine and deterministic plan-then-execute writes. Since phase 6d it also
+covers general file work inside a granted site, with no workbook: an operator describes renames
+and moves with declarative selectors, and the server resolves them against its index into the
+same reviewable, reversible plans. That is still not a per-call wrapper: the server decides which
+files a request means, and nothing is written without a stored plan and a confirm. If an implementation
 choice pulls back toward wrapping a Graph endpoint, that is a signal to stop and reconsider,
 not a shortcut to take.
 
@@ -164,6 +168,13 @@ path rather than a separate one.
 | `generate_move_plan` | plan | Reviewable persisted plan |
 | `execute_move_plan` | write | Same-library moves; cross-library is phase 6b-2 |
 | `replicate_template` | write | Validates the source client internally before replicating |
+| `generate_custom_plan` | plan | Steps an operator describes, resolved against the index; no workbook needed |
+| `execute_custom_plan` | write | Dry run by default, ETag preconditions, reversal log; library-only profiles allowed |
+
+A profile is `compliance` (the default: workbook, taxonomy, naming, deliverables) or `library`
+(site and library only). A library-only profile works with `inventory_tree`, `query_repository`'s
+`empty_folders` question and the two custom plan tools; every other tool refuses it before any
+Graph request, and `tests/tools/profile-kinds.test.ts` makes every tool declare which it is.
 
 There are three kinds, not two. A plan generator writes a plan, so `readOnlyHint` is false for
 it. Calling one read-only would be exactly the decorative annotation this project exists to
@@ -392,10 +403,23 @@ The spec carries the full phase descriptions. Status as of 2026-09-24:
      spec's steps and passed, including a mixed run that returned `moved`, `precondition_refused`
      and `target_name_taken` in one plan, and a rename regression through the shared executor.
      `docs/OPEN-ITEMS.md` carries the dated record and what the sitting did not establish.
+   - **6d: operator-authored plans and library-only profiles. Complete and verified live on
+     2026-09-24.** `generate_custom_plan` and `execute_custom_plan`, per
+     `docs/superpowers/specs/2026-09-23-custom-plans-design.md` and its amendments. A request is up to
+     20 steps, each a selector (folder, recursion, name, extension, modified dates) and a move, a
+     literal rename (set, replace, prefix, suffix), or both; a pure resolver in
+     `src/domain/custom/resolve.ts` turns them into exact files against the index, refusing with
+     evidence (an unknown folder names the nearest existing one and its subfolders) or excluding a
+     file with a reason (matched by two steps, no change, extension change, invalid SharePoint name,
+     occupied target, shared target). Extensions never change, steps never see each other, and plans
+     cap at 100 files. Execution is the shared 6b-1 executor. A profile may now be library-only.
+     The live sitting ran a mixed plan (two moves into a folder with a space, a setName, a combined
+     move and rename, a prefix) through dry run, execution, verification, rollback, a stale
+     precondition refusing one file while four applied, and both exclusion types from real data.
    - **6b-2 and 6c.** Held rather than started: cross-library moves, which begin with a live probe
      of how Graph moves an item between drives; `replicate_template`, the plausible first caller for
-     folder creation; and `$batch`. Phase 6d, operator-authored plans, is designed in
-     `docs/superpowers/specs/2026-09-23-custom-plans-design.md` and builds on 6b-1's executor.
+     folder creation, where the prior-art read suggests a created folder's reversal could go to the
+     recycle bin rather than be deleted; and `$batch`.
    Then **Copilot Studio integration and governance**, then the **evaluation suite**, whose
    questions are already written in `docs/EVALUATION-QUESTIONS.md`. They exist early on purpose, so
    phase 3 has a concrete target rather than inventing its own test afterward.

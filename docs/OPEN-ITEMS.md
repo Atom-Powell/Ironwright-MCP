@@ -2259,6 +2259,43 @@ ordering regression "by position", and under that exact regression only one of t
 The branch that fixed a documented-but-never-printed log corrected a documented-but-never-run
 assertion before merging.
 
+## The phase 6d live sitting, 2026-09-24: plans an operator describes
+
+Run against the sandbox tenant through the MCP transport, from source, with the plan store on
+Azurite and the server's grant widened to `write` for the sitting and restored to `read` after it.
+A scratch folder was seeded in `Documents` and deleted afterward; a fresh `generate_move_plan` and
+`generate_rename_plan` then matched the pre-sitting baseline exactly.
+
+1. **A library-only profile.** A temporary profile of kind `library` over the `Archive` library
+   loaded beside the compliance profile. `inventory_tree` answered for it at 3 Graph requests;
+   `reconcile_workbook_vs_repository` and `validate_structure` refused it by name, saying which tools
+   do work with it; `query_repository` answered `empty_folders` and refused `naming_violations`.
+2. **An unknown folder** was refused with evidence from the real index: the nearest existing folder
+   (the library root) and its subfolders. No ETag was fetched and no plan saved.
+3. **A mixed plan** of four steps resolved to five files: two PDFs moved into a folder whose name
+   contains a space, a `setName`, a combined move and `replace` in one write, and an `addPrefix`.
+4. The dry run issued no Graph operation; the confirmed run applied all five with five operations;
+   a direct listing showed the new layout; the reversal plan, of kind `custom`, applied all five back
+   and a listing showed the original layout.
+5. The plan was generated again and one planned file renamed away and back between generating and
+   executing: that file alone was `precondition_refused` and the other four applied. A plan
+   generated from a fresh scan saw the moved files in their new folder. Replaying that run's reversal
+   applied four and refused the one entry for the file that never moved, as designed.
+6. **Both exclusion types arose from real data:** a file selected by two steps was excluded from
+   both as `matched_by_multiple_steps`, and a rename onto an existing name was excluded as
+   `target_path_already_occupied`, with no ETag lookup spent on either.
+
+### What this sitting did NOT establish
+
+- **A 100-file plan, and the 20-step limit,** against a real library; both are covered by tests.
+- **`invalid_target_name`, `extension_would_change` and `two_items_share_one_target`** from real
+  data; all are covered by resolver tests.
+- **A real Azure Table Storage account**, again.
+- **Deferred by design, still out:** creating folders (6c is the likely first caller, and the
+  prior-art read suggests a created folder's reversal could be the recycle bin rather than a
+  delete), deleting anything, cross-library moves (6b-2), selecting folders, chains and swaps, and
+  regex or templated renames.
+
 ## The phase 6b-1 live sitting, 2026-09-24: the first move this server has made
 
 Run against the sandbox tenant through the MCP transport, from source, with the plan store on

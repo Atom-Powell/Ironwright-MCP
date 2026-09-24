@@ -286,6 +286,8 @@ Ten tools, inside the recommended 25 to 30 ceiling for a single agent.
 | `generate_move_plan` | plan | Produces a persisted, reviewable plan |
 | `execute_move_plan` | write | Same-library moves; cross-library is phase 6b-2 |
 | `replicate_template` | write | Validates the source client internally before replicating |
+| `generate_custom_plan` | plan | Steps an operator describes, resolved against the index; no workbook needed (phase 6d) |
+| `execute_custom_plan` | write | Applies a custom plan through the shared executor (phase 6d) |
 
 The `plan` kind is a third category on purpose. A plan generator performs no repository
 writes, but it does persist a plan to the state store, so `readOnlyHint` is false and

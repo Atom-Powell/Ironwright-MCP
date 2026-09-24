@@ -459,6 +459,28 @@ Running the command again after a rollback is how you retry, since the rollback 
 behind. Running it again after a run that kept its application is not a repair: it would create
 a second app registration with a second secret rather than fixing the first one.
 
+## Library-only profiles
+
+A document library with no tracking workbook can still be onboarded, for inventory, the
+empty-folder question and plans an operator describes with `generate_custom_plan`. Its profile
+names only the site and the library:
+
+```json
+{
+  "kind": "library",
+  "profileId": "shared-docs",
+  "identity": {
+    "siteUrl": "https://contoso.sharepoint.com/sites/Example",
+    "library": "Shared Documents"
+  }
+}
+```
+
+A profile without `kind` is a compliance profile, as every profile before phase 6d was. A
+library-only profile may not carry compliance fields; the server refuses one that does rather than
+ignoring them. The tools that need a workbook refuse a library-only profile by name and say which
+tools do work with it. `examples/profiles/library-example.json` is the committed example.
+
 ## Running the server
 
 `npm start` runs the MCP server itself, `dist/server/main.js`. It reads its own environment at
