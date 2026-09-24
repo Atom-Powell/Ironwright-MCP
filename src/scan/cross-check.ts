@@ -47,8 +47,11 @@ export interface CrossCheckResult {
  * is unreached from the scan CLI, which reads `reason` straight off that
  * function's own result. The reconciliation tool itself can never observe
  * "library-profile" either: it refuses a library-only profile through
- * `ProfileRegistry.get` before a scan ever runs, so that reason reaches this
- * function only from the scan CLI's own call site.
+ * `ProfileRegistry.get` before a scan ever runs. Nor can the scan CLI, which
+ * loads its profile through `loadProfile` and so accepts compliance profiles
+ * only. That reason therefore reaches this function from no caller today; its
+ * case below exists so a future caller that scans a library-only profile and
+ * reports the skip gets a true sentence rather than the unrecorded default.
  */
 export function describeCrossCheckSkipReason(reason: CrossCheckSkipReason | undefined): string {
   switch (reason) {

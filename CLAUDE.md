@@ -142,6 +142,8 @@ because they are history rather than current instruction.
 server instance per customer tenant. Recurring-deliverable compliance is the fixed domain shape,
 with taxonomy, filename standard, workbook mapping, and per-client cadence as declarative
 profile data rather than code. Profiles are deployment configuration and are never committed.
+Since phase 6d the product also serves general file work inside a granted site, through
+operator-authored plans and library-only profiles, with compliance still the centerpiece.
 
 **Setup.** Two phases, because a live run proved Graph refuses a delegated token on the per-site
 grant endpoint even for a Global Administrator. A separate grant-issuer application holds

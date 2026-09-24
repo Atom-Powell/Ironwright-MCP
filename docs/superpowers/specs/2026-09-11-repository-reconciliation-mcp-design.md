@@ -272,7 +272,7 @@ does not imply report existence.
 
 ## Tool surface
 
-Ten tools, inside the recommended 25 to 30 ceiling for a single agent.
+Twelve tools, inside the recommended 25 to 30 ceiling for a single agent.
 
 | Tool | Kind | Notes |
 |---|---|---|

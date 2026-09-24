@@ -114,8 +114,8 @@ export const GENERATE_CUSTOM_PLAN_OUTPUT_SCHEMA = {
         "file's extension, which this tool never does. invalid_target_name means the new name breaks a SharePoint " +
         "naming rule this server checks, such as a forbidden character. target_path_already_occupied means a file already sits at the target path. " +
         "two_items_share_one_target means more than one file would land on the same target path, so every one of " +
-        "them is left alone. no_etag_available and file_not_found_at_plan_time mean the file had no usable " +
-        "precondition when the plan was generated.",
+        "them is left alone. no_etag_available means Graph returned no ETag for the file when the plan was " +
+        "generated. file_not_found_at_plan_time means the file was not at its path when the plan was generated.",
     ),
   excludedCount: z.number().int().describe("Excluded items in the stored plan. Computed before the listing above is cut."),
   excludedOmitted: z.number().int().describe("Excluded items the listing above left out."),
