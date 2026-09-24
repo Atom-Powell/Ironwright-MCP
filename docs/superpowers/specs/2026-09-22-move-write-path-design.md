@@ -178,9 +178,29 @@ committed.
    nothing was replaced or auto-renamed. `conflictBehavior: fail` as a body annotation and as a query
    parameter answered identically.
 
+### Question 7, 2026-09-24: how the target folder is written
+
+The first probe only moved between folders named `src` and `dst`, so a second probe measured how
+`parentReference.path` must be written when a folder name needs encoding in a URL. Graph returns that
+field percent-encoded, which made the encoded form the natural guess. The guess was wrong.
+
+| Case | Status | Landed |
+|---|---|---|
+| Folder with a space, segments unencoded | 200 | yes |
+| Folder with a space, each segment `encodeURIComponent`-encoded | 400 `invalidRequest` | no |
+| Folder `hash#pct%`, encoded | 400 `invalidRequest` | no |
+| Folders `hash#pct%`, `amp & 'quote'`, `café plus+sign`, `semi;colon,comma`, unencoded | 200 each | yes |
+| Library root as `/drives/{driveId}/root:` | 200 | yes |
+
+`parentReference.path` travels in the JSON body, not the URL, so it takes the folder path as
+written, raw. The encoded form fails with the same generic 400 an absent folder does, which is why
+the mistake would have looked like a missing folder rather than an encoding error. The verb joins
+raw segments, and no folder name needs a plan-time exclusion.
+
 ### What the design does with it
 
-- `relocateDriveItem` addresses the target folder by `parentReference.path` and sends
+- `relocateDriveItem` addresses the target folder by `parentReference.path`, written with raw,
+  unencoded segments per question 7, and sends
   `"@microsoft.graph.conflictBehavior": "fail"` in the body on every call that sets `newParentPath`.
   Relying on an undocumented default is what this spec already declined; the body form is chosen over
   the query form because it keeps the addressed URL a plain item path. This makes 6b-1 the first

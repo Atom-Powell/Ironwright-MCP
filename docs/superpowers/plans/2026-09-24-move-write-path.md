@@ -225,10 +225,8 @@ function recordingClient(response: unknown = { eTag: '"{GUID},2"' }) {
 }
 
 describe("parentReferencePath", () => {
-  it("addresses a library folder with each segment encoded", () => {
-    expect(parentReferencePath("d1", "2026/Client A/09-September")).toBe(
-      "/drives/d1/root:/2026/Client%20A/09-September",
-    );
+  it("writes the folder path raw, since it travels in the JSON body and Graph rejects an encoded one", () => {
+    expect(parentReferencePath("d1", "2026/Client A/hash#pct%")).toBe("/drives/d1/root:/2026/Client A/hash#pct%");
   });
 
   it("addresses the library root with no trailing segment", () => {
@@ -385,16 +383,20 @@ export function etagOf(item: unknown): string | undefined {
 }
 
 /**
- * The target folder of a move, in the form the 2026-09-24 probe measured Graph
- * accepting: `/drives/{driveId}/root:/{folder}`, each segment encoded the way
- * `driveItemPath` encodes a URL, since Graph itself returns
- * `parentReference.path` percent-encoded. The library root is `root:` with
- * nothing after it.
+ * The target folder of a move, in the form the 2026-09-24 probes measured
+ * Graph accepting: `/drives/{driveId}/root:/{folder}` with the folder written
+ * RAW. Unlike `driveItemPath`, this value travels in the JSON body rather than
+ * the URL, and Graph answered an `encodeURIComponent`-encoded folder with the
+ * same generic 400 an absent folder gets, while raw names containing a space,
+ * `#`, `%`, `&`, `'`, `+`, `;`, `,` and non-ASCII letters all landed. Encoding
+ * it because Graph returns `parentReference.path` encoded is the natural
+ * mistake, and it would read as a missing folder rather than an encoding
+ * error. The library root is `root:` with nothing after it, also measured.
  */
 export function parentReferencePath(driveId: string, folder: string): string {
   const trimmed = folder.replace(/^\/+/, "").replace(/\/+$/, "");
   if (trimmed.length === 0) return `/drives/${driveId}/root:`;
-  return `/drives/${driveId}/root:/${trimmed.split("/").map(encodeURIComponent).join("/")}`;
+  return `/drives/${driveId}/root:/${trimmed}`;
 }
 
 /**
@@ -1860,8 +1862,8 @@ export function movingLibraryGraphClient(files: Record<string, string>, folders:
       const request = body as { name?: string; parentReference?: { path: string } };
       let folder = parentOf(path);
       if (request.parentReference !== undefined) {
-        const encodedFolder = request.parentReference.path.replace(/^\/drives\/[^/]+\/root:\/?/, "");
-        folder = encodedFolder.split("/").map(decodeURIComponent).join("/");
+        // Raw, as Graph requires; see parentReferencePath.
+        folder = request.parentReference.path.replace(/^\/drives\/[^/]+\/root:\/?/, "");
         if (folder !== "" && !folderSet.has(folder)) throw fail(url, 400, "invalidRequest");
       }
       const target = folder === "" ? (request.name ?? nameOf(path)) : `${folder}/${request.name ?? nameOf(path)}`;
