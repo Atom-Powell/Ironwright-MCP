@@ -1,7 +1,8 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { loadProfile, ProfileValidationError } from "../domain/profile/load.js";
+import { ProfileValidationError } from "../domain/profile/load.js";
 import type { Profile } from "../domain/profile/schema.js";
+import { isLibraryProfile, loadAnyProfile, type AnyProfile } from "../domain/profile/library.js";
 
 /**
  * A profile directory this server cannot start with. Every problem found in
@@ -44,6 +45,28 @@ export class UnknownProfileError extends Error {
   }
 }
 
+/**
+ * A tool that needs a compliance definition was handed a library-only
+ * profile. Every such tool resolves its profile before its first Graph
+ * request, so in practice nothing has been read; the message does not claim
+ * that, because this class cannot observe where its caller was. A
+ * reconciliation or structure check over a profile with no expected state
+ * would report every client as compliant, a result the server did not observe.
+ */
+export class LibraryProfileError extends Error {
+  readonly profileId: string;
+
+  constructor(profileId: string) {
+    super(
+      `Profile "${profileId}" is library-only: it names a site and a library but no tracking workbook, ` +
+        "taxonomy or filename standard, so this tool, which needs them, cannot run against it. inventory_tree, " +
+        "query_repository's empty_folders question, and the custom plan tools work with a library-only profile.",
+    );
+    this.name = "LibraryProfileError";
+    this.profileId = profileId;
+  }
+}
+
 /** One candidate profile, already read. `source` is used only in messages. */
 export interface ProfileEntry {
   source: string;
@@ -68,8 +91,15 @@ function sameSite(a: string, b: string): boolean {
 }
 
 export interface ProfileRegistry {
-  /** Throws `UnknownProfileError` rather than returning undefined: every caller has to report the same thing. */
+  /**
+   * Throws `UnknownProfileError` rather than returning undefined: every
+   * caller has to report the same thing. Also throws `LibraryProfileError`
+   * for a profile that carries identity only, since this method's callers
+   * need a compliance definition and a library profile has none.
+   */
   get(profileId: string): Profile;
+  /** Either kind. For the tools that work without a compliance definition. */
+  getAny(profileId: string): AnyProfile;
   ids(): string[];
 }
 
@@ -93,12 +123,12 @@ export interface ProfileRegistry {
  */
 export function createProfileRegistry(entries: readonly ProfileEntry[], grantedSiteUrl: string): ProfileRegistry {
   const issues: string[] = [];
-  const byId = new Map<string, { profile: Profile; source: string }>();
+  const byId = new Map<string, { profile: AnyProfile; source: string }>();
 
   for (const entry of entries) {
-    let profile: Profile;
+    let profile: AnyProfile;
     try {
-      profile = loadProfile(entry.contents);
+      profile = loadAnyProfile(entry.contents);
     } catch (error) {
       if (!(error instanceof ProfileValidationError)) throw error;
       issues.push(`${entry.source}: ${error.issues.join("; ")}`);
@@ -137,6 +167,12 @@ export function createProfileRegistry(entries: readonly ProfileEntry[], grantedS
   return {
     ids: () => [...ids],
     get(profileId: string): Profile {
+      const held = byId.get(profileId);
+      if (held === undefined) throw new UnknownProfileError(profileId, [...ids]);
+      if (isLibraryProfile(held.profile)) throw new LibraryProfileError(profileId);
+      return held.profile;
+    },
+    getAny(profileId: string): AnyProfile {
       const held = byId.get(profileId);
       if (held === undefined) throw new UnknownProfileError(profileId, [...ids]);
       return held.profile;
