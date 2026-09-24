@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { runExecuteRenamePlan } from "../../../src/tools/rename/execute.js";
 import { createFakeToolContext } from "../fake-context.js";
 import type { ExecuteRenamePlanOutput } from "../../../src/tools/rename/output.js";
+import { GraphRequestError } from "../../../src/graph/errors.js";
 import { MalformedPlanEntityError } from "../../../src/store/types.js";
 import type { StateStore } from "../../../src/store/types.js";
 import { ITEM_A, ITEM_B, planWith, renamingGraphClient, storeWithFailingSavePlan } from "./fixtures.js";
@@ -119,6 +120,33 @@ describe("per-item refusals", () => {
     expect(reversal?.items[0]?.etag).toBe(ITEM_A.etag);
   });
 
+  it("reports a rename onto a name another file took after planning as target_name_taken", async () => {
+    const graph = renamingGraphClient({ patchStatuses: { [ITEM_A.path]: 409 } });
+    // The renaming fake answers a failing status with an empty body, which carries no
+    // Graph error code; give it one so the verb can recognize nameAlreadyExists.
+    const original = graph.patch.bind(graph);
+    graph.patch = async <T>(path: string, body: unknown, headers?: Record<string, string>): Promise<T> => {
+      try {
+        return await original<T>(path, body, headers);
+      } catch (error) {
+        if (error instanceof GraphRequestError && error.status === 409) {
+          throw new GraphRequestError({ method: "PATCH", path, status: 409, body: '{"error":{"code":"nameAlreadyExists"}}' });
+        }
+        throw error;
+      }
+    };
+    const context = createFakeToolContext({ graph });
+    await context.store.savePlan("example", planWith([ITEM_A, ITEM_B]));
+
+    const output = outputOf(
+      await runExecuteRenamePlan({ profileId: "example", planId: "rnm-2026-09-18-a1b2c3d4", confirm: true }, context),
+    );
+
+    expect(output.counts.targetNameTaken).toBe(1);
+    expect(output.counts.renamed).toBe(1);
+    expect(output.counts.failed).toBe(0);
+  });
+
   it("still reports a rename as renamed when saving the refreshed reversal entry fails", async () => {
     // The PATCH succeeds and returns a fresh etag, so no follow-up read is
     // needed at all; the only failure is the store call that persists that
@@ -204,5 +232,43 @@ describe("refusals before anything is attempted", () => {
     const result = await runExecuteRenamePlan({ profileId: "nope", planId: PLAN_ID }, context);
 
     expect(result.isError).toBe(true);
+  });
+
+  it("refuses a move plan rather than applying it as a rename", async () => {
+    const graph = renamingGraphClient();
+    const context = createFakeToolContext({ graph });
+    await context.store.savePlan("example", { ...planWith([ITEM_A]), kind: "move" });
+
+    const result = await runExecuteRenamePlan({ profileId: "example", planId: "rnm-2026-09-18-a1b2c3d4", confirm: true }, context);
+
+    expect(result.isError).toBe(true);
+    expect(result.content.map((c) => ("text" in c ? c.text : "")).join("")).toContain("execute_move_plan");
+    expect(graph.calls).toEqual([]);
+  });
+
+  it("refuses a rename plan carrying a move-only exclusion reason before any rename is attempted", async () => {
+    const graph = renamingGraphClient();
+    const context = createFakeToolContext({ graph });
+    await context.store.savePlan(
+      "example",
+      planWith(
+        [ITEM_A],
+        [
+          {
+            path: ITEM_B.path,
+            currentName: ITEM_B.currentName,
+            targetName: ITEM_B.targetName,
+            client: ITEM_B.client,
+            reason: "in_another_library",
+            library: "Archive",
+          },
+        ],
+      ),
+    );
+
+    const result = await runExecuteRenamePlan({ profileId: "example", planId: PLAN_ID, confirm: true }, context, () => REVERSAL_ID);
+
+    expect(result.isError).toBe(true);
+    expect(graph.calls).toEqual([]);
   });
 });

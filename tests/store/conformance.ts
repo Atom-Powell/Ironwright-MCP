@@ -247,6 +247,41 @@ export function stateStoreConformance(create: () => StateStore): void {
     await expect(store.getPlan("example", plan.planId)).resolves.toEqual(plan);
   });
 
+  it("round-trips a move plan, including an exclusion that names another library", async () => {
+    const store = create();
+    const plan: StoredPlan = {
+      planId: "mov-2026-09-24-a1b2c3d4",
+      profileId: "example",
+      kind: "move",
+      driveId: "d1",
+      createdAt: "2026-09-24T12:00:00Z",
+      items: [
+        {
+          path: "2026/CLIENTA/08-August/2026-09_CLIENTA_MonthlyTraining.xlsx",
+          currentName: "2026-09_CLIENTA_MonthlyTraining.xlsx",
+          targetName: "2026-09_CLIENTA_MonthlyTraining.xlsx",
+          targetPath: "2026/CLIENTA/09-September/2026-09_CLIENTA_MonthlyTraining.xlsx",
+          etag: '"{GUID},1"',
+          client: "CLIENTA",
+        },
+      ],
+      excluded: [
+        {
+          path: "2026/CLIENTB/09-September/2026-09_CLIENTB_MonthlyTraining.xlsx",
+          currentName: "2026-09_CLIENTB_MonthlyTraining.xlsx",
+          targetName: "2026-09_CLIENTB_MonthlyTraining.xlsx",
+          client: "CLIENTB",
+          reason: "in_another_library",
+          library: "Archive",
+        },
+      ],
+    };
+
+    await store.savePlan("example", plan);
+
+    await expect(store.getPlan("example", plan.planId)).resolves.toEqual(plan);
+  });
+
   it("keeps one profile's plans out of another profile's reach", async () => {
     const store = create();
     const plan: StoredPlan = {

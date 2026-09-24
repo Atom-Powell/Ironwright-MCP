@@ -88,8 +88,11 @@ export interface StateStore {
  * not yet at the canonical path either (misnamed or misplaced) and would
  * also land there once corrected, so this file and the winner are two files
  * contending for one name. None of the three is resolvable without
- * `conflictBehavior`, which this phase deliberately does not build. The last
- * two come from the plan-time etag fetch: a file with no etag has no usable
+ * `conflictBehavior`, which this phase deliberately does not build.
+ * `slot_won_by_file_in_another_library` means this file lost its slot to a
+ * file found in another library of the same site, and nothing occupies the
+ * canonical path in this library. The last two come from the plan-time etag
+ * fetch: a file with no etag has no usable
  * precondition, and silently sending no `If-Match` for it would turn the item
  * carrying the least information into the only unguarded write in the batch.
  */
@@ -97,15 +100,29 @@ export type PlanExclusionReason =
   | "target_path_already_occupied"
   | "slot_already_satisfied_by_another_file"
   | "two_files_share_one_target_name"
+  | "slot_won_by_file_in_another_library"
   | "no_etag_available"
   | "file_not_found_at_plan_time";
+
+/**
+ * Reasons only a move plan records. `in_another_library` means the Microsoft
+ * Search cross-check found the file in a different document library of the
+ * same site, and this server does not yet move files between libraries.
+ * `target_folder_absent` means the folder the file belongs in does not exist,
+ * and this slice creates no folders, since a folder's reversal is a delete.
+ */
+export type MoveOnlyExclusionReason = "in_another_library" | "target_folder_absent";
+
+export type MoveExclusionReason = PlanExclusionReason | MoveOnlyExclusionReason;
+
+export type PlanKind = "rename" | "move";
 
 export interface RenamePlanItem {
   /** Library-relative, no leading slash. The file as it stands now. */
   path: string;
   currentName: string;
   targetName: string;
-  /** Library-relative path this item occupies once renamed. Always the same folder as `path`. */
+  /** Library-relative path this item occupies once applied. The same folder as `path` for a rename, another folder for a move. */
   targetPath: string;
   /**
    * The `If-Match` precondition, and where it came from depends on which kind
@@ -123,18 +140,24 @@ export interface RenamePlanItem {
    * replaces it with the etag the rename's own PATCH response carried as each
    * rename lands. An entry that never gets replaced keeps the stale value and
    * is refused on replay, which is the safe direction. `reversalItemsFor` in
-   * `src/tools/rename/execute.ts` carries the full reasoning.
+   * `src/tools/plans/apply.ts` carries the full reasoning.
    */
   etag: string;
   client: string;
 }
 
-export interface ExcludedPlanItem {
+/**
+ * Generic over its reason so each tool's output can state the narrower set its
+ * own plans carry, while a stored plan holds the union.
+ */
+export interface ExcludedPlanItem<R extends string = MoveExclusionReason> {
   path: string;
   currentName: string;
   targetName: string;
   client: string;
-  reason: PlanExclusionReason;
+  reason: R;
+  /** The library the file was found in, present only for `in_another_library`. */
+  library?: string;
 }
 
 /**
@@ -146,7 +169,7 @@ export interface ExcludedPlanItem {
 export interface StoredPlan {
   planId: string;
   profileId: string;
-  kind: "rename";
+  kind: PlanKind;
   driveId: string;
   createdAt: string;
   items: RenamePlanItem[];

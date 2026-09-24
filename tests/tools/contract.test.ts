@@ -202,8 +202,8 @@ describe("input schema contract", () => {
     // rule the advertised schema cannot carry, and until this rule existed
     // nothing checked that the words ever reached the description. A tool
     // could set the field, say nothing in its prose, and leave every gate
-    // green while a caller still had no way to predict the rejection. Phase 6
-    // is the first tool that needs one, for generate_move_plan's scopeValue.
+    // green while a caller still had no way to predict the rejection.
+    // No tool needs one today: phase 6b-1 dropped generate_move_plan's scope and scopeValue, the pair this rule was written for.
     for (const tool of ALL_TOOLS) {
       expect(
         statesItsInputConstraints(tool),

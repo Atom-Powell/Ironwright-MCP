@@ -150,6 +150,72 @@ role, so the grant issuer is stood back up per `docs/SETUP.md`, the grant widene
 deleted and purged afterward. One widened window may serve both the probe and the sitting if the
 operator accepts the write grant standing in between; otherwise it is two cycles.
 
+## What the probe found, 2026-09-24
+
+Run as the server application, holding `Sites.Selected` widened to the write role for the purpose,
+against a scratch folder in the sandbox `Documents` library that the probe created and then deleted
+(204). The raw results are in `.superpowers/live-sitting/probe-move-results.json`, which is not
+committed.
+
+1. **Path addressing works.** A PATCH carrying `parentReference.path` of the form
+   `/drives/{driveId}/root:/{folder}` answered 200 and moved the file. The id form also works, but
+   nothing needs it, so the verb stays path-native and plan generation costs no metadata GET per
+   target folder.
+2. **One PATCH applies both.** A body carrying `name` and `parentReference` together answered 200,
+   and the file appeared only at the new folder under the new name. `misnamed_and_misplaced` is one
+   request, as designed.
+3. **The response carries the new `eTag`, and a move changes it.** The version component went from
+   `,1` to `,2`, the response's value equaled a fresh GET's, and the item id was unchanged. The
+   reversal log's entries are refreshed from the PATCH response exactly as 6a's are.
+4. **A stale `If-Match` answers 412 `resourceModified`** and moves nothing, identical to a rename.
+5. **An absent target folder answers 400 `invalidRequest`** with the generic message "Invalid
+   request", and moves nothing. That status is not distinguishable from any other malformed request,
+   so by this spec's own rule the case gains no outcome of its own. It stays under the outcome for a
+   Graph refusal this server cannot interpret, and the plan-time `target_folder_absent` exclusion
+   remains the guard that matters.
+6. **An occupied target name is refused by default.** With no `conflictBehavior`, Graph answered 409
+   `nameAlreadyExists`; the incoming file stayed at its source and the occupant kept its id, so
+   nothing was replaced or auto-renamed. `conflictBehavior: fail` as a body annotation and as a query
+   parameter answered identically.
+
+### Question 7, 2026-09-24: how the target folder is written
+
+The first probe only moved between folders named `src` and `dst`, so a second probe measured how
+`parentReference.path` must be written when a folder name needs encoding in a URL. Graph returns that
+field percent-encoded, which made the encoded form the natural guess. The guess was wrong.
+
+| Case | Status | Landed |
+|---|---|---|
+| Folder with a space, segments unencoded | 200 | yes |
+| Folder with a space, each segment `encodeURIComponent`-encoded | 400 `invalidRequest` | no |
+| Folder `hash#pct%`, encoded | 400 `invalidRequest` | no |
+| Folders `hash#pct%`, `amp & 'quote'`, `café plus+sign`, `semi;colon,comma`, unencoded | 200 each | yes |
+| Library root as `/drives/{driveId}/root:` | 200 | yes |
+
+`parentReference.path` travels in the JSON body, not the URL, so it takes the folder path as
+written, raw. The encoded form fails with the same generic 400 an absent folder does, which is why
+the mistake would have looked like a missing folder rather than an encoding error. The verb joins
+raw segments, and no folder name needs a plan-time exclusion.
+
+### What the design does with it
+
+- `relocateDriveItem` addresses the target folder by `parentReference.path`, written with raw,
+  unencoded segments per question 7, and sends
+  `"@microsoft.graph.conflictBehavior": "fail"` in the body on every call that sets `newParentPath`.
+  Relying on an undocumented default is what this spec already declined; the body form is chosen over
+  the query form because it keeps the addressed URL a plain item path. This makes 6b-1 the first
+  caller of `conflictBehavior`, which therefore leaves the deferred list for this slice.
+- A 409 `nameAlreadyExists` is distinguishable, unlike question 5, so it earns an outcome of its
+  own: `target_name_taken`, meaning a file arrived at the target between generating and executing.
+  Today's rename executor reports a 409 as a generic failure, so giving renames the same outcome is a
+  behavior change. It is therefore made as its own commit after the behavior-preserving refactor, not
+  inside it, and the rename assertions it changes are changed there deliberately.
+- The operator prerequisite is met for this window: the grant issuer was stood back up on 2026-09-24
+  and the server application's grant widened to write for the probe, then restored to read the same
+  day. The grant issuer was left standing, its secret expiring 2026-10-01, so the sitting re-widens
+  the grant with one call rather than a new Global Administrator sign-in. A sitting after that date
+  starts with `--create-bootstrap` again.
+
 ## Verification before merge
 
 The sitting runs 6a's five steps against move plans, and adds three.

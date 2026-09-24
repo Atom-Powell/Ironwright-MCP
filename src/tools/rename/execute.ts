@@ -1,12 +1,20 @@
 import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { readDriveItemEtag, renameDriveItem } from "../../graph/rename.js";
-import type { RenamePlanItem, StoredPlan } from "../../store/types.js";
+import {
+  MalformedPlanEntityError,
+  type ExcludedPlanItem,
+  type PlanExclusionReason,
+  type RenamePlanItem,
+  type StoredPlan,
+} from "../../store/types.js";
 import type { ToolContext } from "../context.js";
 import { describeToolFailure, type FailureSubject } from "../errors.js";
+import { applyPlan, comparePaths, type AppliedOutcome } from "../plans/apply.js";
+import { noPlanStored, wrongPlanKind } from "../plans/refusals.js";
 import { newPlanId } from "./ids.js";
 import {
   MAX_PLAN_ITEMS_LISTED,
+  PLAN_EXCLUSION_REASONS,
   type ExecuteRenamePlanOutput,
   type RenameItemOutcome,
   type RenameItemResult,
@@ -27,40 +35,37 @@ export const EXECUTE_RENAME_PLAN_INPUT_SCHEMA = {
 
 const InputObject = z.object(EXECUTE_RENAME_PLAN_INPUT_SCHEMA);
 
-function comparePaths(a: { path: string }, b: { path: string }): number {
-  return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+const RENAME_OUTCOME: Record<AppliedOutcome, RenameItemOutcome> = {
+  applied: "renamed",
+  would_apply: "would_rename",
+  precondition_refused: "precondition_refused",
+  target_name_taken: "target_name_taken",
+  not_found: "not_found",
+  failed: "failed",
+};
+
+function isRenameExclusionReason(reason: string): reason is PlanExclusionReason {
+  return (PLAN_EXCLUSION_REASONS as readonly string[]).includes(reason);
 }
 
 /**
- * The inverse of a forward plan, ready before the first write.
- *
- * Each entry carries the forward item's PRE-rename etag, which is stale for the
- * inverse operation by construction: the rename it undoes has not happened yet,
- * and when it does it will change the etag. The executor overwrites each entry
- * as its rename lands. An entry that never gets overwritten keeps the stale
- * value and is refused on replay, which is the safe direction: a stale
- * precondition declines to act, where an absent one would rename whatever
- * happens to be sitting at that path.
+ * A rename plan's generator writes only rename reasons, so a foreign reason
+ * here means the stored row contradicts its own kind. Refused rather than
+ * passed through, because the output schema would reject it at the SDK and the
+ * operator would see a validation error instead of the cause.
  */
-function reversalItemsFor(items: readonly RenamePlanItem[]): RenamePlanItem[] {
-  return items.map((item) => ({
-    path: item.targetPath,
-    currentName: item.targetName,
-    targetName: item.currentName,
-    targetPath: item.path,
-    etag: item.etag,
-    client: item.client,
-  }));
+function renameExclusionsOf(plan: StoredPlan): ExcludedPlanItem<PlanExclusionReason>[] {
+  return plan.excluded.map((item) => {
+    if (!isRenameExclusionReason(item.reason)) {
+      throw new MalformedPlanEntityError(plan.planId, "excluded", `holds the reason "${item.reason}", which a rename plan cannot carry`);
+    }
+    return { ...item, reason: item.reason };
+  });
 }
 
 /**
- * Applies a rename plan, or previews it.
- *
- * One loop walks every item, whether this is a dry run or a confirmed run. Its
- * first statement is the dry-run branch, so a decision added to the confirmed
- * path later is added inside the same loop body a reviewer is already reading,
- * rather than inside a second, separately maintained preview implementation
- * that could omit it without anything failing.
+ * Applies a rename plan, or previews it, through the executor every plan kind
+ * shares. It refuses a plan of any other kind before anything is attempted.
  */
 export async function runExecuteRenamePlan(
   input: unknown,
@@ -81,150 +86,23 @@ export async function runExecuteRenamePlan(
       // The second half of that condition cannot fire through a partitioned
       // read today. It is checked anyway, because the alternative to a refusal
       // here is applying one profile's plan against another profile's library.
-      return {
-        isError: true,
-        content: [
-          {
-            type: "text" as const,
-            text:
-              `No plan "${args.planId}" is stored for profile "${args.profileId}". Generate one with ` +
-              "generate_rename_plan and pass the id it returns. Nothing was changed.",
-          },
-        ],
-      };
+      return noPlanStored(args.planId, args.profileId, "generate_rename_plan");
     }
+    if (plan.kind !== "rename") return wrongPlanKind(plan, "rename");
+    // Validated before anything is applied. Checked after the loop instead, a
+    // malformed row would be refused only once every rename had landed, and
+    // the refusal would replace the per-item report of what was applied.
+    const excluded = renameExclusionsOf(plan).sort(comparePaths);
 
-    const sorted = [...plan.items].sort(comparePaths);
-    const results: RenameItemResult[] = [];
-    let graphOperationsIssued = 0;
-    let reversalEntriesNotRefreshed = 0;
-    let reversalPlanId: string | undefined;
+    const applied = await applyPlan(plan, {
+      confirm: args.confirm,
+      context,
+      profileId: args.profileId,
+      toolName: "execute_rename_plan",
+      makeReversalPlanId,
+    });
+    const results = applied.results.map((entry) => resultFor(entry.item, RENAME_OUTCOME[entry.outcome]));
 
-    // Created and saved before the loop, but only when there is a run to
-    // reverse: a dry run changes nothing, so it has nothing to roll back.
-    // Written before the first rename, so a crash mid-apply still leaves
-    // something to roll back with. It necessarily over-covers at this point,
-    // listing inverses for renames that have not happened; replaying one of
-    // those finds nothing at the source path and reports it, which is how the
-    // over-coverage corrects itself through the same machinery.
-    let reversal: StoredPlan | undefined;
-    if (args.confirm) {
-      reversal = {
-        planId: makeReversalPlanId(),
-        profileId: args.profileId,
-        kind: "rename",
-        driveId: plan.driveId,
-        createdAt: context.now().toISOString(),
-        items: reversalItemsFor(sorted),
-        excluded: [],
-        reverses: plan.planId,
-      };
-      await context.store.savePlan(args.profileId, reversal);
-      reversalPlanId = reversal.planId;
-    }
-
-    for (const [index, item] of sorted.entries()) {
-      if (!args.confirm) {
-        results.push(resultFor(item, "would_rename"));
-        continue;
-      }
-      if (reversal === undefined) {
-        // Cannot happen: reversal is created above whenever args.confirm is
-        // true, and this branch runs only when args.confirm is true too. The
-        // check exists so the compiler agrees with that, not only this
-        // comment.
-        continue;
-      }
-
-      // The PATCH gets its own error boundary. Once it answers, the outcome is
-      // settled: nothing past this point may overwrite it. A prior version of
-      // this function shared one try/catch for the PATCH and the bookkeeping
-      // that follows a success, so a failure refreshing the reversal entry or
-      // saving it overwrote an already-observed "renamed" with "failed", the
-      // report contradicting what the function itself had just seen happen.
-      let renameResult: Awaited<ReturnType<typeof renameDriveItem>> | "failed";
-      try {
-        graphOperationsIssued += 1;
-        renameResult = await renameDriveItem(context.graph, {
-          driveId: plan.driveId,
-          path: item.path,
-          newName: item.targetName,
-          etag: item.etag,
-        });
-      } catch (error) {
-        // Recorded and continued rather than rethrown. Rethrowing would
-        // discard the report, which is the operator's only account of which
-        // renames already applied; the reversal log alone does not say which
-        // of its entries are live.
-        console.error(`execute_rename_plan could not rename "${item.path}" under plan "${plan.planId}"`, error);
-        renameResult = "failed";
-      }
-
-      let outcome: RenameItemOutcome;
-      if (renameResult === "failed") {
-        outcome = "failed";
-      } else if (renameResult.kind === "precondition_failed") {
-        outcome = "precondition_refused";
-      } else if (renameResult.kind === "not_found") {
-        // Unreachable while this executor always sends If-Match. The live probe
-        // at .superpowers/live-sitting/probe-precondition.ts measured Graph
-        // evaluating If-Match before existence: a stale precondition against a
-        // path holding nothing answers 412, never 404. Kept rather than
-        // removed, the same way src/domain/rename/plan.ts keeps its own
-        // unreachable collision branches labeled instead of deleted: nothing
-        // proves a negative, and removing a branch on a write path is the
-        // worse risk. readDriveItemEtag's own 404 mapping is not affected by
-        // this: that call is a GET carrying no precondition at all, so its 404
-        // stays live and meaningful.
-        outcome = "not_found";
-      } else {
-        // The rename is done. This outcome is final; the bookkeeping below has
-        // its own error boundary specifically so it cannot change it.
-        outcome = "renamed";
-        try {
-          let fresh = renameResult.etag;
-          if (fresh === undefined) {
-            // Graph's documented PATCH response is the updated item, so this
-            // branch should not run. It exists because "should" is not
-            // "does", and this project has paid once for designing against
-            // an API surface nobody had called.
-            graphOperationsIssued += 1;
-            const lookup = await readDriveItemEtag(context.graph, {
-              driveId: plan.driveId,
-              path: item.targetPath,
-            });
-            fresh = lookup.kind === "found" ? lookup.etag : undefined;
-          }
-          if (fresh === undefined) {
-            reversalEntriesNotRefreshed += 1;
-          } else {
-            const entry = reversal.items[index];
-            if (entry !== undefined) reversal.items[index] = { ...entry, etag: fresh };
-            // Saved per item rather than once at the end. A single save at
-            // the end would lose every correction to a crash, which is the
-            // failure the early write exists to survive.
-            await context.store.savePlan(args.profileId, reversal);
-          }
-        } catch (error) {
-          // The rename already happened, so this failure is about the
-          // reversal entry, not about whether the file was renamed. Reported
-          // as an unrefreshed entry rather than rethrown or turned into
-          // "failed", for the same reason the PATCH's own catch above does
-          // not touch a settled outcome: a rollback that cannot undo this
-          // item is a defect in the reversal log, not evidence the forward
-          // rename did not happen.
-          console.error(
-            `execute_rename_plan renamed "${item.path}" under plan "${plan.planId}" but could not refresh its ` +
-              "reversal entry",
-            error,
-          );
-          reversalEntriesNotRefreshed += 1;
-        }
-      }
-      results.push(resultFor(item, outcome));
-    }
-
-    const excluded = [...plan.excluded].sort(comparePaths);
     const output: ExecuteRenamePlanOutput = {
       planId: plan.planId,
       profileId: plan.profileId,
@@ -242,15 +120,16 @@ export async function runExecuteRenamePlan(
         renamed: countOf(results, "renamed"),
         wouldRename: countOf(results, "would_rename"),
         preconditionRefused: countOf(results, "precondition_refused"),
+        targetNameTaken: countOf(results, "target_name_taken"),
         notFound: countOf(results, "not_found"),
         failed: countOf(results, "failed"),
       },
       excluded: excluded.slice(0, MAX_PLAN_ITEMS_LISTED),
       excludedCount: excluded.length,
       excludedOmitted: Math.max(0, excluded.length - MAX_PLAN_ITEMS_LISTED),
-      ...(reversalPlanId === undefined ? {} : { reversalPlanId }),
-      reversalEntriesNotRefreshed,
-      graphOperationsIssued,
+      ...(applied.reversalPlanId === undefined ? {} : { reversalPlanId: applied.reversalPlanId }),
+      reversalEntriesNotRefreshed: applied.reversalEntriesNotRefreshed,
+      graphOperationsIssued: applied.graphOperationsIssued,
     };
 
     return {

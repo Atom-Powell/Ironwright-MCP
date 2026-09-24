@@ -1,30 +1,13 @@
 import { z } from "zod";
 import type { PlanExclusionReason } from "../../store/types.js";
 
-/**
- * A coarse pre-check against an obviously oversized plan, refused before a
- * single Graph request is spent rather than after the etag fetch loop. It is
- * not the real ceiling: the store's actual bound is `MAX_PLAN_JSON_CHARS`
- * (32000 characters across `items` and `excluded` combined), and a realistic
- * item serializes to roughly 274 characters, so the true limit is closer to
- * 116 items with `excluded` unbounded. This number exists only so a plan far
- * past any reasonable size fails fast, with a remedy a caller can act on,
- * before the etag fetch loop runs at all; `savePlan` is what actually enforces
- * the character cap, in both StateStore implementations.
- */
-export const MAX_PLAN_ITEMS = 200;
-
-/**
- * The most items and exclusions one response lists. The stored plan holds every
- * one of them; `itemCount` and `excludedCount` are computed before this cut, so
- * a reader always learns the true size even when the listing is a prefix.
- */
-export const MAX_PLAN_ITEMS_LISTED = 50;
+export { MAX_PLAN_ITEMS, MAX_PLAN_ITEMS_LISTED } from "../plans/limits.js";
 
 export const PLAN_EXCLUSION_REASONS = [
   "target_path_already_occupied",
   "slot_already_satisfied_by_another_file",
   "two_files_share_one_target_name",
+  "slot_won_by_file_in_another_library",
   "no_etag_available",
   "file_not_found_at_plan_time",
 ] as const satisfies readonly PlanExclusionReason[];
@@ -99,8 +82,11 @@ export const GENERATE_RENAME_PLAN_OUTPUT_SCHEMA = {
     )
     .describe(
       "Misnamed files this plan will NOT attempt, each with why. The first three reasons are name collisions this " +
-        "server cannot resolve without a conflict behavior it deliberately does not implement; the last two mean " +
-        "the file had no usable precondition when the plan was generated.",
+        "server cannot resolve without a conflict behavior it deliberately does not implement. " +
+        "slot_won_by_file_in_another_library means this file lost its slot to a file found in another library of " +
+        "the same site, and nothing occupies the canonical path in this library; which file to act on then is the " +
+        "operator's decision. no_etag_available and file_not_found_at_plan_time mean the file had no usable " +
+        "precondition when the plan was generated.",
     ),
   excludedCount: z.number().int().describe("Excluded items in the stored plan. Computed before the listing above is cut."),
   excludedOmitted: z.number().int().describe("Excluded items the listing above left out."),
@@ -130,6 +116,7 @@ export const RENAME_ITEM_OUTCOMES = [
   "renamed",
   "would_rename",
   "precondition_refused",
+  "target_name_taken",
   "not_found",
   "failed",
 ] as const;
@@ -163,7 +150,14 @@ export interface ExecuteRenamePlanOutput {
   results: RenameItemResult[];
   resultCount: number;
   resultsOmitted: number;
-  counts: { renamed: number; wouldRename: number; preconditionRefused: number; notFound: number; failed: number };
+  counts: {
+    renamed: number;
+    wouldRename: number;
+    preconditionRefused: number;
+    targetNameTaken: number;
+    notFound: number;
+    failed: number;
+  };
   excluded: Array<{ path: string; currentName: string; targetName: string; client: string; reason: PlanExclusionReason }>;
   excludedCount: number;
   excludedOmitted: number;
@@ -195,8 +189,8 @@ export const EXECUTE_RENAME_PLAN_OUTPUT_SCHEMA = {
     .boolean()
     .describe(
       "True when nothing was changed. A dry run contacts Graph not at all, so it cannot tell whether the item at " +
-        "a path is still the one the plan recorded: outcomes of precondition_refused and not_found can only " +
-        "appear in a confirmed run.",
+        "a path is still the one the plan recorded, or whether the target name is free: outcomes of " +
+        "precondition_refused, target_name_taken, not_found and failed can only appear in a confirmed run.",
     ),
   results: z
     .array(
@@ -214,7 +208,9 @@ export const EXECUTE_RENAME_PLAN_OUTPUT_SCHEMA = {
         "dry run reached it and stopped; precondition_refused means Graph refused the write because the item at " +
         "that path is not the one the plan recorded. Graph checks If-Match before existence, so this single " +
         "outcome covers both a file that changed and a file that is no longer there, and this server deliberately " +
-        "does not pay the cost of a GET per refusal to tell the two apart. not_found is expected to stay zero: " +
+        "does not pay the cost of a GET per refusal to tell the two apart. target_name_taken means another file " +
+        "held the target name when the write was attempted, and Graph refused rather than replace it. not_found " +
+        "is expected to stay zero: " +
         "this executor always sends If-Match, and a stale precondition against an absent path answers 412 before " +
         "Graph ever reports the path missing, so a 404 cannot reach this outcome today. It is kept as a label " +
         "rather than removed, since a branch on a write path is not removed on the strength of a negative nobody " +
@@ -235,6 +231,10 @@ export const EXECUTE_RENAME_PLAN_OUTPUT_SCHEMA = {
             "changed file and an absent one: Graph checks If-Match before existence, and telling the two apart " +
             "would cost a GET per refusal this project deliberately does not pay.",
         ),
+      targetNameTaken: z
+        .number()
+        .int()
+        .describe("Items Graph refused because another file already holds the target name. Nothing was replaced."),
       notFound: z
         .number()
         .int()
@@ -259,7 +259,9 @@ export const EXECUTE_RENAME_PLAN_OUTPUT_SCHEMA = {
     .describe(
       "Items the plan recorded at generation time as ones it would not attempt, carried here so an operator " +
         "reading this report does not have to hold the plan open beside it to learn why a file they expected to " +
-        "be renamed was not.",
+        "be renamed was not. The reasons mean what generate_rename_plan's excluded description says, including " +
+        "slot_won_by_file_in_another_library: the file lost its slot to a file found in another library of the " +
+        "same site, and nothing occupies the canonical path in this library.",
     ),
   excludedCount: z.number().int().describe("Excluded items in the plan. Computed before the listing above is cut."),
   excludedOmitted: z.number().int().describe("Excluded items the listing above left out."),

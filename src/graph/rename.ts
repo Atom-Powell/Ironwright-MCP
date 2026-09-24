@@ -1,6 +1,7 @@
 import type { GraphClient } from "./client.js";
 import { GraphRequestError } from "./errors.js";
 import { driveItemPath } from "./paths.js";
+import { etagOf, relocateDriveItem } from "./relocate.js";
 
 /**
  * The three responses a rename can produce, kept apart rather than collapsed
@@ -19,31 +20,10 @@ import { driveItemPath } from "./paths.js";
 export type RenameOutcome =
   | { kind: "renamed"; etag: string | undefined }
   | { kind: "precondition_failed" }
-  | { kind: "not_found" };
+  | { kind: "not_found" }
+  | { kind: "name_conflict" };
 
 export type EtagLookup = { kind: "found"; etag: string | undefined } | { kind: "not_found" };
-
-/**
- * An empty string is treated as absent. Graph does not return one, but an
- * empty etag is not a usable If-Match precondition either way, so collapsing
- * the two here means no caller downstream has to test for both.
- *
- * The null and undefined guard is not defensive padding. `createGraphClient`'s
- * `request()` returns `undefined as T` for a zero-length response body, and a
- * 204 passes its success check, so a PATCH Graph answers with no body at all
- * reaches this function as `undefined` rather than as an object missing its
- * `eTag`. Reading a property off that threw, and the executor's PATCH error
- * boundary caught the throw and reported an item as `failed` although the file
- * HAD been renamed, leaving its reversal entry on the stale pre-rename etag
- * with nothing counted anywhere. Both fakes modelled an absent etag as `{}`,
- * the one shape this function already handled, so the fakes and the code
- * agreed with each other and neither agreed with the real client.
- */
-function etagOf(item: unknown): string | undefined {
-  if (item === null || item === undefined) return undefined;
-  const value = (item as { eTag?: unknown }).eTag;
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
 
 /**
  * Renames one driveItem in place, addressed by path.
@@ -59,29 +39,21 @@ function etagOf(item: unknown): string | undefined {
  * undefined rather than guessed when it is not, because a fabricated
  * precondition is worse than an absent one: a caller can fetch a missing etag,
  * but it cannot detect an invented one.
+ *
+ * It is now a thin form of `relocateDriveItem` that never changes the folder,
+ * kept so the body phase 6a verified live stays pinned by 6a's own tests.
  */
 export async function renameDriveItem(
   client: Pick<GraphClient, "patch">,
   args: { driveId: string; path: string; newName: string; etag: string },
 ): Promise<RenameOutcome> {
-  try {
-    const updated = await client.patch<unknown>(
-      driveItemPath(args.driveId, args.path),
-      { name: args.newName },
-      { "if-match": args.etag },
-    );
-    return { kind: "renamed", etag: etagOf(updated) };
-  } catch (error) {
-    if (error instanceof GraphRequestError && error.status === 412) return { kind: "precondition_failed" };
-    // Unreachable through execute_rename_plan today: every call into this
-    // function carries an If-Match etag, and Graph checks that precondition
-    // before existence, so a stale one against an absent path answers 412
-    // above, never reaches here. readDriveItemEtag below is different and its
-    // own 404 mapping stays live and meaningful, because that call is a GET
-    // carrying no precondition at all.
-    if (error instanceof GraphRequestError && error.status === 404) return { kind: "not_found" };
-    throw error;
-  }
+  const outcome = await relocateDriveItem(client, {
+    driveId: args.driveId,
+    path: args.path,
+    etag: args.etag,
+    newName: args.newName,
+  });
+  return outcome.kind === "relocated" ? { kind: "renamed", etag: outcome.etag } : outcome;
 }
 
 /**

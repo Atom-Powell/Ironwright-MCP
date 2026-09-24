@@ -34,8 +34,15 @@ function workbookOwing(client: string): WorkbookSnapshot {
   };
 }
 
-function file(path: string, etag: string): RepositoryFile {
-  return { path, name: path.slice(path.lastIndexOf("/") + 1), size: 1024, modified: "2026-06-14T09:00:00Z", etag };
+function file(path: string, etag: string, library?: string): RepositoryFile {
+  return {
+    path,
+    name: path.slice(path.lastIndexOf("/") + 1),
+    size: 1024,
+    modified: "2026-06-14T09:00:00Z",
+    etag,
+    ...(library === undefined ? {} : { library }),
+  };
 }
 
 function repository(files: RepositoryFile[], extraFolders: string[] = []): RepositorySnapshot {
@@ -216,6 +223,36 @@ describe("pairMisnamedArtifacts against a real reconcile() report", () => {
         targetName: CANONICAL_NAME,
         client: CLIENT,
         reason: "slot_already_satisfied_by_another_file",
+      },
+    ]);
+  });
+
+  it("excludes a misnamed file as slot_won_by_file_in_another_library when a canonically named copy in another library wins its slot", () => {
+    // The Archive copy carries the canonical name at the same relative path,
+    // but a file carrying a library is always misplaced (see computeState in
+    // match.ts), and misplaced outranks misnamed, so it wins the slot and the
+    // local misnamed file becomes its duplicate. Nothing occupies the
+    // canonical path in this library.
+    const misnamedPath = `${FOLDER}/${MISNAMED_NAME}`;
+    const foreignPath = `${FOLDER}/${CANONICAL_NAME}`;
+    const snapshot = repository([file(misnamedPath, "e1"), file(foreignPath, "e2", "Archive")]);
+    const report = reconcile(PROFILE, workbookOwing(CLIENT), snapshot, AS_OF);
+
+    const finding = report.artifacts.find((artifact) => artifact.client === CLIENT && artifact.period.month === AS_OF.month);
+    expect(finding?.state).toBe("misplaced");
+    expect(finding?.matched).toEqual(expect.objectContaining({ path: foreignPath, library: "Archive" }));
+    expect(report.duplicates).toEqual([expect.objectContaining({ path: misnamedPath, state: "misnamed" })]);
+
+    const pairing = pairMisnamedArtifacts(report);
+
+    expect(pairing.candidates).toEqual([]);
+    expect(pairing.collisions).toEqual([
+      {
+        path: misnamedPath,
+        currentName: MISNAMED_NAME,
+        targetName: CANONICAL_NAME,
+        client: CLIENT,
+        reason: "slot_won_by_file_in_another_library",
       },
     ]);
   });
