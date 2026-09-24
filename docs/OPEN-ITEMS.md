@@ -152,8 +152,18 @@ as by design, that an application holding `Sites.Selected` plus `Files.Read.All`
 roles claim (`appRolesFromAccessToken` in `src/setup/steps.ts`), but the running server never
 checks its own, so someone adding a permission to the server application in Entra would widen
 it silently. The 2026-09-24 token check found `["Sites.Selected"]` only, so nothing is wrong
-today; the item is that nothing would say so if it changed. Belongs with phase 5b's startup and
-telemetry work, or sooner as a small slice.
+today; the item is that nothing would say so if it changed. Scheduled 2026-09-24 as its own
+small slice ahead of phase 6d, since it needs no Azure resources.
+
+**Report the server version in `/health` and the startup log (phase 5b).** From the same refresh:
+a peer server's users asked for a way to see which version is running (Lokka #52), because it
+was hardcoded rather than read from `package.json`. Worth doing with 5b's telemetry, once there
+is a deployment to ask; nothing to build before then.
+
+**Read the Google Drive MCP server with `dry_run` and a restore token before planning phase 6d.**
+A search result during the refresh described one, the nearest thing to a reversal log found
+outside this project, but its name and repository were not recorded. Find it and read its plan
+and undo design first; research only.
 
 **CLOSED 2026-09-18 by phase 5a, `1c79bbf`, "build: compile the server without the setup
 command for production", carried through a timeout fix in `4acce7c`.** A production image
