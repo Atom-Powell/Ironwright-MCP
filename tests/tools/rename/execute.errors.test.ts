@@ -246,6 +246,18 @@ describe("refusals before anything is attempted", () => {
     expect(graph.calls).toEqual([]);
   });
 
+  it("refuses a custom plan rather than applying it as a rename", async () => {
+    const graph = renamingGraphClient();
+    const context = createFakeToolContext({ graph });
+    await context.store.savePlan("example", { ...planWith([{ ...ITEM_A, step: 1 }]), kind: "custom" });
+
+    const result = await runExecuteRenamePlan({ profileId: "example", planId: PLAN_ID, confirm: true }, context);
+
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain("execute_custom_plan");
+    expect(graph.calls).toEqual([]);
+  });
+
   it("refuses a rename plan carrying a move-only exclusion reason before any rename is attempted", async () => {
     const graph = renamingGraphClient();
     const context = createFakeToolContext({ graph });

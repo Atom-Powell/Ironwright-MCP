@@ -228,3 +228,55 @@ window if the operator accepts the write grant standing between the two.
 - `docs/SETUP.md`: a library-only profile example.
 - `docs/OPEN-ITEMS.md`: the sitting's record and what it did not establish, and the deferred
   operations listed at the top of this document.
+
+## Amendments, 2026-09-24, before the implementation plan
+
+Written after phase 6b-1 and the token role guard merged, against the code as it now stands.
+
+### Prior art read: `henrysouchien/drive-mcp`
+
+The Google Drive MCP server the competitive refresh found, read at commit `9833c10` (MIT,
+[repository](https://github.com/henrysouchien/drive-mcp)). It offers `dry_run` on its mutating
+tools and returns a `restore_token` that `gdrive_undo` consumes. Its source settles three
+questions its documentation leaves open, and each confirms a choice this spec already makes:
+
+- The restore token is base64 JSON held by the caller and never stored or signed
+  (`_make_restore_token` in `src/server.py`). Nothing on the server records what was changed, and
+  a caller can hand `gdrive_undo` a token it wrote itself. This spec's reversal log is persisted by
+  the server, carries the plan it reverses, and cannot be forged by a caller.
+- Undo carries no precondition: it renames or re-parents by file id whatever the file is now, so
+  undoing an old change overwrites anything done since. This spec's reversal entries carry ETags,
+  so a stale undo is refused, which the 6b-1 sitting measured.
+- Its move dry run returns before resolving the destination folder, so a preview can succeed where
+  the real move fails. This spec refuses an unknown folder before any plan is stored.
+
+One idea is worth keeping for a later slice, not this one: its undo of a create moves the item to
+the trash rather than deleting it. SharePoint has a recycle bin too, so a created folder's reversal
+could be recoverable, which weakens the reason 6b-1 and this spec both gave for deferring folder
+creation. It is recorded for phase 6c, where `replicate_template` is the first caller of folder
+creation, and changes nothing here.
+
+### Four corrections from the code as built
+
+1. **`query_repository` on a library profile answers `empty_folders` only.** `recent_reports`
+   identifies a report by parsing its name against the profile's naming standard
+   (`createFileParser(profile)` in `src/tools/query/run.ts`), so it needs a compliance profile as
+   much as `naming_violations` does. Both refuse a library profile, before any store read.
+2. **A library profile's scan skips the Microsoft Search cross-check.** The cross-check builds its
+   query from the naming template's literal extension (`src/scan/cross-check.ts`), which a library
+   profile does not have. It is skipped with a fifth named skip reason, `library-profile`, so a
+   scan never reports a cross-check as incomplete without saying why.
+3. **How a tool "declares" that it needs a compliance profile.** The registry's existing
+   `get(profileId)` keeps its return type and refuses a library profile with a new
+   `LibraryProfileError`, and a new `getAny(profileId)` returns either kind. Every compliance tool
+   already calls `get`, so none of them changes; the three tools that accept a library profile
+   call `getAny`. The registry-wide test names both sets explicitly and fails if a tool is in
+   neither, so a tool added later has to choose.
+4. **Rules spanning several input fields** (a step needs `moveTo` or `rename`; `rename` takes
+   exactly one form; `setName` needs exactly one match) are enforced in the handler and stated in
+   the tool's `inputConstraints`, since the installed SDK advertises an empty schema for a refined
+   one (`docs/OPEN-ITEMS.md`, "The MCP SDK cannot advertise a refined input schema").
+
+Two smaller clarifications. A selector's `folder` and a `moveTo` folder are matched against the
+index ignoring case, and the plan records the folder's actual casing. And a custom plan's reversal
+records the plan it reverses in the existing `reverses` field and carries no `steps`.

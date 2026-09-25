@@ -1,0 +1,8 @@
+{
+  "kind": "library",
+  "profileId": "shared-docs",
+  "identity": {
+    "siteUrl": "https://contoso.sharepoint.com/sites/Example",
+    "library": "Shared Documents"
+  }
+}

@@ -143,7 +143,7 @@ export function formatScanResult(result: ScanResult, storeKind: "azure-table" | 
 
   // `searchCrossCheckSkipReason` absent means `crossCheckOtherLibraries` completed, per its own
   // contract (see ScanResult's own comment on the field): every reachable way for it to have
-  // never run at all is itself one of the four named reasons, so there is no third state here
+  // never run at all is itself one of the five named reasons, so there is no third state here
   // to guess at, unlike the reconciliation tool's own provenance.
   if (result.searchCrossCheckSkipReason === undefined) {
     lines.push("The Microsoft Search cross-check completed.");

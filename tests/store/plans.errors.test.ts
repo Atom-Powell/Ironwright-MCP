@@ -38,7 +38,8 @@ describe("stored plan size", () => {
     const plan = planWithItems(300);
 
     await expect(store.savePlan("example", plan)).rejects.toBeInstanceOf(PlanTooLargeError);
-    await expect(store.savePlan("example", plan)).rejects.toThrow(/naming fewer clients/);
+    await expect(store.savePlan("example", plan)).rejects.toThrow(/fewer clients for a rename or move plan/);
+    await expect(store.savePlan("example", plan)).rejects.toThrow(/narrower steps for a custom plan/);
   });
 
   it("accepts a plan comfortably inside the cap", async () => {
@@ -125,11 +126,20 @@ describe("malformed stored plan entities", () => {
     await expect(store.getPlan("example", planId)).rejects.toThrow(/kind/);
   });
 
-  it("names both accepted kinds when it refuses an unknown one", async () => {
+  it("names all three accepted kinds when it refuses an unknown one", async () => {
     const plans = new FakeTableClient();
     await plans.upsertEntity({ ...validEntity(), kind: "reversal" });
     const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory: new FakeTableClient(), plans });
 
-    await expect(store.getPlan("example", planId)).rejects.toThrow(/not "rename" or "move"/);
+    await expect(store.getPlan("example", planId)).rejects.toThrow(/not "rename", "move" or "custom"/);
+  });
+
+  it("refuses a plan whose steps field is present but not a JSON array", async () => {
+    const plans = new FakeTableClient();
+    await plans.upsertEntity({ ...validEntity(), steps: "{}" });
+    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory: new FakeTableClient(), plans });
+
+    await expect(store.getPlan("example", planId)).rejects.toBeInstanceOf(MalformedPlanEntityError);
+    await expect(store.getPlan("example", planId)).rejects.toThrow(/steps/);
   });
 });

@@ -1,3 +1,5 @@
+import type { CustomExclusionReason, CustomStep } from "../domain/custom/resolve.js";
+
 export interface InventoryRecord {
   itemId: string;
   /** Library-relative, no leading slash. */
@@ -115,7 +117,16 @@ export type MoveOnlyExclusionReason = "in_another_library" | "target_folder_abse
 
 export type MoveExclusionReason = PlanExclusionReason | MoveOnlyExclusionReason;
 
-export type PlanKind = "rename" | "move";
+/**
+ * The full union a stored plan's `excluded` field can carry, spanning what a
+ * rename or move plan records and what a custom plan records. A stored plan
+ * holds one entity type regardless of kind, so its excluded items are typed
+ * over the union; each tool narrows to its own kind's subset when it reads one
+ * back, the way `renameExclusionsOf` and `moveExclusionsOf` already do.
+ */
+export type AnyExclusionReason = MoveExclusionReason | CustomExclusionReason;
+
+export type PlanKind = "rename" | "move" | "custom";
 
 export interface RenamePlanItem {
   /** Library-relative, no leading slash. The file as it stands now. */
@@ -143,21 +154,32 @@ export interface RenamePlanItem {
    * `src/tools/plans/apply.ts` carries the full reasoning.
    */
   etag: string;
+  /**
+   * Required, not optional: a rename or move plan's item always names the
+   * client the workbook mapped it to. A custom plan has no workbook mapping
+   * and no client, so its items write the empty string here rather than
+   * leaving the field out.
+   */
   client: string;
+  /** Which step of a custom plan produced this item. Absent on a rename or move plan. */
+  step?: number;
 }
 
 /**
  * Generic over its reason so each tool's output can state the narrower set its
- * own plans carry, while a stored plan holds the union.
+ * own plans carry, while a stored plan holds the full union.
  */
-export interface ExcludedPlanItem<R extends string = MoveExclusionReason> {
+export interface ExcludedPlanItem<R extends string = AnyExclusionReason> {
   path: string;
   currentName: string;
   targetName: string;
+  /** Required for the same reason RenamePlanItem's is: a custom plan writes "" here, having no client. */
   client: string;
   reason: R;
   /** The library the file was found in, present only for `in_another_library`. */
   library?: string;
+  /** Which steps of a custom plan matched this file. Absent on a rename or move plan. */
+  steps?: number[];
 }
 
 /**
@@ -176,22 +198,36 @@ export interface StoredPlan {
   excluded: ExcludedPlanItem[];
   /** The plan id this one reverses. Absent on a forward plan. */
   reverses?: string;
+  /** The operator-written steps a custom plan resolved from. Absent on a rename or move plan. */
+  steps?: CustomStep[];
 }
 
 /**
  * Azure Table caps a single String property at 32768 characters, and the
  * check in `table.ts` compares this constant against the combined length of
- * two separate String properties, `items` and `excluded`, rather than either
- * one alone. That sum is not the quantity the service actually limits, but
- * checking it this way can only over-refuse relative to the real per-property
- * cap, never under-refuse: whichever of the two strings is larger is bounded
- * by the same total, so neither one can pass this check while itself
- * exceeding 32768. The margin below the true limit covers the rest of the
- * entity's other properties, and the refusal is raised in this codebase
- * rather than left to the service, whose own error names neither the plan nor
- * a remedy.
+ * the separate String properties a stored plan writes as JSON: `items`,
+ * `excluded`, and, on a custom plan, `steps`. That sum is not the quantity the
+ * service actually limits, but checking it this way can only over-refuse
+ * relative to the real per-property cap, never under-refuse: whichever of
+ * those strings is largest is bounded by the same total, so none of them can
+ * pass this check while itself exceeding 32768. The margin below the true
+ * limit covers the rest of the entity's other properties, and the refusal is
+ * raised in this codebase rather than left to the service, whose own error
+ * names neither the plan nor a remedy.
  */
 export const MAX_PLAN_JSON_CHARS = 32000;
+
+/**
+ * The one measurement both store implementations compare against
+ * `MAX_PLAN_JSON_CHARS`, and the one `generate_custom_plan` estimates with
+ * before it spends any lookup, so the estimate cannot drift from the check it
+ * predicts. `steps` is stringified only when present, so a rename or move
+ * plan, which carries none, contributes nothing for it.
+ */
+export function storedPlanJsonChars(plan: Pick<StoredPlan, "items" | "excluded" | "steps">): number {
+  const steps = plan.steps === undefined ? 0 : JSON.stringify(plan.steps).length;
+  return JSON.stringify(plan.items).length + JSON.stringify(plan.excluded).length + steps;
+}
 
 export class PlanTooLargeError extends Error {
   readonly planId: string;
@@ -200,8 +236,9 @@ export class PlanTooLargeError extends Error {
   constructor(planId: string, chars: number) {
     super(
       `Plan "${planId}" serializes to ${String(chars)} characters, more than the ` +
-        `${String(MAX_PLAN_JSON_CHARS)} a single stored plan holds. Generate a narrower plan by naming fewer ` +
-        "clients. Refused rather than truncated, because a plan missing items a reviewer saw is worse than no plan at all.",
+        `${String(MAX_PLAN_JSON_CHARS)} a single stored plan holds. Generate a narrower plan with fewer items: ` +
+        "fewer clients for a rename or move plan, narrower steps for a custom plan. Refused rather than truncated, " +
+        "because a plan missing items a reviewer saw is worse than no plan at all.",
     );
     this.name = "PlanTooLargeError";
     this.planId = planId;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { describeToolFailure } from "../../src/tools/errors.js";
-import { UnknownProfileError } from "../../src/profiles/registry.js";
+import { LibraryProfileError, UnknownProfileError } from "../../src/profiles/registry.js";
 import { LibraryNotFoundError } from "../../src/graph/drive.js";
 import { WorkbookFileError, WorkbookMappingError, WorkbookUnreadableError } from "../../src/workbook/errors.js";
 import { GraphRequestError } from "../../src/graph/errors.js";
@@ -151,6 +151,14 @@ describe("describeToolFailure", () => {
 
   it("reports a thrown non-error without crashing on it", () => {
     expect(describeToolFailure("not an error object", SUBJECT)).toContain("not an error object");
+  });
+
+  it("explains that a tool needs a compliance profile when handed a library-only one", () => {
+    const message = describeToolFailure(new LibraryProfileError("docs"), { tool: "reconcile_workbook_vs_repository", profileId: "docs" });
+
+    expect(message).toContain('"docs"');
+    expect(message).toContain("library-only");
+    expect(message).toContain("reconcile_workbook_vs_repository");
   });
 
   describe("with no profileId, the shape describe_workbook is the first tool to hit", () => {

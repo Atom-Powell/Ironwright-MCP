@@ -1,7 +1,7 @@
 import type { GraphClient } from "../graph/client.js";
 import { DeltaResyncRequiredError, deltaPages } from "../graph/delta.js";
 import { resolveDrive } from "../graph/drive.js";
-import type { Profile } from "../domain/profile/schema.js";
+import type { AnyProfile } from "../domain/profile/library.js";
 import type { RepositorySnapshot } from "../domain/reconcile/index.js";
 import type { StateStore } from "../store/types.js";
 import { changesFromDeltaItems } from "./changes.js";
@@ -11,7 +11,7 @@ import { crossCheckOtherLibraries, type CrossCheckSkipReason } from "./cross-che
 export interface ScanDependencies {
   client: GraphClient;
   store: StateStore;
-  profile: Profile;
+  profile: AnyProfile;
   now: () => Date;
   subPath?: string;
 }
@@ -41,11 +41,12 @@ export interface ScanResult {
   unfilteredFolderCount: number;
   /**
    * Present only when the Search cross-check did not complete, naming why.
-   * `crossCheckOtherLibraries` always names one of the four reasons whenever
+   * `crossCheckOtherLibraries` always names one of the five reasons whenever
    * it does not complete, "no-region" included, so absent means the
    * cross-check completed rather than "completed or never ran": every
    * reachable way for it to have never run at all, such as the profile
-   * carrying no searchRegion, is itself one of the four named reasons.
+   * carrying no searchRegion or being library-only, is itself one of the
+   * five named reasons.
    */
   searchCrossCheckSkipReason?: CrossCheckSkipReason;
   /**

@@ -282,6 +282,48 @@ export function stateStoreConformance(create: () => StateStore): void {
     await expect(store.getPlan("example", plan.planId)).resolves.toEqual(plan);
   });
 
+  it("round-trips a custom plan, including its steps and a step-numbered item and exclusion", async () => {
+    const store = create();
+    const plan: StoredPlan = {
+      planId: "cus-2026-09-24-a1b2c3d4",
+      profileId: "example",
+      kind: "custom",
+      driveId: "d1",
+      createdAt: "2026-09-24T12:00:00Z",
+      items: [
+        {
+          path: "2026/Reports/old-name.xlsx",
+          currentName: "old-name.xlsx",
+          targetName: "new-name.xlsx",
+          targetPath: "2026/Reports/new-name.xlsx",
+          etag: '"{GUID},1"',
+          // A custom plan has no client, and this field stays required, so it
+          // writes the empty string rather than something optional.
+          client: "",
+          step: 1,
+        },
+      ],
+      excluded: [
+        {
+          path: "2026/Reports/other.xlsx",
+          currentName: "other.xlsx",
+          targetName: "other.xlsx",
+          client: "",
+          reason: "matched_by_multiple_steps",
+          steps: [1, 2],
+        },
+      ],
+      steps: [
+        { selector: { folder: "2026/Reports" }, rename: { addSuffix: "-v2" } },
+        { selector: { folder: "2026/Reports", extensions: [".xlsx"] }, moveTo: "2026/Archive" },
+      ],
+    };
+
+    await store.savePlan("example", plan);
+
+    await expect(store.getPlan("example", plan.planId)).resolves.toEqual(plan);
+  });
+
   it("keeps one profile's plans out of another profile's reach", async () => {
     const store = create();
     const plan: StoredPlan = {

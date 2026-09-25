@@ -107,11 +107,13 @@ const EXPECTED_TOOL_NAMES = [
   "execute_rename_plan",
   "generate_move_plan",
   "execute_move_plan",
+  "generate_custom_plan",
+  "execute_custom_plan",
   "replicate_template",
 ];
 
 describe("tool surface completeness", () => {
-  it("registers exactly the ten planned tools", () => {
+  it("registers exactly the planned tools", () => {
     expect(ALL_TOOLS.map((tool) => tool.name).sort()).toEqual([...EXPECTED_TOOL_NAMES].sort());
   });
 

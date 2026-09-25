@@ -1,5 +1,5 @@
 import { inventoryPartitionKey, MAX_TRANSACTION_SIZE, planInventoryChanges } from "./keys.js";
-import { MAX_PLAN_JSON_CHARS, PlanTooLargeError } from "./types.js";
+import { MAX_PLAN_JSON_CHARS, PlanTooLargeError, storedPlanJsonChars } from "./types.js";
 import type { ApplyResult, InventoryRecord, ScannedDrive, StateStore, StoredPlan } from "./types.js";
 
 /**
@@ -89,10 +89,9 @@ export function createMemoryStateStore(): StateStore {
       // rather than left to that implementation alone: a StateStore caller
       // must not be able to tell which implementation answered, and a plan
       // this store would accept but the Table store would refuse is exactly
-      // the drift that promise exists to rule out.
-      const items = JSON.stringify(plan.items);
-      const excluded = JSON.stringify(plan.excluded);
-      const total = items.length + excluded.length;
+      // the drift that promise exists to rule out. `storedPlanJsonChars` is
+      // the one measurement both implementations call.
+      const total = storedPlanJsonChars(plan);
       if (total > MAX_PLAN_JSON_CHARS) throw new PlanTooLargeError(plan.planId, total);
 
       // Cloned on the way in and out. Without it, a caller holding the object

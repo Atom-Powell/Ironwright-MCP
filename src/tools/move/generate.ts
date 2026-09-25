@@ -5,7 +5,7 @@ import { pairMisplacedArtifacts } from "../../domain/move/plan.js";
 import type { Profile } from "../../domain/profile/schema.js";
 import type { GraphClient } from "../../graph/client.js";
 import { readWorkbookSnapshot } from "../../scan/workbook.js";
-import type { ExcludedPlanItem, StoredPlan } from "../../store/types.js";
+import type { ExcludedPlanItem, MoveExclusionReason, StoredPlan } from "../../store/types.js";
 import type { ToolContext } from "../context.js";
 import { describeToolFailure, type FailureSubject } from "../errors.js";
 import { comparePaths } from "../plans/apply.js";
@@ -85,7 +85,7 @@ export async function runGenerateMovePlan(
       };
     }
 
-    const excluded: ExcludedPlanItem[] = exclusions.map((e) => ({
+    const excluded: ExcludedPlanItem<MoveExclusionReason>[] = exclusions.map((e) => ({
       path: e.path,
       currentName: e.currentName,
       targetName: e.targetName,
