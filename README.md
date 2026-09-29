@@ -8,14 +8,13 @@ Built by Ironwright (Adam Powell). Licensed under the Elastic License 2.0; see `
 
 ## Status
 
-Phase 6a. The five read tools are wired and have each answered against a live tenant:
-`inventory_tree`, `describe_workbook`, `reconcile_workbook_vs_repository`, `query_repository` and
-`validate_structure`. So is the rename pair: `generate_rename_plan` produces a reviewable persisted
-plan, and `execute_rename_plan` applies it, which means it really renames files in a SharePoint
-library. It is published only when `IW_ALLOW_WRITES=true`, and even then a call without
-`confirm: true` is a dry run that writes nothing. The remaining three tools, `generate_move_plan`,
-`execute_move_plan` and `replicate_template`, are still registered stubs returning a placeholder
-response.
+Where each phase stands, and what has been verified against a live tenant, is kept in one place:
+the "Where the build stands" table at the top of `docs/OPEN-ITEMS.md`. This file does not restate
+it, because a second copy is the one that goes stale.
+
+What holds regardless of phase: every write tool is plan-then-execute, a write tool is published
+only when `IW_ALLOW_WRITES=true`, and even then a call without `confirm: true` is a dry run that
+writes nothing.
 
 ## Documentation
 
