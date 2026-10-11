@@ -36,8 +36,12 @@ already fits.
 
 ## Design
 
-**Probe server.** A throwaway MCP server in this repo under a clearly separate path, exposing two
-dummy tools and reading no tenant data. Its only job is to be the thing a dev tunnel fronts while
+**Probe server.** Built 2026-10-11 at `scripts/copilot-probe/`, with tests in
+`tests/scripts/copilot-probe.test.ts`. A throwaway MCP server exposing two dummy tools and reading no
+tenant data, reusing the production transport (`createApp`) so it answers questions about the
+real thing. It enforces its own inbound key check (header or bearer, constant-time compare),
+refuses to start unauthenticated without an explicit override, binds to loopback only, and writes
+the call trace below. Its only job is to be the thing a dev tunnel fronts while
 we learn what Copilot Studio accepts. The Ironwright server is never put behind a tunnel before it
 has inbound authentication, because it has none today.
 
@@ -75,9 +79,9 @@ written up as a gap list. Nothing is submitted.
 2. **Thin comparison arm.** Whether the comparison uses Microsoft's Work IQ SharePoint server
    (requires licensing the trial may not include), or a minimal thin wrapper we write. A wrapper we
    write is weaker evidence because we chose its shape.
-3. **Where the probe server lives.** In this repo behind a path the production build excludes, as
-   `src/setup` is excluded, or in a separate repository. The first keeps one lint and test setup;
-   the second keeps throwaway code out of a repo with a security boundary around its build.
+3. **Where the probe server lives.** Provisionally settled when it was built: in this repo under
+   `scripts/`, which the production build does not compile (it compiles `src/` only, minus
+   `src/setup`). Recorded here so the choice can be reversed; it keeps one lint and test setup.
 
 ## Assumptions
 

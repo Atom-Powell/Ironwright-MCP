@@ -39,12 +39,33 @@ authentication choice it offers, using the exact wording. Do not complete the di
 **A4. Limits on the connector.** Record any text on those screens about transport, tool or resource
 support, tool count limits, or data loss prevention.
 
-## Part B: needs the probe server
+## Running the probe server
 
-Part B waits on a throwaway probe server that exposes two dummy tools and reads no tenant data, so
-that the tunnel never fronts anything real. It does not exist yet; the spec lists it as the first
-build item. Do not point a tunnel at the Ironwright server for these probes, because that server has
-no inbound authentication today.
+The probe server is `scripts/copilot-probe/`. It exposes two dummy tools (`get_fruit_stock` and
+`celsius_to_fahrenheit`), reads no tenant data, holds no Graph credentials, and binds to loopback
+only. Do not point a tunnel at the Ironwright server for these probes, because that server has no
+inbound authentication today.
+
+```
+node --import tsx scripts/copilot-probe/main.ts > probe-trace.jsonl
+```
+
+With no `PROBE_API_KEY` set it generates a key, prints it once to the terminal, and requires it on
+every `/mcp` request in the `x-api-key` header. Copy it straight into the Copilot Studio field; do
+not paste it into a session. `PROBE_AUTH=bearer` switches to an `Authorization: Bearer` header so
+you can try whichever mode Copilot Studio offers (what A3 showed). The server refuses to start
+without authentication unless `PROBE_ALLOW_ANONYMOUS=1` is set. The trace file is yours to keep or
+share: it holds tool names, argument keys and types, durations and status codes, and never argument
+values or the key.
+
+For the tunnel, use Microsoft dev tunnels. The commands below are from memory and unverified, so
+check `devtunnel --help` first. Install the CLI (`winget install Microsoft.devtunnel`), sign in
+(`devtunnel user login`), then host the port (`devtunnel host -p 8787`). A tunnel that requires a
+Microsoft sign-in cannot be reached by Copilot Studio, so it likely needs the anonymous-access
+option on the tunnel, which is why the server's own key check matters. The tunnel hostname is a
+credential while it is up: keep the tunnel running only during a probe, and stop it afterward.
+
+## Part B: needs the probe server running behind a tunnel
 
 **B1. Tunnel acceptance.** With the probe server behind a dev tunnel, does Copilot Studio accept
 the tunnel URL? Record which authentication choices worked and which were refused, with the error

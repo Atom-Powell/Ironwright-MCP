@@ -35,7 +35,7 @@ sections below say what was proven and what was not. Last updated 2026-09-29.
 | 6b-2 Cross-library moves | Held: begins with a live probe; waits on the decision below | |
 | 6c `replicate_template` and folder creation | Held | |
 | `$batch` | Held: no caller yet whose measured cost justifies it | |
-| 7 Copilot Studio integration and governance | Not started | |
+| 7 Copilot Studio integration and governance | In progress: track 1 spec drafted (pre-probe) and probe server built; no Copilot Studio contact yet | `docs/superpowers/specs/2026-10-11-copilot-studio-integration-design.md` |
 | 8 Evaluation suite | Not started; questions written in `docs/EVALUATION-QUESTIONS.md` | |
 
 Still open from the parent spec's pre-phase-2 decisions: which delegated scopes the setup
