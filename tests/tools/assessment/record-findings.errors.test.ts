@@ -96,6 +96,26 @@ describe("record_findings failures", () => {
     expect(journal.map((entry) => [entry.operation, entry.target])).toEqual([["list_item_created", "Findings/11"]]);
   });
 
+  it("reports an updated finding whose answer disagrees with what was sent, keeps its journal entry and writes nothing after it", async () => {
+    const { graph, calls } = createScriptedGraph([
+      ...WITH_DOSSIER,
+      // F-1 exists with an older risk, so the call updates it; Graph answers the PATCH with Medium.
+      findingsQuery([listItem("11", findingFields("F-1", F1.observation, "Low", F1.recommendation), '"finding-11,1"')]),
+      { method: "patch", pathIncludes: "/lists/Findings/items/11/fields", response: findingFields("F-1", F1.observation, "Medium", F1.recommendation) },
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runRecordFindings(INPUT, context);
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toContain('Graph accepted the write to Findings item 11 for finding "F-1", but its answer disagrees with what was sent: Risk read "Medium", not "High".');
+    expect(resultText(result)).toContain("The journal records the write; nothing after it was written.");
+    expect(calls.filter((call) => call.method === "patch").map((call) => call.path)).toHaveLength(1);
+    expect(calls.filter((call) => call.method === "post")).toEqual([]);
+    const journal = await context.store.listJournal(PROFILE, ID);
+    expect(journal.map((entry) => [entry.operation, entry.target, entry.etagBefore])).toEqual([["list_item_updated", "Findings/11", '"finding-11,1"']]);
+  });
+
   it("reports a summary update whose answer disagrees with what was sent, keeping its journal entry", async () => {
     const { graph } = createScriptedGraph([
       ...WITH_DOSSIER,
