@@ -23,7 +23,9 @@ describe("open_assessment", () => {
       "Assessments/Acme Corp/ASM-2026-00002/Published",
     ]);
     expect(output.created).toBe(true);
+    expect(output.resumed).toBe(false);
     expect(output.graphRequests).toBe(graph.requests());
+    expect(resultText(result)).toContain("Opened ASM-2026-00002 for Acme Corp (Security): item 2 in Assessments");
 
     const assessmentCreate = calls.find((call) => call.method === "post" && call.path.includes("/lists/Assessments/items"));
     const createFields = (assessmentCreate?.body as { fields: Record<string, unknown> }).fields;
@@ -58,9 +60,7 @@ describe("open_assessment", () => {
       ...RESOLVE_DRIVE_SCRIPT,
       vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" })]),
       assessmentsQuery("Acme Corp", [existing]),
-      // The folder pass runs on a retry too, so a workspace an earlier call left half built is completed; present folders answer 409.
-      ...folderCreates("Acme Corp", "ASM-2026-00002", ["Assessments", "Acme Corp", "ASM-2026-00002", "Research", "Evidence", "Published"]),
-      rootRead("Acme Corp", "ASM-2026-00002"),
+      // The live state read finds the root present, so no folder is created or even attempted.
       ...retryStateReads("Acme Corp", "ASM-2026-00002"),
     ]);
     const context = assessmentToolContext(graph);
@@ -70,14 +70,17 @@ describe("open_assessment", () => {
     expect(result.isError).toBeUndefined();
     const output = result.structuredContent as Record<string, unknown>;
     expect(output.created).toBe(false);
+    expect(output.resumed).toBe(false);
     expect(output.assessmentId).toBe("ASM-2026-00002");
     expect(output.graphRequests).toBe(graph.requests());
     expect(calls.filter((call) => call.method === "patch")).toEqual([]);
-    expect(calls.filter((call) => call.method === "post" && !call.path.endsWith("/children"))).toEqual([]);
+    expect(calls.filter((call) => call.method === "post")).toEqual([]);
     for (const key of ["(vendor)", "(unassigned)", "ASM-2026-00002"]) {
       expect(await context.store.listJournal(PROFILE, key)).toEqual([]);
     }
-    expect(resultText(result)).toContain("already open");
+    expect(resultText(result)).toBe(
+      "ASM-2026-00002 for Acme Corp (Security) is already open; nothing was written. Workspace Assessments/Acme Corp/ASM-2026-00002 is present.",
+    );
   });
 
   it("resumes an open that died before the id was written", async () => {
@@ -88,19 +91,52 @@ describe("open_assessment", () => {
       ...idWriteBack("Acme Corp", "3", "ASM-2026-00003"),
       ...folderCreates("Acme Corp", "ASM-2026-00003"),
       rootRead("Acme Corp", "ASM-2026-00003"),
-      ...retryStateReads("Acme Corp", "ASM-2026-00003"),
     ]);
     const context = assessmentToolContext(graph);
 
     const result = await runOpenAssessment(INPUT, context);
 
     expect(result.isError).toBeUndefined();
-    expect((result.structuredContent as Record<string, unknown>).assessmentId).toBe("ASM-2026-00003");
+    const output = result.structuredContent as Record<string, unknown>;
+    expect(output.assessmentId).toBe("ASM-2026-00003");
+    expect(output.created).toBe(false);
+    expect(output.resumed).toBe(true);
+    expect(output.graphRequests).toBe(graph.requests());
+    expect(resultText(result)).toBe(
+      "Resumed ASM-2026-00003 for Acme Corp (Security), which was already in progress: this call wrote the assessment id to item 3 and created 6 folders. " +
+        "Workspace Assessments/Acme Corp/ASM-2026-00003 read back.",
+    );
     expect(calls.filter((call) => call.method === "patch").map((call) => call.body)).toEqual([{ AssessmentId: "ASM-2026-00003" }]);
     expect(calls.filter((call) => call.method === "post" && call.path.includes("/lists/"))).toEqual([]);
     const journal = await context.store.listJournal(PROFILE, "ASM-2026-00003");
     expect(journal.filter((entry) => entry.operation === "folder_created")).toHaveLength(6);
     expect(journal.filter((entry) => entry.operation === "list_item_updated")).toHaveLength(1);
+  });
+
+  it("resumes an open that died between the id write and the folders, when the live read finds no root", async () => {
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" })]),
+      assessmentsQuery("Acme Corp", [listItem("2", { ...assessmentFields("Acme Corp"), AssessmentId: "ASM-2026-00002" })]),
+      { method: "get", pathIncludes: "/drives/drive-1/root:/Assessments/Acme Corp/ASM-2026-00002:?", throws: { status: 404, code: "itemNotFound" } },
+      ...retryStateReads("Acme Corp", "ASM-2026-00002").slice(1),
+      ...folderCreates("Acme Corp", "ASM-2026-00002", ["Assessments", "Acme Corp"]),
+      rootRead("Acme Corp", "ASM-2026-00002"),
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runOpenAssessment(INPUT, context);
+
+    expect(result.isError).toBeUndefined();
+    const output = result.structuredContent as Record<string, unknown>;
+    expect(output.created).toBe(false);
+    expect(output.resumed).toBe(true);
+    expect(calls.filter((call) => call.method === "patch")).toEqual([]);
+    expect(resultText(result)).toBe(
+      "Resumed ASM-2026-00002 for Acme Corp (Security), which was already in progress: this call created 4 folders. " +
+        "Workspace Assessments/Acme Corp/ASM-2026-00002 read back.",
+    );
+    expect((await context.store.listJournal(PROFILE, "ASM-2026-00002")).map((entry) => entry.operation)).toEqual(Array<string>(4).fill("folder_created"));
   });
 
   it("reports a folder that already exists as satisfied and journals only what it created", async () => {

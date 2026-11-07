@@ -22,6 +22,9 @@ export const OPEN_OUTPUT_SCHEMA = {
   workspaceRoot: z.string().describe('Library-relative root folder, for example "Assessments/Acme Corp/ASM-2026-00002".'),
   subfolders: z.array(z.string()).describe('Library-relative folders under the root, for example ["Assessments/Acme Corp/ASM-2026-00002/Research"].'),
   created: z.boolean().describe("True when this call created the assessment, false when it returned one already in progress, for example false on a retry."),
+  resumed: z
+    .boolean()
+    .describe("True when the assessment already existed and this call wrote to complete it, its id or missing workspace folders, for example true after an open that died before the folders were created."),
   correlationId: z.string().describe('Shared by every journal entry this call wrote, for example "6f1c...".'),
   graphRequests: z.number().int().describe("Graph requests this call issued, for example 14."),
 } satisfies z.ZodRawShape;
@@ -53,9 +56,14 @@ export async function runOpenAssessment(input: unknown, context: ToolContext): P
     // The vendor record. Its stored folder name wins over recomputation, so a convention set once sticks.
     const vendors = await queryListItems(context.graph, { siteId: ac.siteId, listName: lists.vendors.name, filter: `fields/Title eq ${odataString(args.vendor)}` });
     let folder = vendorFolder;
+    // What this call wrote, so the text says only what happened: created, resumed, or already open with nothing written.
+    let vendorCreated = false;
+    let wroteId = false;
+    let foldersCreated = 0;
     if (vendors.length === 0) {
       const created = await createListItem(context.graph, { siteId: ac.siteId, listName: lists.vendors.name, fields: { Title: args.vendor, [lists.vendors.columns.folderName]: vendorFolder } });
       await appendJournal(context, ac, "(vendor)", { stage: STAGE, operation: "list_item_created", target: `${lists.vendors.name}/${created.id}`, etagAfter: created.eTag });
+      vendorCreated = true;
     } else {
       const stored = vendors[0]!.fields[lists.vendors.columns.folderName];
       if (typeof stored === "string" && stored.length > 0) folder = stored;
@@ -89,33 +97,50 @@ export async function runOpenAssessment(input: unknown, context: ToolContext): P
         };
       }
       record = readBack;
+      wroteId = true;
     }
 
     const paths = workspacePaths(ac, { vendorTitle: record.vendorTitle ?? args.vendor, vendorFolder: record.vendorFolder ?? folder, assessmentId: record.assessmentId! });
-    const toCreate = [paths.root, ...paths.subfolders];
-    const ensured = new Set<string>();
-    for (const target of toCreate) {
-      const segments = target.split("/");
-      for (let depth = 1; depth <= segments.length; depth += 1) {
-        const path = segments.slice(0, depth).join("/");
-        if (ensured.has(path)) continue;
-        const outcome = await createFolder(context.graph, { driveId: ac.driveId, parentPath: segments.slice(0, depth - 1).join("/"), name: segments[depth - 1]! });
-        if (outcome.kind === "created") {
-          await appendJournal(context, ac, record.assessmentId!, { stage: STAGE, operation: "folder_created", target: path, etagAfter: outcome.item.eTag });
+    // An item this call created or completed needs its workspace. An item that was already whole is
+    // checked live instead: a present root is the open's last step, so the folders are skipped and a
+    // retry costs reads only; an absent root is a resume after a crash between the id write and the folders.
+    let needsFolders = created || wroteId;
+    if (!needsFolders) {
+      const state = await readAssessmentState(context.graph, ac, record);
+      needsFolders = !state.rootPresent;
+    }
+
+    if (needsFolders) {
+      const toCreate = [paths.root, ...paths.subfolders];
+      const ensured = new Set<string>();
+      for (const target of toCreate) {
+        const segments = target.split("/");
+        for (let depth = 1; depth <= segments.length; depth += 1) {
+          const path = segments.slice(0, depth).join("/");
+          if (ensured.has(path)) continue;
+          const outcome = await createFolder(context.graph, { driveId: ac.driveId, parentPath: segments.slice(0, depth - 1).join("/"), name: segments[depth - 1]! });
+          if (outcome.kind === "created") {
+            await appendJournal(context, ac, record.assessmentId!, { stage: STAGE, operation: "folder_created", target: path, etagAfter: outcome.item.eTag });
+            foldersCreated += 1;
+          }
+          ensured.add(path);
         }
-        ensured.add(path);
+      }
+
+      const root = await readDriveItem(context.graph, { driveId: ac.driveId, path: paths.root });
+      if (root.kind !== "found" || !root.item.isFolder) {
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: `The workspace root "${paths.root}" was created or found present, but reading it back ${root.kind === "found" ? "returned a file, not a folder" : "answered 404"}. The journal records what was created.` }],
+        };
       }
     }
 
-    const root = await readDriveItem(context.graph, { driveId: ac.driveId, path: paths.root });
-    if (root.kind !== "found" || !root.item.isFolder) {
-      return {
-        isError: true,
-        content: [{ type: "text" as const, text: `The workspace root "${paths.root}" was created or found present, but reading it back ${root.kind === "found" ? "returned a file, not a folder" : "answered 404"}. The journal records what was created.` }],
-      };
-    }
-
-    if (!created) await readAssessmentState(context.graph, ac, record);
+    const writes: string[] = [];
+    if (vendorCreated) writes.push(`created the vendor record in ${lists.vendors.name}`);
+    if (wroteId) writes.push(`wrote the assessment id to item ${record.itemId}`);
+    if (foldersCreated > 0) writes.push(`created ${foldersCreated} ${foldersCreated === 1 ? "folder" : "folders"}`);
+    const resumed = !created && writes.length > 0;
 
     const output = {
       assessmentId: record.assessmentId!,
@@ -130,12 +155,15 @@ export async function runOpenAssessment(input: unknown, context: ToolContext): P
       workspaceRoot: paths.root,
       subfolders: paths.subfolders,
       created,
+      resumed,
       correlationId: ac.correlationId,
       graphRequests: context.graph.requests() - before,
     };
     const text = created
       ? `Opened ${output.assessmentId} for ${output.vendor} (${output.scope}): item ${output.itemId} in ${lists.assessments.name}, workspace ${paths.root} with ${paths.subfolders.length} subfolders, all read back.`
-      : `${output.assessmentId} for ${output.vendor} (${output.scope}) is already open; returned, not repeated. Workspace ${paths.root} is present.`;
+      : resumed
+        ? `Resumed ${output.assessmentId} for ${output.vendor} (${output.scope}), which was already in progress: this call ${writes.join(" and ")}. Workspace ${paths.root} read back.`
+        : `${output.assessmentId} for ${output.vendor} (${output.scope}) is already open; nothing was written. Workspace ${paths.root} is present.`;
     return { structuredContent: output, content: [{ type: "text" as const, text }] };
   } catch (error) {
     console.error(`open_assessment failed for profile "${args.profileId}"`, error);
