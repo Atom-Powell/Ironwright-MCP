@@ -22,6 +22,11 @@ function buildProfile(): Profile {
       library: "Compliance Reports",
       workbookPath: "/Trackers/Tracker.xlsx",
     },
+    sites: [{
+      siteUrl: "https://contoso.sharepoint.com/sites/Example",
+      library: "Compliance Reports",
+      workbookPath: "/Trackers/Tracker.xlsx",
+    }],
     taxonomy: { segments: ["{year}", "{client}", "{month:02}-{monthName}"] },
     naming: {
       template: "{year}-{month:02}_{client}_{deliverable}.xlsx",

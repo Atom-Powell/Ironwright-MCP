@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { unknownPlaceholders } from "./placeholders.js";
+import { ProfileIdSchema, SiteEntrySchema, SitesSchema, normalizeProfileSites, refineIdentityAgreesWithSites } from "./base.js";
 
 function isValidRegex(pattern: string): boolean {
   try {
@@ -72,20 +73,15 @@ export const CadenceSchema = z.enum(["monthly", "quarterly", "semiannual", "annu
 export const PeriodAnchorSchema = z.enum(["first", "last"]);
 export const VerdictSchema = z.enum(["compliant", "misnamed"]);
 
-export const IdentitySchema = z.object({
-  siteUrl: z.string().url(),
-  library: z.string().min(1),
-  workbookPath: z.string().startsWith("/"),
-  /**
-   * The Microsoft Search region, such as "NAM". Required by Graph on any
-   * search issued with an application permission, and there is no discovery
-   * call this project has verified, so it is configured rather than detected.
-   * Optional because a profile without it is still valid: the cross-check is
-   * skipped and the report says that is why, rather than failing a run over a
-   * field that only affects one of its checks.
-   */
-  searchRegion: z.string().min(1).optional(),
-});
+/**
+ * The compliance site entry: the shared fields, with `workbookPath` required.
+ * Built from `SiteEntrySchema` so identity and a site entry parse the same
+ * fields. The Microsoft Search region (`searchRegion`) is optional because a
+ * profile without it is still valid: the cross-check is skipped and the report
+ * says that is why, rather than failing a run over a field that only affects
+ * one of its checks.
+ */
+export const IdentitySchema = SiteEntrySchema.extend({ workbookPath: z.string().startsWith("/") });
 
 export const TaxonomySchema = z.object({
   segments: z.array(z.string().min(1)).min(1),
@@ -138,10 +134,16 @@ export const WindowSchema = z.object({
   respectEffectiveFrom: z.boolean().default(false),
 });
 
-export const ProfileSchema = z
+// The preprocess is here, not only in loadProfile, because fixtures and scripts
+// parse a profile straight through this schema and a legacy identity-only file
+// has to reach `sites` on that path too.
+export const ProfileSchema = z.preprocess(
+  normalizeProfileSites,
+  z
   .object({
-    profileId: z.string().min(1).regex(/^[a-z0-9-]+$/, "must be lowercase letters, digits, and hyphens"),
+    profileId: ProfileIdSchema,
     identity: IdentitySchema,
+    sites: SitesSchema,
     taxonomy: TaxonomySchema,
     naming: NamingSchema,
     deliverables: z.array(DeliverableSchema).min(1),
@@ -150,6 +152,13 @@ export const ProfileSchema = z
   })
   .superRefine((profile, ctx) => {
     const custom = z.ZodIssueCode.custom;
+
+    refineIdentityAgreesWithSites(profile, ctx);
+    profile.sites.forEach((site, index) => {
+      if (site.workbookPath === undefined) {
+        ctx.addIssue({ code: custom, path: ["sites", index, "workbookPath"], message: "a compliance profile needs a workbookPath on every site" });
+      }
+    });
 
     for (const token of unknownPlaceholders(profile.naming.template)) {
       ctx.addIssue({ code: custom, path: ["naming", "template"], message: `unknown placeholder {${token}}` });
@@ -233,6 +242,7 @@ export const ProfileSchema = z
         message: "requires workbookMapping.columns.effectiveFrom to be mapped",
       });
     }
-  });
+  }),
+);
 
 export type Profile = z.infer<typeof ProfileSchema>;

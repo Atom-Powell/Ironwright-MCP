@@ -1,7 +1,8 @@
 import type { z } from "zod";
+import type { ProfileKind } from "../domain/profile/base.js";
 import type { ToolDefinition } from "../tools/types.js";
 
-export type ProfileKind = "compliance" | "library";
+export type { ProfileKind };
 
 /**
  * One domain, as the core sees it: which profile kind it owns, how to

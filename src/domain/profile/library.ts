@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { ProfileSchema, type Profile } from "./schema.js";
+import { type Profile } from "./schema.js";
+import { ProfileIdSchema, SiteEntrySchema, SitesSchema, normalizeProfileSites, refineIdentityAgreesWithSites } from "./base.js";
 import { ProfileValidationError, loadProfile } from "./load.js";
 
 /**
@@ -15,16 +16,23 @@ import { ProfileValidationError, loadProfile } from "./load.js";
 export const LibraryProfileSchema = z
   .object({
     kind: z.literal("library"),
-    profileId: ProfileSchema.innerType().shape.profileId,
-    identity: z
-      .object({
-        siteUrl: z.string().url(),
-        library: z.string().min(1),
-        searchRegion: z.string().min(1).optional(),
-      })
-      .strict(),
+    profileId: ProfileIdSchema,
+    identity: SiteEntrySchema.omit({ workbookPath: true }).strict(),
+    sites: SitesSchema,
   })
-  .strict();
+  .strict()
+  .superRefine((profile, ctx) => {
+    refineIdentityAgreesWithSites(profile, ctx);
+    profile.sites.forEach((site, index) => {
+      if (site.workbookPath !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sites", index, "workbookPath"],
+          message: "a library profile has no workbook, so a site entry cannot carry a workbookPath",
+        });
+      }
+    });
+  });
 
 export type LibraryProfile = z.infer<typeof LibraryProfileSchema>;
 
@@ -39,7 +47,8 @@ export function isLibraryProfile(profile: AnyProfile): profile is LibraryProfile
  * compliance profile, so every profile written before kinds existed loads
  * exactly as it did.
  */
-export function loadAnyProfile(input: unknown): AnyProfile {
+export function loadAnyProfile(rawInput: unknown): AnyProfile {
+  const input = normalizeProfileSites(rawInput);
   const kind = typeof input === "object" && input !== null ? (input as { kind?: unknown }).kind : undefined;
   if (kind === undefined || kind === "compliance") {
     const { kind: _ignored, ...rest } = input as Record<string, unknown>;

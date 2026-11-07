@@ -203,6 +203,7 @@ describe("crossCheckOtherLibraries failures", () => {
       kind: "library" as const,
       profileId: "docs",
       identity: { siteUrl: "https://contoso.sharepoint.com/sites/Example", library: "Docs", searchRegion: "NAM" },
+      sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", library: "Docs", searchRegion: "NAM" }],
     };
 
     const result = await crossCheckOtherLibraries(client, library, [], "drive-1");
