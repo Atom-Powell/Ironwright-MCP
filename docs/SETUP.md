@@ -483,7 +483,7 @@ tools do work with it. `examples/profiles/library-example.json` is the committed
 
 Any profile, of either kind, may be written with `sites` instead of `identity`. `sites` is a
 non-empty list of entries with `siteUrl` and `library`, and optionally `searchRegion`, `clientId`
-and `workbookPath`; `identity` is then the first entry. This phase still checks every listed site
+and `workbookPath`; `identity` is then the first entry. A compliance profile requires `workbookPath` on every site, and a library profile refuses it. This phase still checks every listed site
 against the one granted site, `IW_SITE_URL`, so a profile naming a second site fails at startup.
 
 ## Running the server
@@ -592,7 +592,7 @@ The server refuses to start without a key. `src/config.ts` names the missing var
 a generator: `node -e "console.log(require('node:crypto').randomBytes(24).toString('hex'))"`.
 Mode `none` is for loopback development only and needs `IW_ALLOW_ANONYMOUS=1` as a second,
 deliberate confirmation. `/health` stays open and every other route is behind the check. The key
-never appears in logs, and the startup line prints only the mode.
+never appears in logs, and the startup line reports the auth mode and never the key.
 
 **Optional.**
 
