@@ -21,7 +21,7 @@ const ACCEPTS_SITE_PROFILES = new Set(["inventory_tree", "query_repository", "ge
 const ACCEPTS_ASSESSMENT = new Set(["open_assessment", "get_assessment", "save_assessment_artifact", "read_assessment_artifact", "verify_publication", "record_findings", "transition_assessment"]);
 const TAKES_NO_PROFILE = new Set(["describe_workbook"]);
 
-describe("which tools accept a library-only profile", () => {
+describe("which tools accept a library or an assessment profile", () => {
   it("places every registered tool in exactly one set", () => {
     for (const tool of ALL_TOOLS) {
       const memberships = [REQUIRES_COMPLIANCE, ACCEPTS_SITE_PROFILES, ACCEPTS_ASSESSMENT, TAKES_NO_PROFILE].filter((set) => set.has(tool.name)).length;

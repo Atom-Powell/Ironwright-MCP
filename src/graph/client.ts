@@ -27,10 +27,13 @@ export interface GraphClient {
   get<T>(pathOrUrl: string, headers?: Record<string, string>): Promise<T>;
   post<T>(pathOrUrl: string, body?: unknown, headers?: Record<string, string>): Promise<T>;
   /**
-   * The only mutating verb this server has. Required rather than optional on
-   * the interface: a caller that had to branch on whether `patch` exists would
-   * be deciding at runtime whether this deployment can write, and that decision
-   * belongs to the registry's write gate, where it is reviewed once.
+   * Changes an existing item's fields or location. It is not the only verb
+   * that writes: `putBytes` writes file content, and `post` creates folders
+   * and list items besides carrying the read only Search query. Required
+   * rather than optional on the interface: a caller that had to branch on
+   * whether `patch` exists would be deciding at runtime whether this
+   * deployment can write, and that decision belongs to the registry's write
+   * gate, where it is reviewed once.
    */
   patch<T>(pathOrUrl: string, body: unknown, headers?: Record<string, string>): Promise<T>;
   /**

@@ -224,8 +224,8 @@ Graph request, and `tests/tools/profile-kinds.test.ts` makes every tool declare 
 
 There are three kinds, not two. A plan generator writes a plan, so `readOnlyHint` is false for
 it. Calling one read-only would be exactly the decorative annotation this project exists to
-avoid. The fourth kind, `lifecycle`, shipped with the assessment module on 2026-11-07, is described in
-the Write-tool design amendment above, and its seven tools are in the table above.
+avoid. The fourth kind, `lifecycle`, is described in the Write-tool design amendment above; it is
+built in the assessment module and its seven tools are in the table above.
 
 Every tool carries a Zod input schema with real constraints and worked examples, an
 `outputSchema` with `structuredContent`, all four annotations set explicitly, and a description

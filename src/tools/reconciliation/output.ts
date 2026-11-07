@@ -38,11 +38,11 @@ export interface ScanProvenance {
   scanSharedWithConcurrentCall: boolean;
   /**
    * Present only when the Search cross-check did not complete, naming why.
-   * `crossCheckOtherLibraries` always names one of the five reasons whenever
+   * `crossCheckOtherLibraries` always names one of its reasons whenever
    * it does not complete, "no-region" included, so absent means the
    * cross-check completed rather than "completed or never ran": every
    * reachable way for it to have never run at all, such as the profile
-   * carrying no searchRegion, is itself one of the five named reasons.
+   * carrying no searchRegion, is itself one of the named reasons.
    * "library-profile" and "assessment-profile" are among the named reasons, but
    * this report never carries either:
    * `reconcile_workbook_vs_repository` refuses those profile kinds through

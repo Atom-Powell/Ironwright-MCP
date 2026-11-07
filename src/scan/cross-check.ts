@@ -44,10 +44,10 @@ export interface CrossCheckResult {
  * `reason` is `undefined` for the one caller, the reconciliation tool, whose
  * own provenance can in principle report the cross-check incomplete without
  * having recorded why (see its own comment on `searchCrossCheckSkipReason`).
- * That caller must not upgrade "I do not know why" into any of the five known
- * causes, so this function gives it a sixth, honest sentence to say instead of
- * inventing one at the call site. `crossCheckOtherLibraries` itself always
- * names one of the five reasons whenever it does not complete, so this branch
+ * That caller must not upgrade "I do not know why" into any of the known
+ * causes, so this function gives it one more, honest sentence to say instead
+ * of inventing one at the call site. `crossCheckOtherLibraries` itself always
+ * names one of the known reasons whenever it does not complete, so this branch
  * is unreached from the scan CLI, which reads `reason` straight off that
  * function's own result. The reconciliation tool itself never observes
  * "library-profile" or "assessment-profile": it refuses both kinds through
@@ -103,7 +103,7 @@ export function describeCrossCheckSkipReason(reason: CrossCheckSkipReason | unde
  * nothing was learned about any library. Every other reason, an unrecorded
  * one included, means an attempt reached at least one library, which is why
  * an operator's next step differs by exactly this split rather than by which
- * of the six sentences above fired.
+ * of the sentences above fired.
  */
 export function crossCheckNeverAttempted(reason: CrossCheckSkipReason | undefined): boolean {
   return reason === "no-region" || reason === "library-profile" || reason === "assessment-profile";
