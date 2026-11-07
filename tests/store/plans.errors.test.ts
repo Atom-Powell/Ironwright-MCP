@@ -4,8 +4,8 @@ import { createTableStateStore, type TableEntityLike } from "../../src/store/tab
 import { MalformedPlanEntityError, MAX_PLAN_JSON_CHARS, PlanTooLargeError, type StoredPlan } from "../../src/store/types.js";
 import { FakeTableClient } from "./fake-table-client.js";
 
-function fakeClients(): { deltaLinks: FakeTableClient; inventory: FakeTableClient; plans: FakeTableClient } {
-  return { deltaLinks: new FakeTableClient(), inventory: new FakeTableClient(), plans: new FakeTableClient() };
+function fakeClients(): { deltaLinks: FakeTableClient; inventory: FakeTableClient; plans: FakeTableClient; journal: FakeTableClient } {
+  return { deltaLinks: new FakeTableClient(), inventory: new FakeTableClient(), plans: new FakeTableClient(), journal: new FakeTableClient() };
 }
 
 function planWithItems(count: number): StoredPlan {
@@ -82,7 +82,7 @@ describe("malformed stored plan entities", () => {
     const entity = validEntity();
     delete entity.items;
     await plans.upsertEntity(entity);
-    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory: new FakeTableClient(), plans });
+    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory: new FakeTableClient(), plans, journal: new FakeTableClient() });
 
     await expect(store.getPlan("example", planId)).rejects.toBeInstanceOf(MalformedPlanEntityError);
     await expect(store.getPlan("example", planId)).rejects.toThrow(/items/);
@@ -91,7 +91,7 @@ describe("malformed stored plan entities", () => {
   it("refuses a plan whose items field is not valid JSON", async () => {
     const plans = new FakeTableClient();
     await plans.upsertEntity({ ...validEntity(), items: "not json{" });
-    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory: new FakeTableClient(), plans });
+    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory: new FakeTableClient(), plans, journal: new FakeTableClient() });
 
     await expect(store.getPlan("example", planId)).rejects.toBeInstanceOf(MalformedPlanEntityError);
     await expect(store.getPlan("example", planId)).rejects.toThrow(/items/);
@@ -100,7 +100,7 @@ describe("malformed stored plan entities", () => {
   it("refuses a plan whose items field parses to something that is not an array", async () => {
     const plans = new FakeTableClient();
     await plans.upsertEntity({ ...validEntity(), items: "{}" });
-    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory: new FakeTableClient(), plans });
+    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory: new FakeTableClient(), plans, journal: new FakeTableClient() });
 
     await expect(store.getPlan("example", planId)).rejects.toBeInstanceOf(MalformedPlanEntityError);
     await expect(store.getPlan("example", planId)).rejects.toThrow(/items/);
@@ -111,7 +111,7 @@ describe("malformed stored plan entities", () => {
     const entity = validEntity();
     delete entity.driveId;
     await plans.upsertEntity(entity);
-    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory: new FakeTableClient(), plans });
+    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory: new FakeTableClient(), plans, journal: new FakeTableClient() });
 
     await expect(store.getPlan("example", planId)).rejects.toBeInstanceOf(MalformedPlanEntityError);
     await expect(store.getPlan("example", planId)).rejects.toThrow(/driveId/);
@@ -120,7 +120,7 @@ describe("malformed stored plan entities", () => {
   it("refuses a plan whose kind field is present but not \"rename\"", async () => {
     const plans = new FakeTableClient();
     await plans.upsertEntity({ ...validEntity(), kind: "reversal" });
-    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory: new FakeTableClient(), plans });
+    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory: new FakeTableClient(), plans, journal: new FakeTableClient() });
 
     await expect(store.getPlan("example", planId)).rejects.toBeInstanceOf(MalformedPlanEntityError);
     await expect(store.getPlan("example", planId)).rejects.toThrow(/kind/);
@@ -129,7 +129,7 @@ describe("malformed stored plan entities", () => {
   it("names all three accepted kinds when it refuses an unknown one", async () => {
     const plans = new FakeTableClient();
     await plans.upsertEntity({ ...validEntity(), kind: "reversal" });
-    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory: new FakeTableClient(), plans });
+    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory: new FakeTableClient(), plans, journal: new FakeTableClient() });
 
     await expect(store.getPlan("example", planId)).rejects.toThrow(/not "rename", "move" or "custom"/);
   });
@@ -137,7 +137,7 @@ describe("malformed stored plan entities", () => {
   it("refuses a plan whose steps field is present but not a JSON array", async () => {
     const plans = new FakeTableClient();
     await plans.upsertEntity({ ...validEntity(), steps: "{}" });
-    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory: new FakeTableClient(), plans });
+    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory: new FakeTableClient(), plans, journal: new FakeTableClient() });
 
     await expect(store.getPlan("example", planId)).rejects.toBeInstanceOf(MalformedPlanEntityError);
     await expect(store.getPlan("example", planId)).rejects.toThrow(/steps/);

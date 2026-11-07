@@ -5,14 +5,14 @@ import { stateStoreConformance } from "./conformance.js";
 
 describe("Azure Table state store", () => {
   stateStoreConformance(() =>
-    createTableStateStore({ deltaLinks: new FakeTableClient(), inventory: new FakeTableClient(), plans: new FakeTableClient() }),
+    createTableStateStore({ deltaLinks: new FakeTableClient(), inventory: new FakeTableClient(), plans: new FakeTableClient(), journal: new FakeTableClient() }),
   );
 });
 
 describe("Azure Table state store write shape", () => {
   it("chunks upserts into transactions of at most 100 and issues deletes individually", async () => {
     const inventory = new FakeTableClient();
-    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory, plans: new FakeTableClient() });
+    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory, plans: new FakeTableClient(), journal: new FakeTableClient() });
 
     await store.applyInventoryChanges("example", "d1", [
       ...Array.from({ length: 150 }, (_, index) => ({
@@ -36,7 +36,7 @@ describe("Azure Table state store write shape", () => {
 
   it("stores the raw item id alongside the encoded row key so it reads back without decoding", async () => {
     const inventory = new FakeTableClient();
-    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory, plans: new FakeTableClient() });
+    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory, plans: new FakeTableClient(), journal: new FakeTableClient() });
 
     await store.applyInventoryChanges("example", "d1", [
       {
@@ -61,7 +61,7 @@ describe("Azure Table state store write shape", () => {
 
   it("doubles a single quote in the partition filter so a drive id cannot break out of the literal", async () => {
     const inventory = new FakeTableClient();
-    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory, plans: new FakeTableClient() });
+    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory, plans: new FakeTableClient(), journal: new FakeTableClient() });
     const filters: string[] = [];
     inventory.listEntities = async function* (options?: { queryOptions?: { filter?: string } }) {
       filters.push(options?.queryOptions?.filter ?? "");

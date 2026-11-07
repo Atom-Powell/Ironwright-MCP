@@ -33,6 +33,23 @@ export function inventoryPartitionKey(profileId: string, driveId: string): strin
 }
 
 /**
+ * One partition per assessment. The assessment id is rendered by the module
+ * from a profile template, so its alphabet is the customer's choice and it
+ * is checked rather than encoded, like the drive id: a forbidden character
+ * here means the template needs changing, which is worth failing loudly on.
+ */
+export function journalPartitionKey(profileId: string, assessmentId: string): string {
+  if (FORBIDDEN.test(profileId)) throw new UnsafeKeyError("profile id", profileId);
+  if (FORBIDDEN.test(assessmentId)) throw new UnsafeKeyError("assessment id", assessmentId);
+  return `${profileId}|journal|${assessmentId}`;
+}
+
+/** Sorts ascending by time, then by correlation id, as a row key and as a comparator. */
+export function journalRowKey(entry: { at: string; correlationId: string }): string {
+  return `${entry.at}|${entry.correlationId}`;
+}
+
+/**
  * A driveItem id is an opaque string whose alphabet we do not control, so it is
  * encoded rather than checked. base64url keeps the result inside the characters
  * a key accepts and stays reversible, which a hash would not.

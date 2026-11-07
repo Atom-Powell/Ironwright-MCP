@@ -4,6 +4,8 @@ import {
   decodeRowKey,
   encodeRowKey,
   inventoryPartitionKey,
+  journalPartitionKey,
+  journalRowKey,
   MAX_TRANSACTION_SIZE,
   planInventoryChanges,
 } from "./keys.js";
@@ -13,6 +15,7 @@ import type {
   ApplyResult,
   ExcludedPlanItem,
   InventoryRecord,
+  JournalEntry,
   RenamePlanItem,
   ScannedDrive,
   StateStore,
@@ -44,6 +47,7 @@ export interface TableStateStoreClients {
   deltaLinks: TableClientLike;
   inventory: TableClientLike;
   plans: TableClientLike;
+  journal: TableClientLike;
 }
 
 function statusCodeOf(error: unknown): number | undefined {
@@ -306,6 +310,35 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
       );
     },
 
+    async appendJournalEntry(profileId, assessmentId, entry) {
+      // The entry is one JSON property: every field is short (a path, a hash,
+      // an etag), far under the 32 KB property cap.
+      await clients.journal.upsertEntity(
+        {
+          partitionKey: journalPartitionKey(profileId, assessmentId),
+          rowKey: encodeRowKey(journalRowKey(entry)),
+          entry: JSON.stringify(entry),
+        },
+        "Replace",
+      );
+    },
+
+    async listJournal(profileId, assessmentId) {
+      const partitionKey = journalPartitionKey(profileId, assessmentId);
+      const entries: JournalEntry[] = [];
+      for await (const entity of clients.journal.listEntities({
+        queryOptions: { filter: partitionFilter(partitionKey) },
+      })) {
+        if (typeof entity.entry === "string") entries.push(JSON.parse(entity.entry) as JournalEntry);
+      }
+      // In memory, because base64url row keys do not preserve time order.
+      return entries.sort((a, b) => {
+        const x = journalRowKey(a);
+        const y = journalRowKey(b);
+        return x < y ? -1 : x > y ? 1 : 0;
+      });
+    },
+
     async getPlan(profileId, planId) {
       try {
         const entity = await clients.plans.getEntity(profileId, encodeRowKey(planId));
@@ -350,7 +383,7 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
  * experience.
  */
 export async function ensureTables(clients: TableStateStoreClients): Promise<void> {
-  for (const client of [clients.deltaLinks, clients.inventory, clients.plans]) {
+  for (const client of [clients.deltaLinks, clients.inventory, clients.plans, clients.journal]) {
     try {
       await client.createTable();
     } catch (error) {
@@ -363,7 +396,7 @@ export async function ensureTables(clients: TableStateStoreClients): Promise<voi
 
 /**
  * Returns the clients alongside the store so the entry point can call
- * `ensureTables` on the same pair rather than constructing a second one and
+ * `ensureTables` on the same set rather than constructing a second one and
  * creating tables a different store would then not use.
  */
 export function tableStateStoreFromConnectionString(
@@ -373,6 +406,7 @@ export function tableStateStoreFromConnectionString(
     deltaLinks: TableClient.fromConnectionString(connectionString, "DeltaLinks") as unknown as TableClientLike,
     inventory: TableClient.fromConnectionString(connectionString, "Inventory") as unknown as TableClientLike,
     plans: TableClient.fromConnectionString(connectionString, "Plans") as unknown as TableClientLike,
+    journal: TableClient.fromConnectionString(connectionString, "Journal") as unknown as TableClientLike,
   };
   return { store: createTableStateStore(clients), clients };
 }

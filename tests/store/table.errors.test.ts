@@ -8,7 +8,7 @@ describe("Azure Table state store failures", () => {
     inventory.submitTransaction = async () => {
       throw new Error("the service is unavailable");
     };
-    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory, plans: new FakeTableClient() });
+    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory, plans: new FakeTableClient(), journal: new FakeTableClient() });
 
     await expect(
       store.applyInventoryChanges("example", "d1", [
@@ -22,7 +22,7 @@ describe("Azure Table state store failures", () => {
 
   it("tolerates a 404 on delete but not another failure", async () => {
     const inventory = new FakeTableClient();
-    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory, plans: new FakeTableClient() });
+    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory, plans: new FakeTableClient(), journal: new FakeTableClient() });
 
     await expect(
       store.applyInventoryChanges("example", "d1", [{ kind: "delete", itemId: "absent" }]),
@@ -41,7 +41,7 @@ describe("Azure Table state store failures", () => {
 
   it("clears a partition one row at a time when the batched delete fails", async () => {
     const inventory = new FakeTableClient();
-    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory, plans: new FakeTableClient() });
+    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory, plans: new FakeTableClient(), journal: new FakeTableClient() });
 
     await store.applyInventoryChanges("example", "d1", [
       {
@@ -94,7 +94,7 @@ describe("ensureTables", () => {
       throw error;
     };
 
-    await expect(ensureTables({ deltaLinks, inventory, plans })).resolves.toBeUndefined();
+    await expect(ensureTables({ deltaLinks, inventory, plans, journal: new FakeTableClient() })).resolves.toBeUndefined();
   });
 
   it("lets a non-409 failure from createTable propagate", async () => {
@@ -107,7 +107,7 @@ describe("ensureTables", () => {
       throw error;
     };
 
-    await expect(ensureTables({ deltaLinks, inventory, plans })).rejects.toThrow(/forbidden/);
+    await expect(ensureTables({ deltaLinks, inventory, plans, journal: new FakeTableClient() })).rejects.toThrow(/forbidden/);
   });
 
   it("creates all three clients' tables, not just the first", async () => {
@@ -127,7 +127,7 @@ describe("ensureTables", () => {
       plansCreated = true;
     };
 
-    await ensureTables({ deltaLinks, inventory, plans });
+    await ensureTables({ deltaLinks, inventory, plans, journal: new FakeTableClient() });
 
     expect(deltaLinksCreated).toBe(true);
     expect(inventoryCreated).toBe(true);

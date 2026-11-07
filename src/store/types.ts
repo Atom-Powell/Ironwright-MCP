@@ -40,6 +40,23 @@ export interface ScannedDrive {
   lastScanAt: string;
 }
 
+export interface JournalEntry {
+  /** ISO instant. */
+  at: string;
+  correlationId: string;
+  /** The module's stage name, e.g. "ID", "DOSSIER". */
+  stage: string;
+  operation: "list_item_created" | "list_item_updated" | "folder_created" | "file_created" | "file_overwritten";
+  /** List name plus item id, or library-relative path, as the server computed it. */
+  target: string;
+  etagBefore?: string;
+  etagAfter?: string;
+  /** sha256 hex of what was written, for files. */
+  contentHash?: string;
+  /** The SharePoint version that held the prior content, on an overwrite. */
+  versionId?: string;
+}
+
 export interface StateStore {
   getDeltaLink(profileId: string, driveId: string): Promise<string | undefined>;
   setDeltaLink(profileId: string, driveId: string, deltaLink: string, lastScanAt: string): Promise<void>;
@@ -74,6 +91,17 @@ export interface StateStore {
    */
   savePlan(profileId: string, plan: StoredPlan): Promise<void>;
   getPlan(profileId: string, planId: string): Promise<StoredPlan | undefined>;
+
+  /**
+   * Appends one entry to an assessment's journal. Append, never replace: the
+   * journal is the audit record of what a lifecycle tool did, and the
+   * reversal record for what is reversible, so an entry once written is
+   * never edited. Ordering is by `at` then `correlationId`, which is why
+   * both are required.
+   */
+  appendJournalEntry(profileId: string, assessmentId: string, entry: JournalEntry): Promise<void>;
+  /** Ascending by `at`, then `correlationId`, whatever order the entries were appended in. */
+  listJournal(profileId: string, assessmentId: string): Promise<JournalEntry[]>;
 }
 
 /**
