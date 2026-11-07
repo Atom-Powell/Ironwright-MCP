@@ -52,6 +52,22 @@ describe("get_assessment", () => {
     expect(output.graphRequests).toBe(graph.requests());
   });
 
+  it("says why the root path could not be computed, and reads nothing from the drive, for an item with no Title", async () => {
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      { method: "get", pathIncludes: ["/lists/Assessments/items?", `AssessmentId eq '${ID}'`], headersInclude: NON_INDEXED_QUERY_HEADER, response: page([listItem("2", { ...PROBE_FIELDS, Title: "" })]) },
+    ]);
+
+    const result = await runGetAssessment({ profileId: PROFILE, assessmentId: ID }, assessmentToolContext(graph));
+
+    expect(result.isError).toBeUndefined();
+    const text = resultText(result);
+    expect(text).toContain("The workspace root path could not be computed: item 2 has no Title, so the drive was not read.");
+    expect(text).not.toContain("not found");
+    expect(text).not.toContain("Artifacts present");
+    expect(calls.filter((call) => call.path.includes("/drives/drive-1/root:"))).toEqual([]);
+  });
+
   it("lists a vendor's assessments by its folder name without reading the drive", async () => {
     const { graph, calls } = createScriptedGraph([
       ...RESOLVE_DRIVE_SCRIPT,

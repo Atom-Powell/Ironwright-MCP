@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  recordFromFields, requireArtifact, requireInProgress, requireRecord, requireRoot,
+  recordFromFields, requireArtifact, requireInProgress, requireRecord, requireRoot, rootPathUnavailable,
   type AssessmentColumns, type AssessmentState, type Precondition,
 } from "../../../src/domain/assessment/state.js";
 
@@ -43,6 +43,25 @@ describe("precondition failures", () => {
   it("cites the root path when the root is absent", () => {
     const result = failure(requireRoot(stateWith({ rootPresent: false })));
     expect(result.evidence[0]).toMatchObject({ source: "drive", target: "Assessments/V/A-1" });
+  });
+
+  it.each([
+    ["Title", "item 7 has no Title"],
+    ["vendor folder", "item 7 has no vendor folder"],
+  ])("cites the list item, not a folder, when the root path could not be computed for a missing %s", (_label, reason) => {
+    const result = failure(requireRoot(stateWith({ rootPath: undefined, rootPathUnavailable: reason, rootPresent: false })));
+    expect(result.expected).toBe("the workspace root folder present");
+    expect(result.observed).toBe(`the root path could not be computed: ${reason}`);
+    expect(result.evidence).toEqual([{ source: "list", target: "assessments item 7", found: reason }]);
+  });
+
+  it("names the first field the templates need that the record lacks", () => {
+    const full = recordFromFields({ Title: "V", AssessmentId: "A-1", VendorFolder: "V" }, "7", undefined, columns);
+    expect(rootPathUnavailable(undefined)).toBe("no assessment item was found");
+    expect(rootPathUnavailable({ ...full, assessmentId: undefined })).toBe("item 7 has no assessment id");
+    expect(rootPathUnavailable({ ...full, vendorTitle: undefined })).toBe("item 7 has no Title");
+    expect(rootPathUnavailable({ ...full, vendorFolder: undefined })).toBe("item 7 has no vendor folder");
+    expect(rootPathUnavailable(full)).toBeUndefined();
   });
 
   it("cites the artifact path when the artifact is absent", () => {

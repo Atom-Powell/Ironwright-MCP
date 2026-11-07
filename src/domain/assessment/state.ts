@@ -39,6 +39,12 @@ export interface ArtifactPresence {
 export interface AssessmentState {
   record: AssessmentRecord | undefined;
   rootPath: string | undefined;
+  /**
+   * Why rootPath is undefined, for example "item 7 has no Title", set exactly
+   * when it is. The drive was not read in that case, so a refusal must name
+   * the missing field rather than report a folder as not found.
+   */
+  rootPathUnavailable?: string;
   rootPresent: boolean;
   artifacts: ArtifactPresence[];
 }
@@ -104,11 +110,20 @@ export function requireInProgress(state: AssessmentState, labels: { inProgress: 
 
 export function requireRoot(state: AssessmentState): Precondition {
   if (state.rootPresent) return { ok: true };
+  if (state.rootPath === undefined) {
+    const reason = state.rootPathUnavailable ?? "the state carries no root path";
+    return {
+      ok: false,
+      expected: "the workspace root folder present",
+      observed: `the root path could not be computed: ${reason}`,
+      evidence: [{ source: "list", target: state.record === undefined ? "the assessments list" : `assessments item ${state.record.itemId}`, found: reason }],
+    };
+  }
   return {
     ok: false,
     expected: "the workspace root folder present",
     observed: "the folder was not found",
-    evidence: [{ source: "drive", target: state.rootPath ?? "(root path not computed)", found: "not found" }],
+    evidence: [{ source: "drive", target: state.rootPath, found: "not found" }],
   };
 }
 
@@ -126,4 +141,17 @@ export function requireArtifact(state: AssessmentState, kind: string): Precondit
 
 export function allOf(...checks: Precondition[]): Precondition {
   return checks.find((check) => !check.ok) ?? { ok: true };
+}
+
+/**
+ * Why the workspace paths cannot be rendered for this record, or undefined
+ * when they can. Checked in the order the templates need the values, so the
+ * reason names the first field missing.
+ */
+export function rootPathUnavailable(record: AssessmentRecord | undefined): string | undefined {
+  if (record === undefined) return "no assessment item was found";
+  if (record.assessmentId === undefined) return `item ${record.itemId} has no assessment id`;
+  if (record.vendorTitle === undefined) return `item ${record.itemId} has no Title`;
+  if (record.vendorFolder === undefined) return `item ${record.itemId} has no vendor folder`;
+  return undefined;
 }

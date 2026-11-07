@@ -97,8 +97,11 @@ export async function runGetAssessment(input: unknown, context: ToolContext): Pr
       const present = artifacts.filter((artifact) => artifact.present).map((artifact) => artifact.kind);
       const text =
         `${args.assessmentId}: item ${record.itemId} in ${listName}, status ${JSON.stringify(record.status ?? null)}, state ${JSON.stringify(record.state ?? null)}. ` +
-        `Workspace root ${state.rootPath ?? "(not computed)"} ${state.rootPresent ? "is present" : "was not found"}. ` +
-        `Artifacts present: ${present.length === 0 ? "none" : present.join(", ")}. Journal entries: ${journal.entries}.`;
+        (state.rootPath === undefined
+          ? `The workspace root path could not be computed: ${state.rootPathUnavailable ?? "the state carries no root path"}, so the drive was not read. `
+          : `Workspace root ${state.rootPath} ${state.rootPresent ? "is present" : "was not found"}. ` +
+            `Artifacts present: ${present.length === 0 ? "none" : present.join(", ")}. `) +
+        `Journal entries: ${journal.entries}.`;
       return { structuredContent: output, content: [{ type: "text" as const, text }] };
     }
 
