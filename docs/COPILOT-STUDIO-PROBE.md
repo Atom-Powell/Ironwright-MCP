@@ -36,6 +36,8 @@ Azure subscription at any point.
 Context Protocol option. Before entering a URL, record every field the dialog asks for and every
 authentication choice it offers, using the exact wording. Do not complete the dialog.
 
+Also record whether the dialog can send more than one custom header with a fixed value. Cloudflare Access service tokens need two (`CF-Access-Client-Id` and `CF-Access-Client-Secret`), and whether that is possible decides whether Access is documented as optional hardening or left out.
+
 **A4. Limits on the connector.** Record any text on those screens about transport, tool or resource
 support, tool count limits, or data loss prevention.
 
@@ -67,9 +69,7 @@ credential while it is up: keep the tunnel running only during a probe, and stop
 
 ## Part B: needs the probe server running behind a tunnel
 
-**B1. Tunnel acceptance.** With the probe server behind a dev tunnel, does Copilot Studio accept
-the tunnel URL? Record which authentication choices worked and which were refused, with the error
-text if short.
+**B1. Tunnel acceptance.** Does Copilot Studio accept the server URL as given, for a dev tunnel hostname and for a hostname on an owned domain fronted by Cloudflare Tunnel? Record any validation message either produces. Also record which authentication choices worked and which were refused, with the error text if short.
 
 **B2. Tool discovery.** After connecting, does Copilot Studio list both dummy tools with their
 descriptions and parameter names as the server sent them? Record any difference, including
