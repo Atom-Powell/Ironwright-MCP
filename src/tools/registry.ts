@@ -42,5 +42,5 @@ export const ALL_TOOLS: ToolDefinition[] = [
  * never whether the gate applies.
  */
 export function selectTools(allowWrites: boolean, source: readonly ToolDefinition[] = ALL_TOOLS): ToolDefinition[] {
-  return allowWrites ? [...source] : source.filter((tool) => tool.kind !== "write");
+  return allowWrites ? [...source] : source.filter((tool) => tool.kind !== "write" && tool.kind !== "lifecycle");
 }

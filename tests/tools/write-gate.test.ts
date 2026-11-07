@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ALL_TOOLS, selectTools } from "../../src/tools/registry.js";
+import type { ToolDefinition } from "../../src/tools/types.js";
 import { loadConfig } from "../../src/server/config.js";
 
 describe("selectTools", () => {
@@ -11,6 +12,12 @@ describe("selectTools", () => {
   it("keeps plan tools when writes are disabled, since a plan is reviewable on its own", () => {
     const selected = selectTools(false);
     expect(selected.filter((tool) => tool.kind === "plan").length).toBeGreaterThan(0);
+  });
+
+  it("omits lifecycle tools when writes are disabled, since they advance state", () => {
+    const lifecycleFixture = { ...ALL_TOOLS[0], name: "fixture_lifecycle", kind: "lifecycle" } as ToolDefinition;
+    expect(selectTools(false, [lifecycleFixture])).toEqual([]);
+    expect(selectTools(true, [lifecycleFixture])).toContain(lifecycleFixture);
   });
 
   it("keeps every tool when writes are enabled", () => {
