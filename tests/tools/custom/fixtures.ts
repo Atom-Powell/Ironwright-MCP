@@ -42,8 +42,9 @@ export function customGraph(files: readonly RepositoryFile[] = FILES) {
 }
 
 /**
- * A registry carrying both the compliance example profile and the library-only
- * "shared-docs" profile, since generate_custom_plan works over either.
+ * A registry carrying the compliance example profile, the library-only
+ * "shared-docs" profile and the assessment "vendor-assessments" profile, since
+ * generate_custom_plan works over any of them.
  */
 export function customContext(graph: GraphClient, snapshotValue: RepositorySnapshot = customSnapshot()): ToolContext {
   const result = scanResultFor(snapshotValue);
@@ -57,6 +58,10 @@ export function customContext(graph: GraphClient, snapshotValue: RepositorySnaps
         {
           source: "library-example.json",
           contents: JSON.parse(readFileSync("examples/profiles/library-example.json", "utf8")) as unknown,
+        },
+        {
+          source: "assessment-example.json",
+          contents: JSON.parse(readFileSync("examples/profiles/assessment-example.json", "utf8")) as unknown,
         },
       ],
       SITE,

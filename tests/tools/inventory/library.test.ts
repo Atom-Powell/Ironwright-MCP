@@ -9,6 +9,7 @@ const SITE = "https://contoso.sharepoint.com/sites/Example";
 
 const EXAMPLE_PROFILE = JSON.parse(readFileSync("examples/profiles/example.json", "utf8"));
 const LIBRARY_PROFILE = JSON.parse(readFileSync("examples/profiles/library-example.json", "utf8"));
+const ASSESSMENT_PROFILE = JSON.parse(readFileSync("examples/profiles/assessment-example.json", "utf8"));
 
 /**
  * Mirrors run.test.ts's own contextWith helper: a scan coordinator stub that
@@ -44,6 +45,7 @@ function libraryContext(scan?: Partial<ScanResult>, joined = false) {
       [
         { source: "example.json", contents: EXAMPLE_PROFILE },
         { source: "library-example.json", contents: LIBRARY_PROFILE },
+        { source: "assessment-example.json", contents: ASSESSMENT_PROFILE },
       ],
       SITE,
     ),
@@ -60,5 +62,16 @@ describe("runInventoryTree over a library-only profile", () => {
     expect(structured.profileId).toBe("shared-docs");
     expect(structured.items.map((item) => item.path)).toContain("Reports/notes.docx");
     expect(structured.items.map((item) => item.path)).toContain("Reports");
+  });
+});
+
+describe("runInventoryTree over an assessment profile", () => {
+  it("returns a structured inventory, since it reads only the site and library", async () => {
+    const result = await runInventoryTree({ profileId: "vendor-assessments" }, libraryContext());
+
+    expect(result.isError).toBeFalsy();
+    const structured = result.structuredContent as { profileId: string; items: Array<{ path: string }> };
+    expect(structured.profileId).toBe("vendor-assessments");
+    expect(structured.items.map((item) => item.path)).toContain("Reports/notes.docx");
   });
 });

@@ -14,11 +14,10 @@ const REQUIRES_COMPLIANCE = new Set([
   "execute_move_plan",
   "replicate_template",
 ]);
-// Tools that work over any site profile, library or compliance (ruling 4). An assessment
-// profile has a site and a library too, but which tools accept it is decided per tool when
-// the assessment tools land, so those are classified separately below.
+// Ruling 4: a tool that accepts a library profile accepts an assessment profile too, because
+// both carry only a site and a library and these tools read nothing else.
 const ACCEPTS_SITE_PROFILES = new Set(["inventory_tree", "query_repository", "generate_custom_plan", "execute_custom_plan"]);
-// Filled in when the assessment tools are registered.
+// The assessment module's own tools, which no other kind of profile can use. Filled in when they are registered.
 const ACCEPTS_ASSESSMENT = new Set<string>();
 const TAKES_NO_PROFILE = new Set(["describe_workbook"]);
 

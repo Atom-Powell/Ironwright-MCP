@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { crossCheckOtherLibraries } from "../../src/scan/cross-check.js";
 import { loadProfile } from "../../src/domain/profile/load.js";
+import { loadAnyProfile } from "../../src/domain/profile/library.js";
 import type { GraphClient } from "../../src/graph/client.js";
 import { UnexpectedTokenRolesError } from "../../src/graph/token.js";
 
@@ -209,6 +210,17 @@ describe("crossCheckOtherLibraries failures", () => {
     const result = await crossCheckOtherLibraries(client, library, [], "drive-1");
 
     expect(result).toEqual({ files: [], complete: false, reason: "library-profile" });
+    expect(posts).toBe(0);
+  });
+
+  it("skips an assessment profile with its own reason, not the library one, and spends no request", async () => {
+    let posts = 0;
+    const client = { post: () => { posts += 1; return Promise.reject(new Error("must not search")); } };
+    const assessment = loadAnyProfile(JSON.parse(readFileSync(new URL("../../examples/profiles/assessment-example.json", import.meta.url), "utf8")));
+
+    const result = await crossCheckOtherLibraries(client, assessment, [], "drive-1");
+
+    expect(result).toEqual({ files: [], complete: false, reason: "assessment-profile" });
     expect(posts).toBe(0);
   });
 });
