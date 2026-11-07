@@ -331,23 +331,25 @@ probe server first and the real server second, with the call trace as the eviden
 
 ## Assumptions
 
-Every row is unverified as of this draft. A row with no evidence blocks the implementation plan.
-Probes L and F are one script under `scripts/assessment-probe/`, run against the Ironwright tenant
-with responses recorded, redacted and kept beside the spec. Probes A and B are in
-`docs/COPILOT-STUDIO-PROBE.md`.
+Rows L and F were measured on 2026-11-07 by the probe under `scripts/assessment-probe/`, run against
+the Ironwright developer tenant under a token the runner verified to carry exactly `Sites.Selected`.
+The redacted recording and report are in `evidence/2026-11-07-assessment-probe/` beside this spec,
+and the findings that changed the design are in the 2026-11-07 amendment at the end. Rows A and B
+are in `docs/COPILOT-STUDIO-PROBE.md` and remain unverified. A row with no evidence blocks the
+implementation plan that depends on it.
 
-| Assumption | Why the design needs it | Probe |
-|---|---|---|
-| `Sites.Selected` reaches list items under the site for read, create and update | The state lists are the consumer's system of record | L1 |
-| List item create returns the item with its integer id; a fields PATCH returns the updated fields | ID minting and every status update | L2 |
-| A list query filtered on a field works on this grant, with or without the non indexed query header | Open by vendor and scope, lookup by ID | L3 |
-| Folder create by path with `conflictBehavior: fail` returns the item with an ETag and answers 409 on an existing folder | Additive workspace creation and the retry rule | F1 |
-| A small content PUT with `conflictBehavior: fail` refuses an occupied name with 409 | Create file never replaces | F2 |
-| The same PUT under `If-Match` answers 412 on a stale ETag and returns the new ETag on success | Overwrite only under a precondition | F3 |
-| Copilot Studio's add tool dialog accepts a key header or a bearer token | Which inbound mode is wired | A3 |
-| Copilot Studio accepts a Cloudflare hostname as the server URL | The operator's own ingress | B1 |
-| A scan in flight survives its client disconnecting at the edge | What the ingress docs may claim about long scans | Test in the suite |
-| The existing compliance and library tools answer identically after the move to modules | The platform refactor changes nothing it did not mean to | Registry test |
+| Assumption | Why the design needs it | Probe | Evidence |
+|---|---|---|---|
+| `Sites.Selected` reaches list items under the site for read, create and update | The state lists are the consumer's system of record | L1 | Confirmed 2026-11-07: read 200, create 201, fields update 200 (L1, L2a, L2b). Under the `read` role the create answered 403 `accessDenied` |
+| List item create returns the item with its integer id; a fields PATCH returns the updated fields | ID minting and every status update | L2 | Confirmed 2026-11-07: the body's `id` is the integer rendered as a string, `"2"`; the fields PATCH returned the whole fields object with the new value, and a single item read it back (L2a, L2b, L1b) |
+| A list query filtered on a field works on this grant, with or without the non indexed query header | Open by vendor and scope, lookup by ID | L3 | Amended 2026-11-07: without the header, 400 `invalidRequest` naming the column as not indexed; with `Prefer: HonorNonIndexedQueriesWarningMayFailRandomly`, 200 with the one item (L3a, L3b) |
+| Folder create by path with `conflictBehavior: fail` returns the item with an ETag and answers 409 on an existing folder | Additive workspace creation and the retry rule | F1 | Confirmed 2026-11-07: 201 with `eTag` in the body, 409 `nameAlreadyExists` on the repeat (F0, F1a, F1b) |
+| A small content PUT with `conflictBehavior: fail` refuses an occupied name with 409 | Create file never replaces | F2 | Confirmed 2026-11-07: 201 with `eTag` in the body, 409 `nameAlreadyExists` on the occupied name, and the content read back unchanged (F2a, F2b, F4) |
+| The same PUT under `If-Match` answers 412 on a stale ETag and returns the new ETag on success | Overwrite only under a precondition | F3 | Confirmed for the stale and current cases, 200 with a new `eTag` and 412 (F3a, F3b). Amended 2026-11-07 for the absent case: a PUT under `If-Match` to a path holding nothing created the file and answered 201 (F3c) |
+| Copilot Studio's add tool dialog accepts a key header or a bearer token | Which inbound mode is wired | A3 | Unverified |
+| Copilot Studio accepts a Cloudflare hostname as the server URL | The operator's own ingress | B1 | Unverified |
+| A scan in flight survives its client disconnecting at the edge | What the ingress docs may claim about long scans | Test in the suite | Not part of the 9a probe |
+| The existing compliance and library tools answer identically after the move to modules | The platform refactor changes nothing it did not mean to | Registry test | Not part of the 9a probe |
 
 ## Order of work
 
@@ -402,3 +404,51 @@ a duplicate row, which means a lifecycle tool journals after its write is confir
 The Azure table is named `Journal`, matching the capitalization of the other three.
 
 The four Graph operations named under plan 9b in "Order of work" were moved to plan 9c, where their first caller lives and after plan 9a's evidence exists. `docs/OPEN-ITEMS.md` already titles the rows that way.
+
+## Amendments, 2026-11-07, from plan 9a's probe run
+
+The probe ran against the Ironwright developer tenant on 2026-11-07, under a token the runner
+verified to carry exactly `Sites.Selected`, with the server application's grant widened to `write`
+for the run. Fifteen of seventeen steps answered as the Assumptions table assumed. Two did not, and
+three things the table never asked about were measured on the way. The evidence is
+`evidence/2026-11-07-assessment-probe/recordings.jsonl` and the report beside it.
+
+**`If-Match` on a content PUT does not guard against an absent target.** A PUT to a path holding
+nothing, sent with a valid `If-Match` taken from another file, created the file and answered 201
+(F3c). The project's earlier measurement that Graph evaluates `If-Match` before existence was made
+on a driveItem PATCH, where an absent path answers 412, and it does not carry to the small content
+PUT. The "overwrite file" operation changes accordingly: an ETag precondition proves that a file
+which exists is unchanged, and proves nothing when the file is gone. A lifecycle tool that
+overwrites a file it created reads the item first and refuses when it is absent, rather than
+relying on the precondition to refuse for it, because otherwise a file an operator had moved or
+removed would be recreated at its old path without anyone asking for it. The stale case holds as
+assumed: a wrong ETag answers 412, and its error code is `notAllowed` with the message "ETag does
+not match current item's value", not the `resourceModified` the PATCH case answers, so the
+operation matches on the 412 status and never on the code.
+
+**A filtered list query needs the non-indexed header or an indexed column.**
+`$filter=fields/AssessmentId eq '...'` on a plain text column answered 400 `invalidRequest`, with a
+message naming the column as not indexed and naming `Prefer:
+HonorNonIndexedQueriesWarningMayFailRandomly` as the way to allow it; the same query with that
+header answered 200 with the one matching item (L3a, L3b). The module sends that header on every
+filtered list query. The header's own name carries the caveat: SharePoint may refuse such a query
+once a list passes its view threshold, so the setup documentation tells the operator to index the
+columns the module filters on in the consumer's lists, and the module treats a 400 on a filtered
+query as a plain error carrying that advice rather than something to retry.
+
+**The default library's drive is named `Documents`.** Its URL segment is `Shared Documents`, and
+the probe's first run matched no drive by that name and stopped before the drive steps. The server
+resolves a library by the drive's `name` as Graph lists it, which is the display name shown as the
+library's heading, so a profile names the library that way and never by its URL segment. That was
+already how the compliance profiles behaved. It is recorded because it cost a run.
+
+**ETags come back in the body, not the header.** Every create and overwrite answered with `eTag`
+in the response body, and the content PUTs carried no `ETag` response header at all (F2a, F3a,
+F3c). The four Graph operations read the ETag from the body. The two 409 bodies differ in wording,
+"Name already exists" for a folder and "The specified item name already exists." for a file, under
+the same `nameAlreadyExists` code, so callers match the code.
+
+**The grant widens and narrows without a propagation window.** A list item create under the `read`
+role answered 403 `accessDenied` with nothing more specific; the same request seconds after the
+role was patched to `write` answered 201, and an earlier run had seen the reverse. `npm run
+probe:assessment:grant` is the command for both directions.
