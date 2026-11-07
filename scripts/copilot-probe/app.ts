@@ -1,8 +1,9 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import express from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { createApp } from "../../src/server/app.js";
+import { credentialPresent, inboundAuthMiddleware, type InboundAuthConfig } from "../../src/server/auth.js";
 
 /**
  * A throwaway MCP server for learning what Copilot Studio accepts, built so
@@ -143,28 +144,16 @@ export function buildProbeServer(trace: ProbeOptions["trace"]): McpServer {
   return server;
 }
 
-function keysMatch(supplied: string, expected: string): boolean {
-  const a = Buffer.from(supplied);
-  const b = Buffer.from(expected);
-  // timingSafeEqual throws on unequal lengths, and a length difference is
-  // itself a rejection, so check it first rather than catching.
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
-function suppliedKey(req: express.Request, opts: ProbeOptions): string | undefined {
-  if (opts.authMode === "apikey") {
-    const value = req.header(opts.apiKeyHeader);
-    return value === undefined || value === "" ? undefined : value;
-  }
-  const header = req.header("authorization");
-  const match = header === undefined ? null : /^Bearer (.+)$/i.exec(header);
-  return match?.[1];
-}
-
 export function createProbeApp(opts: ProbeOptions): express.Express {
   if (opts.authMode !== "none" && (opts.apiKey === undefined || opts.apiKey.length < 16)) {
     throw new Error("An API key of at least 16 characters is required unless the auth mode is none.");
   }
+
+  const auth: InboundAuthConfig = {
+    mode: opts.authMode,
+    header: opts.apiKeyHeader,
+    ...(opts.apiKey === undefined ? {} : { key: opts.apiKey }),
+  };
 
   const app = express();
   app.use((req, res, next) => {
@@ -182,7 +171,7 @@ export function createProbeApp(opts: ProbeOptions): express.Express {
         argShapeSent: (req as { argShapeSent?: Record<string, string> }).argShapeSent ?? null,
         status: res.statusCode,
         // Presence only. The value of a credential is never recorded.
-        credentialPresent: opts.authMode === "none" ? null : suppliedKey(req, opts) !== undefined,
+        credentialPresent: credentialPresent(req, auth),
         userAgent: (req.header("user-agent") ?? "").slice(0, 120),
         durationMs: Math.round(performance.now() - started),
       }),
@@ -196,23 +185,7 @@ export function createProbeApp(opts: ProbeOptions): express.Express {
     res.status(200).json({ status: "ok" });
   });
 
-  app.use((req, res, next) => {
-    if (opts.authMode === "none") {
-      next();
-      return;
-    }
-    const supplied = suppliedKey(req, opts);
-    if (supplied !== undefined && keysMatch(supplied, opts.apiKey as string)) {
-      next();
-      return;
-    }
-    if (opts.authMode === "bearer") res.setHeader("WWW-Authenticate", "Bearer");
-    res.status(401).json({
-      jsonrpc: "2.0",
-      error: { code: -32001, message: "Unauthorized." },
-      id: null,
-    });
-  });
+  app.use(inboundAuthMiddleware(auth));
 
   // Parsed here only to record the JSON-RPC method for the trace, which is how
   // probe B2 sees whether Copilot Studio re-lists tools on every turn. The
@@ -240,6 +213,6 @@ export function createProbeApp(opts: ProbeOptions): express.Express {
     });
   }) satisfies express.ErrorRequestHandler);
 
-  app.use(createApp({ serverFactory: () => buildProbeServer(opts.trace) }));
+  app.use(createApp({ auth, serverFactory: () => buildProbeServer(opts.trace) }));
   return app;
 }

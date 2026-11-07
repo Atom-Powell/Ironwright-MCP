@@ -4,7 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createApp } from "../../src/server/app.js";
 
 function app(): ReturnType<typeof createApp> {
-  return createApp({ serverFactory: () => new McpServer({ name: "test", version: "0.0.0" }) });
+  return createApp({ auth: { mode: "none", header: "x-api-key" }, serverFactory: () => new McpServer({ name: "test", version: "0.0.0" }) });
 }
 
 // A stack frame in a response leaks the server's install path and its

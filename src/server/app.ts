@@ -1,6 +1,7 @@
 import express from "express";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { inboundAuthMiddleware, type InboundAuthConfig } from "./auth.js";
 
 export interface AppOptions {
   /**
@@ -8,6 +9,8 @@ export interface AppOptions {
    * probe server, without shipping test-only branches in production code.
    */
   serverFactory: () => McpServer;
+  /** Required, so a caller cannot build an unauthenticated app by omission. */
+  auth: InboundAuthConfig;
 }
 
 export function createApp(opts: AppOptions): express.Express {
@@ -36,6 +39,10 @@ export function createApp(opts: AppOptions): express.Express {
   app.get("/health", (_req, res) => {
     res.status(200).json({ status: "ok" });
   });
+
+  // After /health and before everything else, the 404 and 405 handlers included,
+  // so an unauthenticated scan learns nothing about which routes exist.
+  app.use(inboundAuthMiddleware(opts.auth));
 
   app.post("/mcp", express.json({ limit: "4mb" }), async (req, res) => {
     const server = opts.serverFactory();

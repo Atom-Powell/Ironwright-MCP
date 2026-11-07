@@ -2,7 +2,7 @@ import { createApp } from "./app.js";
 import { installShutdown } from "./shutdown.js";
 import { loadConfig } from "./config.js";
 import { buildServer } from "../mcp/build-server.js";
-import { loadGraphCredentials, loadGrantedSiteUrl, loadShutdownDeadlineMs, loadStoreConnectionString } from "../config.js";
+import { loadGraphCredentials, loadInboundAuth, loadGrantedSiteUrl, loadShutdownDeadlineMs, loadStoreConnectionString } from "../config.js";
 import { loadProfileDirectory } from "../profiles/registry.js";
 import { createGraphClient } from "../graph/client.js";
 import { clientCredentialsTokenProvider, requireExactRoles, SERVER_TOKEN_ROLES } from "../graph/token.js";
@@ -19,6 +19,7 @@ async function main(): Promise<void> {
   const grantedSiteUrl = loadGrantedSiteUrl(process.env);
   const connectionString = loadStoreConnectionString(process.env);
   const shutdownDeadlineMs = loadShutdownDeadlineMs(process.env);
+  const inboundAuth = loadInboundAuth(process.env);
 
   // Everything that can fail on configuration fails here, before the port is
   // bound, so a container that cannot answer a call never reports itself healthy.
@@ -56,6 +57,7 @@ async function main(): Promise<void> {
   };
 
   const app = createApp({
+    auth: inboundAuth,
     serverFactory: () => buildServer({ allowWrites: config.allowWrites, context }),
   });
 
@@ -80,7 +82,7 @@ async function main(): Promise<void> {
     console.log(
       `listening on port ${config.port}, site ${grantedSiteUrl}, writes ${config.allowWrites ? "enabled" : "disabled"}, ` +
         `${profileCount} ${profileCount === 1 ? "profile" : "profiles"} from ${config.profileDir}, ` +
-        `${storeKind} store`,
+        `${storeKind} store, inbound auth ${inboundAuth.mode}`,
     );
   });
 

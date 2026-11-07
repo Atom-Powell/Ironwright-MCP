@@ -28,7 +28,7 @@ const listed = new Map<string, ListedTool>();
 beforeAll(async () => {
   // Writes enabled, because the write tools carry the annotations that matter
   // most and are absent from a default deployment.
-  const app = createApp({ serverFactory: () => buildServer({ allowWrites: true, context: createFakeToolContext() }) });
+  const app = createApp({ auth: { mode: "none", header: "x-api-key" }, serverFactory: () => buildServer({ allowWrites: true, context: createFakeToolContext() }) });
   httpServer = await new Promise<Server>((resolve) => {
     const listener = app.listen(0, () => resolve(listener));
   });
