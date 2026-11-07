@@ -282,6 +282,24 @@ summary columns can hold several lines. If SharePoint normalizes line endings or
 every such write would be reported as a mismatch and every retry as a rewrite. The Task 9 sitting
 sends a multi-line observation and a multi-line summary and reads them back as its check.
 
+**Carried from phase 9c, 2026-11-07: whether a content PUT creates a missing parent folder.**
+`save_assessment_artifact` checks only that the workspace root is present before it writes to a
+path under a subfolder. If Graph's content PUT creates a missing parent folder implicitly, a
+subfolder deleted after open would be recreated by a save with no `folder_created` entry in the
+journal. The Task 9 sitting measures it by deleting `Published` and saving the executive summary.
+
+**Carried from phase 9c, 2026-11-07: whether SharePoint looks the publication name up without
+regard to case.** `verify_publication` now compares the name the lookup answered against the
+expected name exactly and reports a case difference as not present. The artifact presence that
+`transition_assessment` and `get_assessment` read does not compare names, so if the lookup ignores
+case a misnamed publication counts there as present. The Task 9 sitting measures it by uploading
+the publication under a name differing only by case before the correctly named one.
+
+**Carried from phase 9c, 2026-11-07: a journal append that throws after a confirmed write.** When
+Graph confirms a write and the store then fails to append its journal entry, the call reports the
+store's error through `describeToolFailure`, which does not say that the Graph write happened, and
+the journal lacks the entry.
+
 ## Known minor issues
 
 **CLOSED 2026-09-12 by `3b72f52`, "feat: add --delete-bootstrap so the documented teardown is
