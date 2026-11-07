@@ -37,7 +37,7 @@ sections below say what was proven and what was not. Last updated 2026-11-06.
 | `$batch` | Held: no caller yet whose measured cost justifies it | |
 | 7 Copilot Studio integration and governance | In progress: track 1 spec drafted (pre-probe) and probe server built; no Copilot Studio contact yet | `docs/superpowers/specs/2026-10-11-copilot-studio-integration-design.md` |
 | 8 Evaluation suite | Not started; questions written in `docs/EVALUATION-QUESTIONS.md` | |
-| 9a Probes and the grant | Complete: probes L and F run live 2026-11-07, fifteen of seventeen steps as designed and the spec amended on the other two (`If-Match` on a content PUT does not guard an absent path; a filtered list query needs the non-indexed header); A3 and B1 stay unverified until 9d | `docs/superpowers/specs/evidence/2026-11-07-assessment-probe/`; sitting below; PR pending |
+| 9a Probes and the grant | Complete: probes L and F run live 2026-11-07, fifteen of seventeen steps as designed and the spec amended on the other two (`If-Match` on a content PUT does not guard an absent path; a filtered list query needs the non-indexed header); A3 and B1 stay unverified until 9d | `docs/superpowers/specs/evidence/2026-11-07-assessment-probe/`; sitting below; PR #24 |
 | 9b Core: modules, site sets, inbound authentication, lifecycle kind, journal | Complete against fakes, merged 2026-11-07; nothing in it has met a live tenant yet | PR #22, merged 2026-11-07 |
 | 9c Assessment module and the four Graph operations | Designed 2026-11-06; 9a evidence in hand since 2026-11-07, plan not yet written | same spec |
 | 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9c and carries the unverified A3 and B1 probes, and is the item that slips first | same spec |
