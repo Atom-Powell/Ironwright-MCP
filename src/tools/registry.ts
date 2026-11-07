@@ -1,33 +1,9 @@
 import type { ToolDefinition } from "./types.js";
-import { inventoryTree } from "./definitions/inventory-tree.js";
-import { describeWorkbook } from "./definitions/describe-workbook.js";
-import { reconcileWorkbookVsRepository } from "./definitions/reconcile.js";
-import { queryRepository } from "./definitions/query-repository.js";
-import { validateStructure } from "./definitions/validate-structure.js";
-import { generateRenamePlan } from "./definitions/generate-rename-plan.js";
-import { executeRenamePlan } from "./definitions/execute-rename-plan.js";
-import { generateMovePlan } from "./definitions/generate-move-plan.js";
-import { executeMovePlan } from "./definitions/execute-move-plan.js";
-import { generateCustomPlan } from "./definitions/generate-custom-plan.js";
-import { executeCustomPlan } from "./definitions/execute-custom-plan.js";
-import { replicateTemplate } from "./definitions/replicate-template.js";
+import { ALL_MODULES } from "../modules/index.js";
 
 export type { ToolAnnotations, ToolDefinition } from "./types.js";
 
-export const ALL_TOOLS: ToolDefinition[] = [
-  inventoryTree,
-  describeWorkbook,
-  reconcileWorkbookVsRepository,
-  queryRepository,
-  validateStructure,
-  generateRenamePlan,
-  executeRenamePlan,
-  generateMovePlan,
-  executeMovePlan,
-  generateCustomPlan,
-  executeCustomPlan,
-  replicateTemplate,
-];
+export const ALL_TOOLS: ToolDefinition[] = ALL_MODULES.flatMap((module) => module.tools);
 
 /**
  * Write tools are omitted rather than registered and refused. A refusal leaves a
