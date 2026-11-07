@@ -49,6 +49,16 @@ export function journalRowKey(entry: { at: string; correlationId: string }): str
   return `${entry.at}|${entry.correlationId}`;
 }
 
+/** Orders entries by `at`, then `correlationId`; the one comparator both stores sort with. */
+export function compareJournalEntries(
+  a: { at: string; correlationId: string },
+  b: { at: string; correlationId: string },
+): number {
+  const x = journalRowKey(a);
+  const y = journalRowKey(b);
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
 /**
  * A driveItem id is an opaque string whose alphabet we do not control, so it is
  * encoded rather than checked. base64url keeps the result inside the characters

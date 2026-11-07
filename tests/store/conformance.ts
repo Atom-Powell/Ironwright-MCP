@@ -499,6 +499,16 @@ export function stateStoreConformance(create: () => StateStore): void {
     await expect(store.listJournal("other", "ASM-2026-00001")).resolves.toEqual([]);
   });
 
+  it("keeps both entries when two share an instant and a correlation id", async () => {
+    const store = create();
+    const base = { at: "2026-11-07T10:00:00.000Z", correlationId: "c1", operation: "list_item_created" as const, target: "x" };
+    await store.appendJournalEntry("example", "ASM-2026-00001", { ...base, stage: "ID" });
+    await store.appendJournalEntry("example", "ASM-2026-00001", { ...base, stage: "DOSSIER" });
+    const listed = await store.listJournal("example", "ASM-2026-00001");
+    expect(listed).toHaveLength(2);
+    expect(listed.map((entry) => entry.stage).sort()).toEqual(["DOSSIER", "ID"]);
+  });
+
   it("refuses an assessment id that cannot be a table key", async () => {
     const entry = { at: "2026-11-07T10:00:00.000Z", correlationId: "c1", stage: "ID", operation: "list_item_created" as const, target: "x" };
     await expect(create().appendJournalEntry("example", "bad/id", entry)).rejects.toBeInstanceOf(UnsafeKeyError);

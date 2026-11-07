@@ -41,7 +41,7 @@ export interface ScannedDrive {
 }
 
 export interface JournalEntry {
-  /** ISO instant. */
+  /** The string `new Date().toISOString()` produces (UTC, three millisecond digits), because entries are ordered by string comparison. */
   at: string;
   correlationId: string;
   /** The module's stage name, e.g. "ID", "DOSSIER". */
@@ -271,6 +271,27 @@ export class PlanTooLargeError extends Error {
     this.name = "PlanTooLargeError";
     this.planId = planId;
     this.chars = chars;
+  }
+}
+
+/**
+ * Raised by `listJournal` when a stored journal row cannot be read. Names the
+ * partition and row key, never the content, which may carry customer paths.
+ * A journal is an audit record, so a row that cannot be read throws rather
+ * than being skipped, which would present an incomplete record as complete.
+ */
+export class MalformedJournalEntityError extends Error {
+  readonly partitionKey: string;
+  readonly rowKey: string;
+
+  constructor(partitionKey: string, rowKey: string, detail: string) {
+    super(
+      `The stored journal row "${partitionKey}" / "${rowKey}" cannot be read: its entry ${detail}. ` +
+        "Refused rather than skipped, because a journal missing a row reads as a complete record.",
+    );
+    this.name = "MalformedJournalEntityError";
+    this.partitionKey = partitionKey;
+    this.rowKey = rowKey;
   }
 }
 

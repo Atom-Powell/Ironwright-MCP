@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { TableClient } from "@azure/data-tables";
 import {
   chunk,
   decodeRowKey,
   encodeRowKey,
+  compareJournalEntries,
   inventoryPartitionKey,
   journalPartitionKey,
   journalRowKey,
@@ -10,7 +12,7 @@ import {
   planInventoryChanges,
 } from "./keys.js";
 import type { CustomStep } from "../domain/custom/resolve.js";
-import { MalformedPlanEntityError, MAX_PLAN_JSON_CHARS, PlanTooLargeError, storedPlanJsonChars } from "./types.js";
+import { MalformedJournalEntityError, MalformedPlanEntityError, MAX_PLAN_JSON_CHARS, PlanTooLargeError, storedPlanJsonChars } from "./types.js";
 import type {
   ApplyResult,
   ExcludedPlanItem,
@@ -316,7 +318,9 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
       await clients.journal.upsertEntity(
         {
           partitionKey: journalPartitionKey(profileId, assessmentId),
-          rowKey: encodeRowKey(journalRowKey(entry)),
+          // A random suffix, so two entries sharing `at` and `correlationId`
+          // both land, as in the memory store: append, never replace.
+          rowKey: `${encodeRowKey(journalRowKey(entry))}~${randomUUID()}`,
           entry: JSON.stringify(entry),
         },
         "Replace",
@@ -325,18 +329,25 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
 
     async listJournal(profileId, assessmentId) {
       const partitionKey = journalPartitionKey(profileId, assessmentId);
-      const entries: JournalEntry[] = [];
+      const rows: Array<{ rowKey: string; entry: JournalEntry }> = [];
       for await (const entity of clients.journal.listEntities({
         queryOptions: { filter: partitionFilter(partitionKey) },
       })) {
-        if (typeof entity.entry === "string") entries.push(JSON.parse(entity.entry) as JournalEntry);
+        if (typeof entity.entry !== "string") {
+          throw new MalformedJournalEntityError(partitionKey, entity.rowKey, "is missing");
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(entity.entry);
+        } catch {
+          throw new MalformedJournalEntityError(partitionKey, entity.rowKey, "is not valid JSON");
+        }
+        rows.push({ rowKey: entity.rowKey, entry: parsed as JournalEntry });
       }
-      // In memory, because base64url row keys do not preserve time order.
-      return entries.sort((a, b) => {
-        const x = journalRowKey(a);
-        const y = journalRowKey(b);
-        return x < y ? -1 : x > y ? 1 : 0;
-      });
+      // In memory, because base64url row keys do not preserve time order. The
+      // row key is the last tie-break so ties are deterministic within a run.
+      rows.sort((a, b) => compareJournalEntries(a.entry, b.entry) || (a.rowKey < b.rowKey ? -1 : a.rowKey > b.rowKey ? 1 : 0));
+      return rows.map((row) => row.entry);
     },
 
     async getPlan(profileId, planId) {

@@ -1,4 +1,4 @@
-import { inventoryPartitionKey, journalPartitionKey, journalRowKey, MAX_TRANSACTION_SIZE, planInventoryChanges } from "./keys.js";
+import { inventoryPartitionKey, compareJournalEntries, journalPartitionKey, MAX_TRANSACTION_SIZE, planInventoryChanges } from "./keys.js";
 import { MAX_PLAN_JSON_CHARS, PlanTooLargeError, storedPlanJsonChars } from "./types.js";
 import type { ApplyResult, InventoryRecord, JournalEntry, ScannedDrive, StateStore, StoredPlan } from "./types.js";
 
@@ -8,10 +8,6 @@ import type { ApplyResult, InventoryRecord, JournalEntry, ScannedDrive, StateSto
  * `batches` counts the same thing in both and the scan can print the number
  * without qualifying which store produced it.
  */
-function compareKeys(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
-}
-
 export function createMemoryStateStore(): StateStore {
   const deltaLinks = new Map<string, { deltaLink: string; lastScanAt: string }>();
   const inventories = new Map<string, Map<string, InventoryRecord>>();
@@ -122,7 +118,7 @@ export function createMemoryStateStore(): StateStore {
     async listJournal(profileId, assessmentId) {
       const entries = journals.get(journalPartitionKey(profileId, assessmentId)) ?? [];
       // Sorted here, not trusted to append order, so both stores answer alike.
-      return structuredClone(entries).sort((a, b) => compareKeys(journalRowKey(a), journalRowKey(b)));
+      return structuredClone(entries).sort(compareJournalEntries);
     },
   };
 }
