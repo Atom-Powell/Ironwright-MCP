@@ -400,3 +400,5 @@ are both kept. Append never replaces. A retried append after an ambiguous failur
 a duplicate row, which means a lifecycle tool journals after its write is confirmed, not before.
 
 The Azure table is named `Journal`, matching the capitalization of the other three.
+
+The four Graph operations named under plan 9b in "Order of work" were moved to plan 9c, where their first caller lives and after plan 9a's evidence exists. `docs/OPEN-ITEMS.md` already titles the rows that way.

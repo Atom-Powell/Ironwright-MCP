@@ -483,8 +483,8 @@ tools do work with it. `examples/profiles/library-example.json` is the committed
 
 Any profile, of either kind, may be written with `sites` instead of `identity`. `sites` is a
 non-empty list of entries with `siteUrl` and `library`, and optionally `searchRegion`, `clientId`
-and `workbookPath`; `identity` is then the first entry. A compliance profile requires `workbookPath` on every site, and a library profile refuses it. This phase still checks every listed site
-against the one granted site, `IW_SITE_URL`, so a profile naming a second site fails at startup.
+and `workbookPath`; `identity` is then the first entry. A compliance profile requires `workbookPath` on every site, and a library profile
+refuses it. This phase still checks every listed site against the one granted site, `IW_SITE_URL`, so a profile naming a second site fails at startup.
 
 ## Running the server
 
@@ -516,8 +516,8 @@ development build afterward puts the setup output back.
 - `IW_SITE_URL` is required. It is the same `--site` value you passed to the normal setup run
   above, not one of the four values that run prints, since a site URL is not a secret and setup
   already had it as an input rather than an output. The server checks every profile's
-  `identity.siteUrl` against this value at startup and refuses to start if any profile names a
-  different site, rather than letting that mismatch surface later as a 403 on the profile's first
+  `siteUrl` of every entry in `sites` against this value at startup and refuses to start if any
+  profile names a different site, rather than letting that mismatch surface later as a 403 on the profile's first
   Graph call, a failure this server has already been corrected once for being misleading about.
   `describe_workbook` also reads it directly, since that tool runs before any profile exists and
   has no other way to know which site it may reach. Phase 5 hosting must set this in the
@@ -570,8 +570,8 @@ adds the one that phase 5a introduced.
   client-credentials identity, the same three values the normal setup run above prints as
   `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET`.
 - `IW_SITE_URL`. The site the server's `Sites.Selected` grant covers. It became required in
-  phase 4c, and the profile registry checks every profile's `identity.siteUrl` against it at
-  startup, refusing to start on a mismatch rather than letting it surface later as a 403 on a
+  phase 4c, and the profile registry checks the `siteUrl` of every entry in every profile's
+  `sites` against it at startup, refusing to start on a mismatch rather than letting it surface later as a 403 on a
   profile's first Graph call. A deployment definition that omits it does not produce a degraded
   server; the server does not start at all.
 - `IW_PROFILE_DIR`. Names the directory holding this deployment's profile files, each validated
@@ -600,8 +600,8 @@ never appears in logs, and the startup line reports the auth mode and never the 
   failing, so a local run needs no cloud account. Nothing persists across a restart under that
   fallback, and every scan is a full enumeration rather than an incremental one.
 - `IW_ALLOW_WRITES`. Its absence leaves every write tool unpublished rather than merely refused:
-  `selectTools` in `src/tools/registry.ts` filters out every tool of kind `write` when writes are
-  disabled, so a caller never sees `execute_rename_plan`, `execute_move_plan` or
+  `selectTools` in `src/tools/registry.ts` filters out every tool of kind `write` or `lifecycle` when
+  writes are disabled, so a caller never sees `execute_rename_plan`, `execute_move_plan` or
   `replicate_template` in the first place. Set to `true` to opt a deployment in, regardless of
   the site permission the normal setup run above granted.
 - `IW_SHUTDOWN_DEADLINE_MS`. How long the server waits, once it receives SIGTERM, for in-flight
