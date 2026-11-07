@@ -49,6 +49,19 @@ describe("verify_publication", () => {
     expect(resultText(result)).toContain("a folder, not a file");
   });
 
+  it("reports a file whose name differs from the expected one only by case as not present, naming both", async () => {
+    const actual = "acme corp_ASM-2026-00002_risk_assessment.docx";
+    const { graph } = createScriptedGraph([...FOUND, itemRead(PUBLICATION_PATH, fileItem(actual, '"p1"', 48213))]);
+
+    const result = await runVerifyPublication(INPUT, assessmentToolContext(graph));
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toEqual({ present: false, path: PUBLICATION_PATH, expectedName: EXPECTED_NAME, name: actual, graphRequests: graph.requests() });
+    expect(resultText(result)).toBe(
+      `The publication for ${ID} is not present under its expected name: a file named "${actual}" is at ${PUBLICATION_PATH}, and the expected name is "${EXPECTED_NAME}".`,
+    );
+  });
+
   it("reports an assessment id no item carries as an error", async () => {
     const { graph } = createScriptedGraph([...RESOLVE_DRIVE_SCRIPT, assessmentByIdQuery([])]);
 

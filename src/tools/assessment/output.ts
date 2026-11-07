@@ -33,22 +33,3 @@ export const JOURNAL_SUMMARY_SHAPE = {
   lastAt: z.string().optional().describe('When the latest entry was recorded, for example "2026-11-07T20:39:33.000Z". Absent when there are none.'),
   byOperation: z.record(z.number().int()).describe('Entry counts by operation, for example {"folder_created": 6, "list_item_updated": 1}.'),
 } satisfies z.ZodRawShape;
-
-/**
- * Present only on an isError result from refusalResult. The SDK skips output
- * validation on an error result, so these fields are documentation of that
- * shape rather than something a success ever carries; all are optional for
- * that reason. The refused assessment's id rides on the summary's own
- * assessmentId field.
- */
-export const REFUSAL_SHAPE = {
-  refused: z.boolean().optional().describe("Present and true only on a refusal, for example true when the prior stage is not verified."),
-  tool: z.string().optional().describe('The refusing tool, present only on a refusal, for example "save_artifact".'),
-  stage: z.string().optional().describe('The stage refused, present only on a refusal, for example "DOSSIER".'),
-  expected: z.string().optional().describe('What the precondition required, present only on a refusal, for example "the workspace root folder present".'),
-  observed: z.string().optional().describe('What was read instead, present only on a refusal, for example "the folder was not found".'),
-  evidence: z
-    .array(z.object({ source: z.enum(["list", "drive"]), target: z.string(), found: z.string() }))
-    .optional()
-    .describe('What was read and where, present only on a refusal, for example [{"source": "drive", "target": "Assessments/Acme Corp/ASM-2026-00002", "found": "not found"}].'),
-} satisfies z.ZodRawShape;

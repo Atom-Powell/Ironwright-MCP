@@ -12,10 +12,10 @@ export const VERIFY_INPUT_SCHEMA = {
 } satisfies z.ZodRawShape;
 
 export const VERIFY_OUTPUT_SCHEMA = {
-  present: z.boolean().describe("True when a file is at the canonical publication path, for example false before the publisher has run."),
+  present: z.boolean().describe("True when a file named exactly the expected name is at the canonical publication path, for example false before the publisher has run."),
   path: z.string().describe('Library-relative canonical path read, for example "Assessments/Acme Corp/ASM-2026-00002/Published/Acme Corp_ASM-2026-00002_Risk_Assessment.docx".'),
   expectedName: z.string().describe('The file name the profile\'s publication template renders, for example "Acme Corp_ASM-2026-00002_Risk_Assessment.docx".'),
-  name: z.string().optional().describe('The name of the file found, for example "Acme Corp_ASM-2026-00002_Risk_Assessment.docx". Absent when no file is present.'),
+  name: z.string().optional().describe('The name of the file found at the path, for example "Acme Corp_ASM-2026-00002_Risk_Assessment.docx". Present with present false when that name differs from expectedName by case; absent when no file is at the path.'),
   size: z.number().int().optional().describe("The file's size in bytes as read, for example 48213. Absent when no file is present."),
   eTag: z.string().optional().describe('The file\'s ETag as read, for example "\\"{GUID},1\\"". Absent when no file is present.'),
   lastModifiedDateTime: z.string().optional().describe('When the file was last modified, for example "2026-11-07T20:39:33Z". Absent when no file is present.'),
@@ -63,6 +63,16 @@ export async function runVerifyPublication(input: unknown, context: ToolContext)
     }
 
     const item = lookup.item;
+    // SharePoint names are case insensitive, so the lookup above may answer a file whose name differs
+    // from the canonical one only by case; the 9c sitting measures whether it does. That file is not
+    // the publication the template names, and reporting it present would let a misnamed upload pass.
+    if (item.name !== expectedName) {
+      const output = { present: false, path, expectedName, name: item.name, graphRequests: context.graph.requests() - before };
+      const text =
+        `The publication for ${args.assessmentId} is not present under its expected name: a file named "${item.name}" is at ${path}, ` +
+        `and the expected name is "${expectedName}".`;
+      return { structuredContent: output, content: [{ type: "text" as const, text }] };
+    }
     const output = {
       present: true,
       path,

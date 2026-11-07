@@ -131,13 +131,15 @@ export async function runTransitionAssessment(input: unknown, context: ToolConte
     });
     if (readError !== undefined) throw readError;
 
-    const wrote = `status "${label}", disposition "${args.disposition}" and risk "${args.risk}"`;
+    const wrote = `status "${label}", disposition "${args.disposition}", risk "${args.risk}" and ${columns.state} "${STAGE}"`;
     if (back === undefined) {
       return failure(`Graph accepted the update of ${listName} item ${item.itemId} to ${wrote}, but reading the item back answered 404. The journal records the update.`);
     }
     const read = recordFromFields(back.fields, back.id, back.eTag, columns);
-    if (read.status !== label || read.disposition !== args.disposition || read.risk !== args.risk) {
-      const found = `status ${JSON.stringify(read.status ?? null)}, disposition ${JSON.stringify(read.disposition ?? null)} and risk ${JSON.stringify(read.risk ?? null)}`;
+    if (read.status !== label || read.disposition !== args.disposition || read.risk !== args.risk || read.state !== STAGE) {
+      const found =
+        `status ${JSON.stringify(read.status ?? null)}, disposition ${JSON.stringify(read.disposition ?? null)}, ` +
+        `risk ${JSON.stringify(read.risk ?? null)} and ${columns.state} ${JSON.stringify(read.state ?? null)}`;
       return failure(`Graph accepted the update of ${listName} item ${item.itemId} to ${wrote}, but reading it back found ${found}. The journal records the update.`);
     }
 
@@ -152,8 +154,8 @@ export async function runTransitionAssessment(input: unknown, context: ToolConte
       graphRequests: context.graph.requests() - before,
     };
     const text =
-      `Moved ${args.assessmentId} from ${JSON.stringify(item.status ?? null)} to "${read.status}" with disposition "${read.disposition}" and risk "${read.risk}", ` +
-      `as read back from ${listName} item ${item.itemId}. The same update wrote ${columns.state} ${STAGE}.`;
+      `Moved ${args.assessmentId} from ${JSON.stringify(item.status ?? null)} to "${read.status}" with disposition "${read.disposition}", risk "${read.risk}" ` +
+      `and ${columns.state} "${read.state}", as read back from ${listName} item ${item.itemId}.`;
     return { structuredContent: output, content: [{ type: "text" as const, text }] };
   } catch (error) {
     console.error(`${TOOL} failed for profile "${args.profileId}"`, error);

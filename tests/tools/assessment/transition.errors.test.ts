@@ -95,6 +95,22 @@ describe("transition_assessment failures", () => {
     expect(journal.map((entry) => [entry.operation, entry.stage, entry.etagAfter])).toEqual([["list_item_updated", "LIFECYCLE", '"item-2,2"']]);
   });
 
+  it("reports a read back whose State is not LIFECYCLE, though status, disposition and risk match", async () => {
+    const { graph } = createScriptedGraph([
+      ...stateScript({ dossier: dossierItem('"d1"', 120), publication: dossierItem('"p1"', 10) }),
+      { method: "patch", pathIncludes: "/lists/Assessments/items/2/fields", response: stateFields(COMPLETED) },
+      { method: "get", pathIncludes: "/lists/Assessments/items/2?", response: listItem("2", stateFields({ ...COMPLETED, State: "FINDINGS" }), '"item-2,2"') },
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runTransitionAssessment(INPUT, context);
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toContain('reading it back found status "Completed", disposition "Approved", risk "Low" and State "FINDINGS".');
+    expect(resultText(result)).toContain("The journal records the update.");
+    expect((await context.store.listJournal(PROFILE, ID)).map((entry) => entry.operation)).toEqual(["list_item_updated"]);
+  });
+
   it("reports a read back that finds no item, keeping the journal entry for the update", async () => {
     const { graph } = createScriptedGraph([
       ...stateScript({ dossier: dossierItem('"d1"', 120), publication: dossierItem('"p1"', 10) }),
