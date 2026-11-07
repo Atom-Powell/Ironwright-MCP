@@ -2,7 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ProfileValidationError } from "../domain/profile/load.js";
 import type { Profile } from "../domain/profile/schema.js";
-import { isLibraryProfile, type AnyProfile } from "../domain/profile/library.js";
+import { isAssessmentProfile, isLibraryProfile, type AnyProfile } from "../domain/profile/library.js";
 import { normalizeProfileSites } from "../domain/profile/base.js";
 import { ALL_MODULES, moduleForKind, type DomainModule } from "../modules/index.js";
 
@@ -65,6 +65,24 @@ export class LibraryProfileError extends Error {
         "query_repository's empty_folders question, and the custom plan tools work with a library-only profile.",
     );
     this.name = "LibraryProfileError";
+    this.profileId = profileId;
+  }
+}
+
+/**
+ * A tool that needs a compliance definition was handed an assessment profile.
+ * Like the library case, the message states what the profile carries and does
+ * not claim where the caller was.
+ */
+export class AssessmentProfileError extends Error {
+  readonly profileId: string;
+
+  constructor(profileId: string) {
+    super(
+      `Profile "${profileId}" is an assessment profile: it carries a workspace and lists, not a workbook, taxonomy or deliverables, ` +
+        "so this tool cannot use it. The assessment tools can; the compliance tools need a compliance profile.",
+    );
+    this.name = "AssessmentProfileError";
     this.profileId = profileId;
   }
 }
@@ -199,6 +217,7 @@ export function createProfileRegistry(
       const held = byId.get(profileId);
       if (held === undefined) throw new UnknownProfileError(profileId, [...ids]);
       if (isLibraryProfile(held.profile)) throw new LibraryProfileError(profileId);
+      if (isAssessmentProfile(held.profile)) throw new AssessmentProfileError(profileId);
       return held.profile;
     },
     getAny(profileId: string): AnyProfile {

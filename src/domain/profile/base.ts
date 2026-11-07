@@ -11,7 +11,7 @@ import { z } from "zod";
  * `profile.identity` stay as they are. `normalizeProfileSites` makes the two
  * agree before any schema runs.
  */
-export const PROFILE_KINDS = ["compliance", "library"] as const;
+export const PROFILE_KINDS = ["compliance", "library", "assessment"] as const;
 export type ProfileKind = (typeof PROFILE_KINDS)[number];
 
 export const ProfileIdSchema = z.string().min(1).regex(/^[a-z0-9-]+$/, "must be lowercase letters, digits, and hyphens");

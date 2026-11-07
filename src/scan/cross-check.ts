@@ -3,7 +3,7 @@ import type { SiteDrive } from "../graph/drive.js";
 import { searchDriveItems, type SearchHit } from "../graph/search.js";
 import { UnexpectedTokenRolesError } from "../graph/token.js";
 import type { RepositoryFile } from "../domain/reconcile/index.js";
-import { isLibraryProfile, type AnyProfile } from "../domain/profile/library.js";
+import { isAssessmentProfile, isLibraryProfile, type AnyProfile } from "../domain/profile/library.js";
 
 /**
  * The operator's remedy differs for each, which is the whole reason this is a
@@ -307,7 +307,9 @@ export async function crossCheckOtherLibraries(
   // A library profile has no naming template, and the search query is built
   // from the template's literal extension, so there is nothing to search for.
   // Checked before the region so the reason names the real cause.
-  if (isLibraryProfile(profile)) return { files: [], complete: false, reason: "library-profile" };
+  // An assessment profile has no naming template either. The tools refuse it
+  // before any scan, so this is a guard rather than a path.
+  if (isLibraryProfile(profile) || isAssessmentProfile(profile)) return { files: [], complete: false, reason: "library-profile" };
 
   const region = profile.identity.searchRegion;
   // Checked first and returned immediately, spending no Graph call at all:

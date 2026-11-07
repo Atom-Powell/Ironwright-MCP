@@ -1,0 +1,42 @@
+{
+  "kind": "assessment",
+  "profileId": "vendor-assessments",
+  "sites": [
+    {
+      "siteUrl": "https://contoso.sharepoint.com/sites/Example",
+      "library": "Documents"
+    }
+  ],
+  "workspace": {
+    "root": "Assessments/{vendorFolder}/{assessmentId}",
+    "subfolders": ["Research", "Evidence", "Published"],
+    "artifacts": {
+      "dossier": "Research/{vendor}_Research_Dossier.md",
+      "executive_summary": "Published/{assessmentId}_Executive_Summary.md",
+      "publication": "Published/{vendorFolder}_{assessmentId}_Risk_Assessment.docx"
+    }
+  },
+  "assessmentId": {
+    "prefix": "ASM",
+    "template": "{prefix}-{yyyy}-{item:5}"
+  },
+  "lists": {
+    "vendors": { "name": "Vendors", "columns": { "folderName": "FolderName" } },
+    "assessments": {
+      "name": "Assessments",
+      "columns": {
+        "assessmentId": "AssessmentId", "vendorFolder": "VendorFolder", "scope": "Scope", "status": "Status",
+        "state": "State", "disposition": "Disposition", "risk": "Risk", "summary": "Summary"
+      }
+    },
+    "findings": {
+      "name": "Findings",
+      "columns": { "assessmentId": "AssessmentId", "findingKey": "FindingKey", "observation": "Observation", "risk": "Risk", "recommendation": "Recommendation" }
+    }
+  },
+  "lifecycle": {
+    "status": { "inProgress": "In Progress", "completed": "Completed", "provisional": "Provisional" },
+    "dispositions": ["Approved", "Approved with conditions", "Rejected"],
+    "risks": ["Low", "Medium", "High"]
+  }
+}

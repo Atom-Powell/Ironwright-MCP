@@ -3,8 +3,8 @@ import { ALL_MODULES } from "../../src/modules/index.js";
 import { ALL_TOOLS } from "../../src/tools/registry.js";
 
 describe("domain modules", () => {
-  it("registers compliance and library, each with a distinct kind", () => {
-    expect(ALL_MODULES.map((m) => m.kind)).toEqual(["compliance", "library"]);
+  it("registers compliance, library and assessment, each with a distinct kind", () => {
+    expect(ALL_MODULES.map((m) => m.kind)).toEqual(["compliance", "library", "assessment"]);
   });
 
   it("owns every tool exactly once across modules", () => {
