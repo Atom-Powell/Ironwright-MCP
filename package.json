@@ -18,6 +18,7 @@
     "scan": "tsx src/scan/main.ts",
     "seed-library": "tsx scripts/seed-library.ts",
     "probe:assessment:seed": "tsx scripts/assessment-probe/seed.ts",
+    "probe:assessment:grant": "tsx scripts/assessment-probe/grant.ts",
     "probe:assessment": "tsx scripts/assessment-probe/main.ts"
   },
   "repository": {

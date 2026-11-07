@@ -242,8 +242,10 @@ grant issuer's app-only token: list `GET /sites/{site-id}/permissions`, find the
 id rather than on position so another application's grant on the same site cannot be widened by
 accident, and `PATCH` that one entry with `{"roles": ["write"]}`. Restore it to `read` the same way
 when the write work is finished. The 2026-09-19 rename sitting did exactly this, in both
-directions, rather than re-running setup. A first-class command for this is not built; when one is,
-it belongs here.
+directions, rather than re-running setup. Since 2026-11-07 `npm run probe:assessment:grant -- --roles=write` (and
+`--roles=read` to restore) does the same with the grant issuer's credentials read from the
+environment; without `--roles` it only prints the current roles. It lives under `scripts/` because
+it is operator tooling, not part of the deployed server.
 
 Before this command does anything else, it checks that `IW_BOOTSTRAP_CLIENT_ID` and
 `IW_BOOTSTRAP_CLIENT_SECRET` are set and that the token they produce carries
