@@ -161,4 +161,12 @@ describe("journal rows that cannot be read", () => {
     expect((error as Error).message).toContain("row1");
     expect((error as Error).message).not.toContain("secret-path");
   });
+
+  it.each(["{}", "null", '{"at":"x","secret":"leak"}'])("throws a typed error for valid JSON of the wrong shape, %s", async (text) => {
+    const store = await seeded(text);
+    const error: unknown = await store.listJournal("example", "ASM-1").catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(MalformedJournalEntityError);
+    expect((error as Error).message).toContain("row1");
+    expect((error as Error).message).not.toContain("leak");
+  });
 });

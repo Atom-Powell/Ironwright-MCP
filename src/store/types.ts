@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { CustomExclusionReason, CustomStep } from "../domain/custom/resolve.js";
 
 export interface InventoryRecord {
@@ -56,6 +57,23 @@ export interface JournalEntry {
   /** The SharePoint version that held the prior content, on an overwrite. */
   versionId?: string;
 }
+
+/**
+ * The shape `listJournal` insists on for every stored row. JSON that parses but
+ * has the wrong shape is as unreadable as JSON that does not parse, and a cast
+ * would hand it to callers as a valid entry.
+ */
+export const JournalEntrySchema = z.object({
+  at: z.string(),
+  correlationId: z.string(),
+  stage: z.string(),
+  operation: z.enum(["list_item_created", "list_item_updated", "folder_created", "file_created", "file_overwritten"]),
+  target: z.string(),
+  etagBefore: z.string().optional(),
+  etagAfter: z.string().optional(),
+  contentHash: z.string().optional(),
+  versionId: z.string().optional(),
+});
 
 export interface StateStore {
   getDeltaLink(profileId: string, driveId: string): Promise<string | undefined>;

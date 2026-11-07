@@ -12,7 +12,7 @@ import {
   planInventoryChanges,
 } from "./keys.js";
 import type { CustomStep } from "../domain/custom/resolve.js";
-import { MalformedJournalEntityError, MalformedPlanEntityError, MAX_PLAN_JSON_CHARS, PlanTooLargeError, storedPlanJsonChars } from "./types.js";
+import { JournalEntrySchema, MalformedJournalEntityError, MalformedPlanEntityError, MAX_PLAN_JSON_CHARS, PlanTooLargeError, storedPlanJsonChars } from "./types.js";
 import type {
   ApplyResult,
   ExcludedPlanItem,
@@ -342,7 +342,11 @@ export function createTableStateStore(clients: TableStateStoreClients): StateSto
         } catch {
           throw new MalformedJournalEntityError(partitionKey, entity.rowKey, "is not valid JSON");
         }
-        rows.push({ rowKey: entity.rowKey, entry: parsed as JournalEntry });
+        const checked = JournalEntrySchema.safeParse(parsed);
+        if (!checked.success) {
+          throw new MalformedJournalEntityError(partitionKey, entity.rowKey, "does not have the shape of a journal entry");
+        }
+        rows.push({ rowKey: entity.rowKey, entry: checked.data });
       }
       // In memory, because base64url row keys do not preserve time order. The
       // row key is the last tie-break so ties are deterministic within a run.
