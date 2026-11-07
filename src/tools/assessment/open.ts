@@ -3,11 +3,11 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { ToolContext } from "../context.js";
 import { describeToolFailure, type FailureSubject } from "../errors.js";
 import { createFolder, readDriveItem } from "../../graph/items.js";
-import { createListItem, getListItem, odataString, queryListItems, updateListItemFields } from "../../graph/lists.js";
+import { createListItem, getListItem, updateListItemFields } from "../../graph/lists.js";
 import { renderAssessmentId, sanitizeFolderName } from "../../domain/assessment/templates.js";
 import { fieldsFor, recordFromFields } from "../../domain/assessment/state.js";
 import { resolveAssessmentContext } from "./context.js";
-import { findInProgressAssessment, readAssessmentState, workspacePaths } from "./read-state.js";
+import { findInProgressAssessment, findVendor, workspacePaths } from "./read-state.js";
 import { appendJournal } from "./journal.js";
 import { ASSESSMENT_SUMMARY_SHAPE } from "./output.js";
 
@@ -53,20 +53,16 @@ export async function runOpenAssessment(input: unknown, context: ToolContext): P
     const columns = lists.assessments.columns;
     const labels = ac.profile.lifecycle.status;
 
-    // The vendor record. Its stored folder name wins over recomputation, so a convention set once sticks.
-    const vendors = await queryListItems(context.graph, { siteId: ac.siteId, listName: lists.vendors.name, filter: `fields/Title eq ${odataString(args.vendor)}` });
-    let folder = vendorFolder;
+    const vendor = await findVendor(context.graph, ac, args.vendor);
+    const folder = vendor.folder;
     // What this call wrote, so the text says only what happened: created, resumed, or already open with nothing written.
     let vendorCreated = false;
     let wroteId = false;
     let foldersCreated = 0;
-    if (vendors.length === 0) {
+    if (!vendor.found) {
       const created = await createListItem(context.graph, { siteId: ac.siteId, listName: lists.vendors.name, fields: { Title: args.vendor, [lists.vendors.columns.folderName]: vendorFolder } });
       await appendJournal(context, ac, "(vendor)", { stage: STAGE, operation: "list_item_created", target: `${lists.vendors.name}/${created.id}`, etagAfter: created.eTag });
       vendorCreated = true;
-    } else {
-      const stored = vendors[0]!.fields[lists.vendors.columns.folderName];
-      if (typeof stored === "string" && stored.length > 0) folder = stored;
     }
 
     // Retry rule: an assessment already in progress for this vendor and scope is returned, not duplicated.
@@ -101,13 +97,20 @@ export async function runOpenAssessment(input: unknown, context: ToolContext): P
     }
 
     const paths = workspacePaths(ac, { vendorTitle: record.vendorTitle ?? args.vendor, vendorFolder: record.vendorFolder ?? folder, assessmentId: record.assessmentId! });
-    // An item this call created or completed needs its workspace. An item that was already whole is
-    // checked live instead: a present root is the open's last step, so the folders are skipped and a
-    // retry costs reads only; an absent root is a resume after a crash between the id write and the folders.
+    // An item this call created or completed needs its workspace. On a retry of an item that was
+    // already complete, the root and every subfolder are read live, and the pass runs when any is
+    // absent: the root is created first, so a crash part way through the pass leaves a present root
+    // over missing subfolders, and the root alone cannot tell a finished workspace from that one.
+    // The pass answers a present folder as satisfied, so a folder wrongly read absent costs one 409.
     let needsFolders = created || wroteId;
     if (!needsFolders) {
-      const state = await readAssessmentState(context.graph, ac, record);
-      needsFolders = !state.rootPresent;
+      for (const path of [paths.root, ...paths.subfolders]) {
+        const lookup = await readDriveItem(context.graph, { driveId: ac.driveId, path });
+        if (lookup.kind !== "found" || !lookup.item.isFolder) {
+          needsFolders = true;
+          break;
+        }
+      }
     }
 
     if (needsFolders) {
@@ -160,10 +163,10 @@ export async function runOpenAssessment(input: unknown, context: ToolContext): P
       graphRequests: context.graph.requests() - before,
     };
     const text = created
-      ? `Opened ${output.assessmentId} for ${output.vendor} (${output.scope}): item ${output.itemId} in ${lists.assessments.name}, workspace ${paths.root} with ${paths.subfolders.length} subfolders, all read back.`
+      ? `Opened ${output.assessmentId} for ${output.vendor} (${output.scope}): item ${output.itemId} in ${lists.assessments.name}, workspace ${paths.root} with ${paths.subfolders.length} subfolders, root read back.`
       : resumed
         ? `Resumed ${output.assessmentId} for ${output.vendor} (${output.scope}), which was already in progress: this call ${writes.join(" and ")}. Workspace ${paths.root} read back.`
-        : `${output.assessmentId} for ${output.vendor} (${output.scope}) is already open; nothing was written. Workspace ${paths.root} is present.`;
+        : `${output.assessmentId} for ${output.vendor} (${output.scope}) is already open; nothing was written. Workspace ${paths.root} and its ${paths.subfolders.length} subfolders are present.`;
     return { structuredContent: output, content: [{ type: "text" as const, text }] };
   } catch (error) {
     console.error(`open_assessment failed for profile "${args.profileId}"`, error);

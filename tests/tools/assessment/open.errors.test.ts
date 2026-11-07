@@ -73,11 +73,8 @@ describe("open_assessment failures", () => {
       ...RESOLVE_DRIVE_SCRIPT,
       vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" })]),
       assessmentsQuery("Acme Corp", [listItem("2", { ...assessmentFields("Acme Corp"), AssessmentId: "ASM-2026-00002" })]),
-      // The live state read finds no root, so the folder pass runs; the root then still does not read back.
+      // The live workspace read finds no root, so the folder pass runs; the root then still does not read back.
       { method: "get", pathIncludes: "/drives/drive-1/root:/Assessments/Acme Corp/ASM-2026-00002:?", throws: { status: 404, code: "itemNotFound" } },
-      { method: "get", pathIncludes: "_Research_Dossier.md", throws: { status: 404, code: "itemNotFound" } },
-      { method: "get", pathIncludes: "_Executive_Summary.md", throws: { status: 404, code: "itemNotFound" } },
-      { method: "get", pathIncludes: "_Risk_Assessment.docx", throws: { status: 404, code: "itemNotFound" } },
       ...folderCreates("Acme Corp", "ASM-2026-00002"),
       { method: "get", pathIncludes: "/drives/drive-1/root:/Assessments/Acme Corp/ASM-2026-00002:?", throws: { status: 404, code: "itemNotFound" } },
     ]);

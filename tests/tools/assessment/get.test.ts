@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { NON_INDEXED_QUERY_HEADER } from "../../../src/graph/lists.js";
 import { GET_INPUT_CONSTRAINTS, runGetAssessment } from "../../../src/tools/assessment/get.js";
 import { L1_ITEMS_PAGE } from "../../graph/fixtures/assessment-probe.js";
+import { vendorsQuery } from "./open-script.js";
 import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, fileItem, folderItem, listItem, page, resultText } from "./fake-graph.js";
 
 const PROFILE = "vendor-assessments";
@@ -54,6 +55,7 @@ describe("get_assessment", () => {
   it("lists a vendor's assessments by its folder name without reading the drive", async () => {
     const { graph, calls } = createScriptedGraph([
       ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" })]),
       {
         method: "get",
         pathIncludes: ["/lists/Assessments/items?", "VendorFolder eq 'Acme Corp'"],
@@ -73,6 +75,50 @@ describe("get_assessment", () => {
     ]);
     expect(calls.filter((call) => call.path.includes("/drives/drive-1/"))).toEqual([]);
     expect(output.graphRequests).toBe(graph.requests());
+  });
+
+  it("filters on the vendor's stored folder name when it differs from the sanitized one", async () => {
+    const { graph } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: "ACME" })]),
+      {
+        method: "get",
+        pathIncludes: ["/lists/Assessments/items?", "VendorFolder eq 'ACME'"],
+        headersInclude: NON_INDEXED_QUERY_HEADER,
+        response: page([listItem("2", { ...PROBE_FIELDS, VendorFolder: "ACME" })]),
+      },
+    ]);
+
+    const result = await runGetAssessment({ profileId: PROFILE, vendor: "Acme Corp" }, assessmentToolContext(graph));
+
+    expect(result.isError).toBeUndefined();
+    const output = result.structuredContent as { found: boolean; assessments: Array<Record<string, unknown>> };
+    expect(output.found).toBe(true);
+    expect(output.assessments.map((summary) => summary.vendorFolder)).toEqual(["ACME"]);
+  });
+
+  it("falls back to the sanitized name when the vendor has no record", async () => {
+    const { graph } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      { method: "get", pathIncludes: ["/lists/Vendors/items?", "Title eq 'Acme: Corp'"], response: page([]) },
+      { method: "get", pathIncludes: ["/lists/Assessments/items?", "VendorFolder eq 'Acme Corp'"], response: page([]) },
+    ]);
+
+    const result = await runGetAssessment({ profileId: PROFILE, vendor: "Acme: Corp" }, assessmentToolContext(graph));
+
+    expect(result.isError).toBeUndefined();
+    expect((result.structuredContent as { found: boolean }).found).toBe(false);
+    expect(resultText(result)).toBe('No item in list "Assessments" has VendorFolder "Acme Corp".');
+  });
+
+  it("refuses a vendor name with no character a folder name allows, before any Graph request", async () => {
+    const { graph } = createScriptedGraph([]);
+
+    const result = await runGetAssessment({ profileId: PROFILE, vendor: '"*:<>?/\\|' }, assessmentToolContext(graph));
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toContain("no characters SharePoint allows in a folder name");
+    expect(graph.requests()).toBe(0);
   });
 
   it("reports an id no assessment carries as not found rather than as an error", async () => {

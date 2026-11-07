@@ -1,7 +1,7 @@
 import type { GraphClient } from "../../graph/client.js";
 import { readDriveItem } from "../../graph/items.js";
 import { odataString, queryListItems } from "../../graph/lists.js";
-import { joinWorkspacePath, renderWorkspaceTemplate } from "../../domain/assessment/templates.js";
+import { joinWorkspacePath, renderWorkspaceTemplate, sanitizeFolderName } from "../../domain/assessment/templates.js";
 import { recordFromFields, type AssessmentRecord, type AssessmentState } from "../../domain/assessment/state.js";
 import type { AssessmentContext } from "./context.js";
 
@@ -20,6 +20,26 @@ export function workspacePaths(ac: AssessmentContext, record: { vendorTitle: str
     artifacts[kind] = joinWorkspacePath(root, renderWorkspaceTemplate(template, values));
   }
   return { root, subfolders, artifacts };
+}
+
+export interface VendorLookup {
+  /** True when the Vendors list holds an item with this Title. */
+  found: boolean;
+  /** The folder name the vendor's items are filed under: the stored one when set, otherwise the sanitized name. */
+  folder: string;
+}
+
+/**
+ * The stored folder name wins over recomputation, so a convention set once
+ * sticks and every tool files and finds a vendor under the same name. Title
+ * is not unique in a SharePoint list; the first item Graph returns is used
+ * and any other is left as it is.
+ */
+export async function findVendor(graph: Pick<GraphClient, "get">, ac: AssessmentContext, vendor: string): Promise<VendorLookup> {
+  const vendors = ac.profile.lists.vendors;
+  const items = await queryListItems(graph, { siteId: ac.siteId, listName: vendors.name, filter: `fields/Title eq ${odataString(vendor)}` });
+  const stored = items[0]?.fields[vendors.columns.folderName];
+  return { found: items.length > 0, folder: typeof stored === "string" && stored.length > 0 ? stored : sanitizeFolderName(vendor) };
 }
 
 function assessmentsList(ac: AssessmentContext): { siteId: string; listName: string } {
@@ -48,7 +68,8 @@ export async function findInProgressAssessment(
     `fields/${columns.scope} eq ${odataString(scope)} and ` +
     `fields/${columns.status} eq ${odataString(ac.profile.lifecycle.status.inProgress)}`;
   const items = await queryListItems(graph, { ...assessmentsList(ac), filter });
-  // The oldest open one is the one a retry meant; a newer duplicate is a defect to report, not to pick.
+  // The oldest open one is picked because it is the one a retry meant. A newer duplicate is not
+  // reported here; it stays in the list for an operator to see.
   const sorted = [...items].sort((a, b) => Number(a.id) - Number(b.id));
   const item = sorted[0];
   return item === undefined ? undefined : recordFromFields(item.fields, item.id, item.eTag, columns);

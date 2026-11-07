@@ -53,14 +53,22 @@ export function rootRead(folder: string, assessmentId: string): ScriptEntry {
   return { method: "get", pathIncludes: `/drives/drive-1/root:/Assessments/${folder}/${assessmentId}:?`, response: folderItem(assessmentId) };
 }
 
-/** readAssessmentState on the retry path: the root again, then the three artifacts, all absent. */
-export function retryStateReads(folder: string, assessmentId: string): ScriptEntry[] {
-  return [
-    rootRead(folder, assessmentId),
-    { method: "get", pathIncludes: "_Research_Dossier.md", throws: { status: 404, code: "itemNotFound" } },
-    { method: "get", pathIncludes: "_Executive_Summary.md", throws: { status: 404, code: "itemNotFound" } },
-    { method: "get", pathIncludes: "_Risk_Assessment.docx", throws: { status: 404, code: "itemNotFound" } },
-  ];
+/**
+ * The retry path's live workspace reads: the root, then each subfolder, stopping at the first
+ * absent one as open does. `absent` names the one that answers 404; omitted, all are present.
+ */
+export function workspaceReads(folder: string, assessmentId: string, absent?: string): ScriptEntry[] {
+  const root = `/drives/drive-1/root:/Assessments/${folder}/${assessmentId}`;
+  const reads: ScriptEntry[] = [];
+  for (const name of ["(root)", "Research", "Evidence", "Published"]) {
+    const path = name === "(root)" ? `${root}:?` : `${root}/${name}:?`;
+    if (name === absent) {
+      reads.push({ method: "get", pathIncludes: path, throws: { status: 404, code: "itemNotFound" } });
+      break;
+    }
+    reads.push({ method: "get", pathIncludes: path, response: folderItem(name === "(root)" ? assessmentId : name) });
+  }
+  return reads;
 }
 
 export function firstOpenScript(conflict: string[] = []): ScriptEntry[] {

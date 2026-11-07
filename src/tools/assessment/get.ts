@@ -7,7 +7,7 @@ import { sanitizeFolderName } from "../../domain/assessment/templates.js";
 import { recordFromFields, type AssessmentRecord } from "../../domain/assessment/state.js";
 import type { JournalEntry } from "../../store/types.js";
 import { resolveAssessmentContext } from "./context.js";
-import { findAssessmentById, readAssessmentState } from "./read-state.js";
+import { findAssessmentById, findVendor, readAssessmentState } from "./read-state.js";
 import { ARTIFACT_PRESENCE_SHAPE, ASSESSMENT_SUMMARY_SHAPE, JOURNAL_SUMMARY_SHAPE } from "./output.js";
 
 export const GET_INPUT_CONSTRAINTS = "Exactly one of assessmentId or vendor is given.";
@@ -66,6 +66,12 @@ export async function runGetAssessment(input: unknown, context: ToolContext): Pr
   if ((args.assessmentId === undefined) === (args.vendor === undefined)) {
     return { isError: true, content: [{ type: "text" as const, text: GET_INPUT_CONSTRAINTS }] };
   }
+  if (args.vendor !== undefined && sanitizeFolderName(args.vendor).length === 0) {
+    return {
+      isError: true,
+      content: [{ type: "text" as const, text: `The vendor name "${args.vendor}" has no characters SharePoint allows in a folder name, so no assessment could be filed under it. Nothing was read.` }],
+    };
+  }
   const subject: FailureSubject = { tool: "get_assessment", profileId: args.profileId };
   const before = context.graph.requests();
 
@@ -96,7 +102,8 @@ export async function runGetAssessment(input: unknown, context: ToolContext): Pr
       return { structuredContent: output, content: [{ type: "text" as const, text }] };
     }
 
-    const vendorFolder = sanitizeFolderName(args.vendor!);
+    // Filed under the vendor's stored folder name when it has one, as open_assessment files it.
+    const vendorFolder = (await findVendor(context.graph, ac, args.vendor!)).folder;
     const columns = ac.profile.lists.assessments.columns;
     const items = await queryListItems(context.graph, { siteId: ac.siteId, listName, filter: `fields/${columns.vendorFolder} eq ${odataString(vendorFolder)}` });
     const assessments = items.map((item) => assessmentSummary(recordFromFields(item.fields, item.id, item.eTag, columns)));
