@@ -19,7 +19,12 @@ export const ProfileIdSchema = z.string().min(1).regex(/^[a-z0-9-]+$/, "must be 
 export const SiteEntrySchema = z.object({
   siteUrl: z.string().url(),
   library: z.string().min(1),
-  /** Microsoft Search region such as "NAM"; optional, and the cross-check is skipped without it. */
+  /**
+   * The Microsoft Search region, such as "NAM". Required by Graph on any search
+   * issued with an application permission, and there is no discovery call this
+   * project has verified, so it is configured rather than detected. Optional:
+   * when absent the cross-check is skipped and the report says that is why.
+   */
   searchRegion: z.string().min(1).optional(),
   /** The customer's own id for the client this site belongs to, when the client is the site. */
   clientId: z.string().min(1).optional(),
@@ -42,16 +47,17 @@ export function normalizeProfileSites(input: unknown): unknown {
   if (typeof input !== "object" || input === null || Array.isArray(input)) return input;
   const record = input as Record<string, unknown>;
   const hasIdentity = record.identity !== undefined;
-  const hasSites = Array.isArray(record.sites);
+  // Presence, not array-ness: a malformed `sites` must reach the schema and be refused, never be overwritten.
+  const hasSites = record.sites !== undefined;
   if (hasIdentity && !hasSites) return { ...record, sites: [record.identity] };
-  if (!hasIdentity && hasSites) return { ...record, identity: (record.sites as unknown[])[0] };
+  if (!hasIdentity && hasSites) return { ...record, identity: Array.isArray(record.sites) ? record.sites[0] : undefined };
   return record;
 }
 
 /**
  * Field by field, not by serializing: zod emits keys in schema declaration
  * order and the identity and site-entry schemas need not declare them in the
- * same order.
+ * same order. The field list must be updated by hand when SiteEntrySchema gains a field.
  */
 function sameSiteEntry(a: SiteEntry, b: SiteEntry): boolean {
   return (
