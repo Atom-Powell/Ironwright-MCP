@@ -63,36 +63,45 @@ async function main(): Promise<void> {
   };
 
   const raw: ProbeRecord[] = [];
-  for (const step of probeSteps()) {
-    let req: ProbeRequest;
-    try {
-      req = step.request(ctx);
-    } catch (error) {
-      // A step that cannot be built is missing a capture from an earlier step.
-      // The loop stops here rather than skipping on, and the files are still
-      // written below, so the report shows exactly where the chain broke
-      // instead of a run of failures that share one cause.
-      const because = `not sent: ${error instanceof Error ? error.message : String(error)}`;
-      raw.push({
-        id: step.id,
-        assumption: step.assumption,
-        expected: step.expected,
-        request: { method: "GET", url: "(not sent)" },
-        response: { status: 0, headers: {}, body: "" },
-        verdict: { kind: "fail", because },
-      });
-      console.error(`${step.id.padEnd(4)} 0  FAIL ${because}`);
-      break;
+  // The files are written in finally so a fetch that throws mid-run still
+  // leaves its records behind: a half run is evidence of where the chain
+  // broke, and the thrown error still reaches the top-level handler.
+  try {
+    for (const step of probeSteps()) {
+      let req: ProbeRequest;
+      try {
+        req = step.request(ctx);
+      } catch (error) {
+        // A step that cannot be built is missing a capture from an earlier step.
+        // The loop stops here rather than skipping on, and the files are still
+        // written, so the report shows exactly where the chain broke instead of
+        // a run of failures that share one cause.
+        const because = `not sent: ${error instanceof Error ? error.message : String(error)}`;
+        raw.push({
+          id: step.id,
+          assumption: step.assumption,
+          expected: step.expected,
+          request: { method: "GET", url: "(not sent)" },
+          response: { status: 0, headers: {}, body: "" },
+          verdict: { kind: "fail", because },
+        });
+        console.error(`${step.id.padEnd(4)} 0  FAIL ${because}`);
+        break;
+      }
+      const token = await tokenProvider.getToken();
+      const res = await send(token, req);
+      const verdict = step.judge(res, ctx);
+      step.capture?.(res, ctx);
+      raw.push({ id: step.id, assumption: step.assumption, expected: step.expected, request: req, response: res, verdict });
+      const label = verdict.kind === "pass" ? "pass" : verdict.kind === "fail" ? `FAIL ${verdict.because}` : `observed ${verdict.note}`;
+      console.error(`${step.id.padEnd(4)} ${res.status}  ${label}`);
     }
-    const token = await tokenProvider.getToken();
-    const res = await send(token, req);
-    const verdict = step.judge(res, ctx);
-    step.capture?.(res, ctx);
-    raw.push({ id: step.id, assumption: step.assumption, expected: step.expected, request: req, response: res, verdict });
-    const label = verdict.kind === "pass" ? "pass" : verdict.kind === "fail" ? `FAIL ${verdict.because}` : `observed ${verdict.note}`;
-    console.error(`${step.id.padEnd(4)} ${res.status}  ${label}`);
+  } finally {
+    await writeOutputs(raw, ctx, out);
   }
+}
 
+async function writeOutputs(raw: ProbeRecord[], ctx: ProbeContext, out: string): Promise<void> {
   const rawDir = join(".superpowers", "assessment-probe");
   await mkdir(rawDir, { recursive: true });
   await writeFile(join(rawDir, `${ctx.runId}.raw.jsonl`), raw.map((r) => JSON.stringify(r)).join("\n") + "\n");
@@ -105,13 +114,20 @@ async function main(): Promise<void> {
   await writeFile(join(out, "report.md"), reportMarkdown(redacted, ctx.runId, SERVER_TOKEN_ROLES));
   console.error(`wrote ${out}/recordings.jsonl and ${out}/report.md`);
 
+  // Named from the recorded responses, not from captures: a 201 without an
+  // eTag creates the thing and captures nothing.
+  const answered201 = (id: string): boolean => raw.some((r) => r.id === id && r.response.status === 201);
   const created: string[] = [];
-  if (ctx.itemId !== undefined) created.push(`list item ${ctx.itemId} in the ${ctx.listPrefix} Assessments list`);
-  if (ctx.folderEtag !== undefined) created.push(`the folder IW-Probe/probe-${ctx.runId}`);
+  if (answered201("F0")) created.push("the root folder IW-Probe");
+  if (answered201("L2a")) {
+    created.push(`a list item in the Assessments list ${ctx.itemId !== undefined ? `with id ${ctx.itemId}` : "whose id was not captured"}`);
+  }
+  if (answered201("F1a")) created.push(`the folder IW-Probe/probe-${ctx.runId}`);
+  if (answered201("F2a")) created.push(`the file IW-Probe/probe-${ctx.runId}/dossier.md`);
   console.error(
     created.length === 0
-      ? "cleanup: nothing was created by this run"
-      : `cleanup: this run created ${created.join(" and ")}; remove them by hand or leave them, they are named by run`,
+      ? "cleanup: no create step answered 201, so nothing is known to have been created"
+      : `cleanup: this run created ${created.join(", ")}; they were left in place for the operator to remove or keep`,
   );
 }
 
