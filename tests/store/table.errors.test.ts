@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MalformedJournalEntityError } from "../../src/store/types.js";
 import { createTableStateStore, ensureTables } from "../../src/store/table.js";
 import { FakeTableClient } from "./fake-table-client.js";
 
@@ -8,7 +9,7 @@ describe("Azure Table state store failures", () => {
     inventory.submitTransaction = async () => {
       throw new Error("the service is unavailable");
     };
-    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory, plans: new FakeTableClient() });
+    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory, plans: new FakeTableClient(), journal: new FakeTableClient() });
 
     await expect(
       store.applyInventoryChanges("example", "d1", [
@@ -22,7 +23,7 @@ describe("Azure Table state store failures", () => {
 
   it("tolerates a 404 on delete but not another failure", async () => {
     const inventory = new FakeTableClient();
-    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory, plans: new FakeTableClient() });
+    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory, plans: new FakeTableClient(), journal: new FakeTableClient() });
 
     await expect(
       store.applyInventoryChanges("example", "d1", [{ kind: "delete", itemId: "absent" }]),
@@ -41,7 +42,7 @@ describe("Azure Table state store failures", () => {
 
   it("clears a partition one row at a time when the batched delete fails", async () => {
     const inventory = new FakeTableClient();
-    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory, plans: new FakeTableClient() });
+    const store = createTableStateStore({ deltaLinks: new FakeTableClient(), inventory, plans: new FakeTableClient(), journal: new FakeTableClient() });
 
     await store.applyInventoryChanges("example", "d1", [
       {
@@ -94,7 +95,7 @@ describe("ensureTables", () => {
       throw error;
     };
 
-    await expect(ensureTables({ deltaLinks, inventory, plans })).resolves.toBeUndefined();
+    await expect(ensureTables({ deltaLinks, inventory, plans, journal: new FakeTableClient() })).resolves.toBeUndefined();
   });
 
   it("lets a non-409 failure from createTable propagate", async () => {
@@ -107,16 +108,18 @@ describe("ensureTables", () => {
       throw error;
     };
 
-    await expect(ensureTables({ deltaLinks, inventory, plans })).rejects.toThrow(/forbidden/);
+    await expect(ensureTables({ deltaLinks, inventory, plans, journal: new FakeTableClient() })).rejects.toThrow(/forbidden/);
   });
 
-  it("creates all three clients' tables, not just the first", async () => {
+  it("creates all four clients' tables, not just the first", async () => {
     let deltaLinksCreated = false;
     let inventoryCreated = false;
     let plansCreated = false;
+    let journalCreated = false;
     const deltaLinks = new FakeTableClient();
     const inventory = new FakeTableClient();
     const plans = new FakeTableClient();
+    const journal = new FakeTableClient();
     deltaLinks.createTable = async () => {
       deltaLinksCreated = true;
     };
@@ -126,11 +129,44 @@ describe("ensureTables", () => {
     plans.createTable = async () => {
       plansCreated = true;
     };
+    journal.createTable = async () => {
+      journalCreated = true;
+    };
 
-    await ensureTables({ deltaLinks, inventory, plans });
+    await ensureTables({ deltaLinks, inventory, plans, journal });
 
     expect(deltaLinksCreated).toBe(true);
     expect(inventoryCreated).toBe(true);
     expect(plansCreated).toBe(true);
+    expect(journalCreated).toBe(true);
+  });
+});
+
+describe("journal rows that cannot be read", () => {
+  async function seeded(entry: unknown): Promise<ReturnType<typeof createTableStateStore>> {
+    const journal = new FakeTableClient();
+    await journal.upsertEntity({ partitionKey: "example|journal|ASM-1", rowKey: "row1", entry });
+    return createTableStateStore({ deltaLinks: new FakeTableClient(), inventory: new FakeTableClient(), plans: new FakeTableClient(), journal });
+  }
+
+  it("throws a typed error for a row whose entry is not a string", async () => {
+    const store = await seeded(42);
+    await expect(store.listJournal("example", "ASM-1")).rejects.toBeInstanceOf(MalformedJournalEntityError);
+  });
+
+  it("throws a typed error for a row whose entry is not valid JSON, without naming the content", async () => {
+    const store = await seeded("{secret-path");
+    const error: unknown = await store.listJournal("example", "ASM-1").catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(MalformedJournalEntityError);
+    expect((error as Error).message).toContain("row1");
+    expect((error as Error).message).not.toContain("secret-path");
+  });
+
+  it.each(["{}", "null", '{"at":"x","secret":"leak"}'])("throws a typed error for valid JSON of the wrong shape, %s", async (text) => {
+    const store = await seeded(text);
+    const error: unknown = await store.listJournal("example", "ASM-1").catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(MalformedJournalEntityError);
+    expect((error as Error).message).toContain("row1");
+    expect((error as Error).message).not.toContain("leak");
   });
 });

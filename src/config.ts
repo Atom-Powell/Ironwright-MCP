@@ -1,3 +1,5 @@
+import { MIN_INBOUND_KEY_LENGTH, type InboundAuthConfig, type InboundAuthMode } from "./server/auth.js";
+
 export interface GraphCredentialsConfig {
   tenantId: string;
   clientId: string;
@@ -95,4 +97,42 @@ export function loadShutdownDeadlineMs(env: NodeJS.ProcessEnv): number {
     throw new Error(`IW_SHUTDOWN_DEADLINE_MS must be a positive integer of milliseconds, received "${raw}"`);
   }
   return deadlineMs;
+}
+
+/**
+ * Fails closed: no key means no start, and mode none needs a second variable
+ * that says the operator meant it. The key is never echoed, for the same
+ * reason the client secret above is not.
+ */
+export function loadInboundAuth(env: NodeJS.ProcessEnv): InboundAuthConfig {
+  const rawMode = env.IW_INBOUND_AUTH?.trim() ?? "apikey";
+  if (rawMode !== "apikey" && rawMode !== "bearer" && rawMode !== "none") {
+    // The rejected value is not echoed: a mistyped secret pasted into this
+    // variable would otherwise land in a startup log.
+    throw new Error("IW_INBOUND_AUTH must be apikey, bearer or none");
+  }
+  const mode: InboundAuthMode = rawMode;
+  const header = env.IW_INBOUND_KEY_HEADER?.trim() || "x-api-key";
+
+  if (mode === "none") {
+    if (env.IW_ALLOW_ANONYMOUS !== "1") {
+      throw new Error(
+        "IW_INBOUND_AUTH=none starts a server that answers anyone who can reach it. Set IW_ALLOW_ANONYMOUS=1 " +
+          "as well to confirm that this process is reachable from loopback only.",
+      );
+    }
+    return { mode, header };
+  }
+
+  const key = env.IW_INBOUND_KEY;
+  if (!present(key) || key.length < MIN_INBOUND_KEY_LENGTH) {
+    throw new Error(
+      `IW_INBOUND_KEY is required and must be at least ${MIN_INBOUND_KEY_LENGTH} characters: it is the shared key every ` +
+        "request to this server must carry. Generate one with: node -e \"console.log(require('node:crypto').randomBytes(24).toString('hex'))\"",
+    );
+  }
+  if (key !== key.trim()) {
+    throw new Error("IW_INBOUND_KEY must not have leading or trailing whitespace: surrounding whitespace is not allowed.");
+  }
+  return { mode, key, header };
 }

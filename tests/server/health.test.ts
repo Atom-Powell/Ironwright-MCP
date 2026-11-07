@@ -6,7 +6,7 @@ import { createApp } from "../../src/server/app.js";
 describe("GET /health", () => {
   it("returns 200 with a status body", async () => {
     const response = await request(
-      createApp({ serverFactory: () => new McpServer({ name: "test", version: "0.0.0" }) }),
+      createApp({ auth: { mode: "none", header: "x-api-key" }, serverFactory: () => new McpServer({ name: "test", version: "0.0.0" }) }),
     ).get("/health");
 
     expect(response.status).toBe(200);
@@ -15,7 +15,7 @@ describe("GET /health", () => {
 
   it("does not accept POST", async () => {
     const response = await request(
-      createApp({ serverFactory: () => new McpServer({ name: "test", version: "0.0.0" }) }),
+      createApp({ auth: { mode: "none", header: "x-api-key" }, serverFactory: () => new McpServer({ name: "test", version: "0.0.0" }) }),
     ).post("/health");
 
     expect(response.status).toBe(404);
@@ -24,6 +24,7 @@ describe("GET /health", () => {
   it("answers healthy without building a tool server or reaching any dependency", async () => {
     let serverFactoryCalls = 0;
     const app = createApp({
+      auth: { mode: "none", header: "x-api-key" },
       serverFactory: () => {
         serverFactoryCalls += 1;
         return new McpServer({ name: "test", version: "0.0.0" });

@@ -477,4 +477,40 @@ export function stateStoreConformance(create: () => StateStore): void {
     const secondRead = await store.getPlan("example", plan.planId);
     expect(secondRead?.items[0]?.etag).toBe("e1");
   });
+
+  it("lists no journal entries before any are appended", async () => {
+    await expect(create().listJournal("example", "ASM-2026-00001")).resolves.toEqual([]);
+  });
+
+  it("appends journal entries and lists them in time order regardless of append order", async () => {
+    const store = create();
+    const later = { at: "2026-11-07T10:00:01.000Z", correlationId: "c2", stage: "DOSSIER", operation: "file_created" as const, target: "Assessments/V/ASM-2026-00001/Research/V_Research_Dossier.md", etagAfter: "e2", contentHash: "h" };
+    const earlier = { at: "2026-11-07T10:00:00.000Z", correlationId: "c1", stage: "ID", operation: "list_item_created" as const, target: "Assessments#17" };
+    await store.appendJournalEntry("example", "ASM-2026-00001", later);
+    await store.appendJournalEntry("example", "ASM-2026-00001", earlier);
+    await expect(store.listJournal("example", "ASM-2026-00001")).resolves.toEqual([earlier, later]);
+  });
+
+  it("keeps journals apart by profile and by assessment", async () => {
+    const store = create();
+    const entry = { at: "2026-11-07T10:00:00.000Z", correlationId: "c1", stage: "ID", operation: "list_item_created" as const, target: "Assessments#17" };
+    await store.appendJournalEntry("example", "ASM-2026-00001", entry);
+    await expect(store.listJournal("example", "ASM-2026-00002")).resolves.toEqual([]);
+    await expect(store.listJournal("other", "ASM-2026-00001")).resolves.toEqual([]);
+  });
+
+  it("keeps both entries when two share an instant and a correlation id", async () => {
+    const store = create();
+    const base = { at: "2026-11-07T10:00:00.000Z", correlationId: "c1", operation: "list_item_created" as const, target: "x" };
+    await store.appendJournalEntry("example", "ASM-2026-00001", { ...base, stage: "ID" });
+    await store.appendJournalEntry("example", "ASM-2026-00001", { ...base, stage: "DOSSIER" });
+    const listed = await store.listJournal("example", "ASM-2026-00001");
+    expect(listed).toHaveLength(2);
+    expect(listed.map((entry) => entry.stage).sort()).toEqual(["DOSSIER", "ID"]);
+  });
+
+  it("refuses an assessment id that cannot be a table key", async () => {
+    const entry = { at: "2026-11-07T10:00:00.000Z", correlationId: "c1", stage: "ID", operation: "list_item_created" as const, target: "x" };
+    await expect(create().appendJournalEntry("example", "bad/id", entry)).rejects.toBeInstanceOf(UnsafeKeyError);
+  });
 }

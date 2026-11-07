@@ -1,4 +1,5 @@
 import { ProfileSchema, type Profile } from "./schema.js";
+import { normalizeProfileSites } from "./base.js";
 
 /**
  * Validation messages are the product here. A mapping mistake that slips through
@@ -16,7 +17,7 @@ export class ProfileValidationError extends Error {
 }
 
 export function loadProfile(input: unknown): Profile {
-  const result = ProfileSchema.safeParse(input);
+  const result = ProfileSchema.safeParse(normalizeProfileSites(input));
   if (result.success) return result.data;
 
   const issues = result.error.issues.map((issue) => {

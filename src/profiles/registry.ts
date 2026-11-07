@@ -2,7 +2,9 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ProfileValidationError } from "../domain/profile/load.js";
 import type { Profile } from "../domain/profile/schema.js";
-import { isLibraryProfile, loadAnyProfile, type AnyProfile } from "../domain/profile/library.js";
+import { isLibraryProfile, type AnyProfile } from "../domain/profile/library.js";
+import { normalizeProfileSites } from "../domain/profile/base.js";
+import { ALL_MODULES, moduleForKind, type DomainModule } from "../modules/index.js";
 
 /**
  * A profile directory this server cannot start with. Every problem found in
@@ -67,6 +69,28 @@ export class LibraryProfileError extends Error {
   }
 }
 
+/**
+ * Validates with the module that owns the profile's kind. An absent kind means
+ * compliance, the default every profile written before kinds existed relies on.
+ */
+function loadThroughModule(contents: unknown, modules: readonly DomainModule[]): AnyProfile {
+  const normalized = normalizeProfileSites(contents);
+  // Only an absent kind means compliance. `?? "compliance"` would also take a
+  // null, which loadAnyProfile refuses, and two dispatchers disagreeing on one
+  // input is a way for a profile to load through one path and not the other.
+  const declared = typeof normalized === "object" && normalized !== null ? (normalized as { kind?: unknown }).kind : undefined;
+  const kind = declared === undefined ? "compliance" : declared;
+  const module = moduleForKind(kind as string, modules);
+  if (module === undefined) {
+    throw new ProfileValidationError([
+      `kind ${JSON.stringify(kind)} is not one this server has a module for; the configured kinds are ${modules.map((m) => `"${m.kind}"`).join(", ")}`,
+    ]);
+  }
+  const result = module.profileSchema.safeParse(normalized);
+  if (result.success) return result.data as AnyProfile;
+  throw new ProfileValidationError(result.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`));
+}
+
 /** One candidate profile, already read. `source` is used only in messages. */
 export interface ProfileEntry {
   source: string;
@@ -121,14 +145,18 @@ export interface ProfileRegistry {
  * because startup already fails loudly on those and a second failure path
  * would be a second thing an operator has to learn.
  */
-export function createProfileRegistry(entries: readonly ProfileEntry[], grantedSiteUrl: string): ProfileRegistry {
+export function createProfileRegistry(
+  entries: readonly ProfileEntry[],
+  grantedSiteUrl: string,
+  modules: readonly DomainModule[] = ALL_MODULES,
+): ProfileRegistry {
   const issues: string[] = [];
   const byId = new Map<string, { profile: AnyProfile; source: string }>();
 
   for (const entry of entries) {
     let profile: AnyProfile;
     try {
-      profile = loadAnyProfile(entry.contents);
+      profile = loadThroughModule(entry.contents, modules);
     } catch (error) {
       if (!(error instanceof ProfileValidationError)) throw error;
       issues.push(`${entry.source}: ${error.issues.join("; ")}`);
@@ -144,9 +172,10 @@ export function createProfileRegistry(entries: readonly ProfileEntry[], grantedS
       continue;
     }
 
-    if (!sameSite(profile.identity.siteUrl, grantedSiteUrl)) {
+    const foreign = profile.sites.findIndex((site) => !sameSite(site.siteUrl, grantedSiteUrl));
+    if (foreign >= 0) {
       issues.push(
-        `${entry.source}: profile "${profile.profileId}" names site ${profile.identity.siteUrl}, but this ` +
+        `${entry.source}: profile "${profile.profileId}" sites[${foreign}] names site ${profile.sites[foreign]!.siteUrl}, but this ` +
           `server's Sites.Selected grant covers ${grantedSiteUrl}. A profile pointed at a site the grant does ` +
           "not cover would fail as a 403 on its first Graph call rather than at startup.",
       );
@@ -193,7 +222,11 @@ export function createProfileRegistry(entries: readonly ProfileEntry[], grantedS
  * to tell which of several profiles produced it, and the same reasoning already
  * put this wrapper around the scan command's own profile read.
  */
-export async function loadProfileDirectory(dir: string, grantedSiteUrl: string): Promise<ProfileRegistry> {
+export async function loadProfileDirectory(
+  dir: string,
+  grantedSiteUrl: string,
+  modules: readonly DomainModule[] = ALL_MODULES,
+): Promise<ProfileRegistry> {
   let names: string[];
   try {
     names = await readdir(dir);
@@ -221,5 +254,5 @@ export async function loadProfileDirectory(dir: string, grantedSiteUrl: string):
     }
   }
 
-  return createProfileRegistry(entries, grantedSiteUrl);
+  return createProfileRegistry(entries, grantedSiteUrl, modules);
 }

@@ -8,11 +8,45 @@ longer carries it. Things land here when they need to survive past the session t
 because a scratch ledger will not be read by the phase that needs it. Sections are roughly
 ordered by when they will matter, not by when they were written.
 
-**Writing a live sitting up here is only half the step.** The other half is correcting that
-phase's Build Sequence entry in `CLAUDE.md` in the same commit, because that entry is what says
-what the phase still owes and it is the document every session loads. The rule is stated in
-`CLAUDE.md`'s Working Agreement; it is repeated here because this file is where the first half
-gets done and is therefore where the second half gets forgotten, which it has been twice.
+## Where the build stands
+
+This table is the one place status lives. `CLAUDE.md`, the README and the PAI vault note point
+here and restate none of it, so a change of state is one edit in one file, made in the same commit
+as the sitting, merge, or decision that caused it. The table says where each phase is; the dated
+sections below say what was proven and what was not. Last updated 2026-11-06.
+
+| Phase | State | Evidence |
+|---|---|---|
+| 1 Foundation | Complete | PRs #1 to #3; setup verified live 2026-09-12 |
+| 2a Graph layer and repository snapshot | Complete, verified live 2026-09-16 | PR #5 |
+| 2b-1 Excel session reader | Invalidated 2026-09-16, superseded by 2b-2 | PR #9 |
+| 2b-2 Workbook bytes reader | Complete, verified live 2026-09-17 | PR #12 |
+| 2c Microsoft Search cross-check | Complete, verified live 2026-09-17 | PR #13 |
+| 3 Reconciliation engine | Complete; whole-branch review 2026-09-13 | PR #4 |
+| 4a Tool execution layer and reconcile tool | Complete, reconciled live 2026-09-17 | PR #10 |
+| 4b Index-served read tools | Complete, verified live 2026-09-18 | PR #14 |
+| 4c `describe_workbook` | Complete, verified live 2026-09-18 | PR #15 |
+| 5a Deployable server | Complete, compiled output verified live 2026-09-18; the shutdown deadline is covered by tests only | PR #16 |
+| 5b Image, managed identity, Container Apps, front door, CI/CD, telemetry | Redefined 2026-11-06 as the documentation of the Container Apps ingress path, one of three; still needs an Azure subscription to verify | |
+| 6a Rename write path | Complete, verified live 2026-09-19 | PRs #17, #18 |
+| 6b-1 Same-library moves | Complete, verified live 2026-09-24 | PR #19 |
+| Token role guard | Complete | PR #20 |
+| 6d Custom plans and library-only profiles | Complete, verified live 2026-09-24 | PR #21, merged 2026-09-25 |
+| 6b-2 Cross-library moves | Held: begins with a live probe; waits on the decision below | |
+| 6c `replicate_template` and folder creation | Held | |
+| `$batch` | Held: no caller yet whose measured cost justifies it | |
+| 7 Copilot Studio integration and governance | In progress: track 1 spec drafted (pre-probe) and probe server built; no Copilot Studio contact yet | `docs/superpowers/specs/2026-10-11-copilot-studio-integration-design.md` |
+| 8 Evaluation suite | Not started; questions written in `docs/EVALUATION-QUESTIONS.md` | |
+| 9a Probes and the grant | Designed 2026-11-06, pre-probe; blocks 9c and 9d, and the live verification of 9b | `docs/superpowers/specs/2026-11-06-domain-platform-and-assessment-domain-design.md` |
+| 9b Core: modules, site sets, inbound authentication, lifecycle kind, journal | Complete against fakes, merged 2026-11-07; nothing in it has met a live tenant yet | PR #22, merged 2026-11-07 |
+| 9c Assessment module and the four Graph operations | Designed 2026-11-06; waits on 9a evidence | same spec |
+| 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9a and 9c, and is the item that slips first | same spec |
+| Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
+| CPA practice domain (multi-site scan and queries, grant issuer loop over a sites file, folder template taxonomy) | Not started; the phase after 9 | same spec |
+
+Still open from the parent spec's pre-phase-2 decisions: which delegated scopes the setup
+command's device-code sign-in must request. It governs that sign-in rather than the server's own
+Graph access, so it has blocked no phase.
 
 ## Decision required: which file should a plan act on when a slot's winner is in another library?
 
@@ -2510,3 +2544,252 @@ nothing at those lines by construction, so no fake can check them either. The ph
 records the 32768-character cap as unprobed, which is a different claim: the cap is about what the
 service accepts, the cast is about whether the real client satisfies the interface this code calls
 through at all.
+
+## FROZEN: the Build Sequence as CLAUDE.md carried it through 2026-09-29
+
+Kept verbatim as history when status moved to the table at the top of this file. It is not
+maintained and some of it was already stale when frozen, among them phase 3 still reading
+"pending review". Read it for the reasoning behind each phase, never for where a phase stands.
+
+1. **Foundation.** Complete and merged. Stateless transport, all ten tools registered as honest
+   stubs behind the contract test, the pure profile schema, the two-layer write gate, and a
+   scripted per-tenant setup verified end to end against a live tenant.
+2. **Graph performance layer. Complete.** Split into 2a, 2b and 2c because it was more work than
+   one implementation plan should carry; 2b split again into 2b-1 and 2b-2 when the live run
+   invalidated the first attempt.
+   - **2a: the Graph layer and the repository snapshot. Complete and verified live on 2026-09-16.**
+     The token provider, `Retry-After`-aware retry, path addressing, the delta client, both
+     `StateStore` implementations, the snapshot assembler, and the `scan` command, over plain
+     `fetch`. A cold scan enumerated 144 files and 122 folders in 4 Graph requests and an immediate
+     re-scan in 3, reusing the persisted `deltaLink` with no resync, against a tree a recursive walk
+     would have cost at least 122 requests. The `as unknown as TableClientLike` cast, recorded as
+     the one line no fake could check, held against the real `@azure/data-tables` client on Azurite.
+     This phase's central claim is now a measurement rather than a design argument.
+   - **2b-1: the Excel session and the workbook snapshot. INVALIDATED 2026-09-16 by the live run.**
+     The Graph Excel API refuses this server's app-only tokens at every application permission
+     tested, so the session manager and the mapped range read have no reachable endpoint and
+     `readWorkbookSnapshot` cannot run. What survives the invalidation is the pure half: the reader
+     that turns a grid into records and rejections never touched Graph, and the rejection path it
+     built is what the replacement depends on.
+   - **2b-2: the workbook bytes reader. Complete and verified live on 2026-09-17.** Downloads the
+     `.xlsx` through `/content` under the same `Sites.Selected` grant and parses the bytes in
+     process, supplying the engine's second input without an Excel session.
+   - **2c: the Microsoft Search cross-check. Complete and verified live on 2026-09-17.** Finds a
+     correctly named deliverable filed into a different document library of the same site. A
+     deliverable moved into a second library moved from `missing` to `misplaced` naming that
+     library, a copy left at the same relative path in both libraries did not erase the local
+     file, and the other library contributed no orphans. Cross-site is structurally impossible
+     rather than merely out of scope: Microsoft Search is trimmed to the `Sites.Selected` grant,
+     confirmed by a live probe. A report no longer necessarily declares itself degraded; it carries
+     one of four distinguishable reasons when the cross-check did not complete, and says nothing
+     when it did.
+   - The `$batch` builder left this phase on 2026-09-14 for phase 6. A delta-driven inventory
+     has no use for it and a range read is one call either way, so a write tool was expected to be
+     its first real caller. Phase 6a deferred it again and issues renames sequentially, so it still
+     has none; see the Decision Record's Graph access entry for the measured per-rename cost that
+     decides when it arrives.
+3. **Reconciliation engine.** Complete, pending review. Pure and fixture-tested with no Graph
+   dependency, which is what let it be built ahead of phase 2. `reconcile` is the single public
+   entry; the four stages behind it stay internal so two tools cannot disagree about whether a
+   client is compliant. Pinned by a golden report over synthetic fixtures covering every artifact
+   state, both orphan kinds, duplicate resolution, the quarterly anchor, effective-date exclusion
+   and a client who owes nothing. The engine enforces two input contracts phase 2 must satisfy:
+   one workbook row per client, and repository files collapsed by path. This is the MVP
+   checkpoint.
+4. **Read tools**, sliced. **4a: the tool execution layer and the first wired tool.** Complete.
+   The handler contract and the per-process `ToolContext`, the profile registry loaded and
+   validated at startup from `IW_PROFILE_DIR`, the in-process single-flight scan coordinator, and
+   `reconcile_workbook_vs_repository` wired end to end with a real output schema. Graph, Azure
+   Table Storage and the workbook bytes reader have all been exercised live, and
+   `reconcile_workbook_vs_repository` returned a report against a real library on 2026-09-17 once
+   phase 2b-2 supplied the workbook snapshot.
+   **4b: the three index-served read tools. Complete and verified live on 2026-09-18.**
+   `inventory_tree`, `query_repository` and `validate_structure` are wired onto the 4a execution
+   layer. The tool contract widened so `inputSchema` can be a full Zod schema rather than a raw
+   shape, which is what lets a future refinement be expressed; `StateStore` gained one read
+   method, `getScannedDrives`; and a pure taxonomy conformance matcher was added at
+   `src/domain/structure/conform.ts`. All three tools ran against the live site through the MCP
+   transport: `inventory_tree` reproduced phase 2a's 4-request cold scan through the tool layer,
+   `query_repository` returned all three questions at zero Graph requests and refused before any
+   scan had run, and `validate_structure` matched the seeded tree. The sitting found a cap defect
+   no fixture could reach; `docs/OPEN-ITEMS.md` carries the dated record and what the sitting does
+   not establish.
+   **4c: `describe_workbook`. Complete, covered by fakes only.** All five read tools are now
+   wired, which closes phase 4. `IW_SITE_URL` becomes required server configuration, replacing
+   the stub's `siteUrl` input, which promised a reach the `Sites.Selected` permission model could
+   never honor; the profile registry now refuses at startup a profile whose `identity.siteUrl`
+   disagrees with the granted site, instead of that mismatch surfacing later as a 403. Two pure
+   modules carry the new logic: `src/workbook/introspect.ts` enumerates a workbook's worksheets
+   and tables without building a grid, surfacing one it cannot resolve rather than dropping or
+   zeroing it, and `src/workbook/describe.ts` detects a header row, declining when two candidates
+   are equally plausible, and describes a range's columns with inferred types and bounded
+   samples. It proposes no `columns` mapping and infers no `date` type, both deliberate, and
+   withholds every sample for a source when the workbook is `fullCalcOnLoad` over a range holding
+   a formula. **Verified live on 2026-09-18.** Both modes ran against the live site through the
+   MCP transport and a per-request `McpServer`, and the tool rediscovered a workbook mapping this
+   repository independently knows is correct without being told any of it. The sitting also found
+   a request-count defect no fixture could reach, since a download costs two counted Graph
+   requests and the shared fake charged one. `docs/OPEN-ITEMS.md` carries the dated record and
+   what the sitting does not establish. Phase 4 is complete.
+5. **Hosting.** Split into 5a and 5b at the Azure line, because everything past producing a
+   deployable artifact needs an Azure subscription, real spending, and an operator at a keyboard
+   for at least the first sign-in.
+   - **5a: the deployable server. Complete and verified on 2026-09-18.** The compiled production
+     output answered all five read tools against the live tenant, every figure matching the phase 4b
+     and 4c sittings; this was the first time this project executed its compiled artifact at all,
+     every earlier sitting having run `tsx` against source. The shutdown deadline is NOT covered by
+     that run, because Windows does not deliver a POSIX SIGTERM; it is covered by tests and by a
+     probe against the compiled shutdown module. See `docs/OPEN-ITEMS.md`.
+     Separates the production compile from the development one: `tsconfig.build.json` excludes
+     `src/setup`, which issues per-site permission grants using a separate application holding
+     `Sites.FullControl.All` and has no business inside a server image, and `npm run build:prod`
+     runs it. Bounds the SIGTERM handler to a deadline, `IW_SHUTDOWN_DEADLINE_MS`, default 25
+     seconds, so one request that never completes can no longer hold the process open until the
+     platform sends SIGKILL with nothing said about why. The deadline logs one sentence
+     synchronously before exiting, saying the drain did not finish, and deliberately no count:
+     `getConnections` is the only API that reports open sockets, it defers its callback through
+     `process.nextTick`, and `process.exit` does not drain that queue, so a number is not
+     obtainable and the line that asked for one printed nothing at all.
+     Settles that `GET /health` answers only whether this process can serve, and must never call
+     Microsoft Graph, since a health check depending on a third party turns that party's outage
+     into an instance restart loop. The container image was moved out of this phase by amendment,
+     after discovering mid-plan that the development machine has no container runtime; it is held
+     for its own slice rather than dropped, and the merge gate became the compiled production
+     output answering live in its place. That gate, `node dist/server/main.js` built from `npm
+     run build:prod` against all five read tools on the live tenant, ran and passed on 2026-09-18,
+     as recorded above. `docs/SETUP.md` carries the full
+     deployment configuration contract this phase settled.
+   - **5b: everything past the image.** Held rather than started. The container image itself,
+     recorded in the design spec so this slice does not restart from nothing; the federated
+     managed-identity credential replacing the client secret, which begins with a live probe
+     rather than an interface built on an assumption, per the rule phase 2b-1 cost this project;
+     Container Apps at one replica with a rollout that never runs a new revision alongside the
+     old, since phase 4c made the single-process assumption load-bearing for correctness and not
+     only for the delta link; the Entra authentication front door already decided in
+     `docs/OPEN-ITEMS.md`; CI/CD; and telemetry, which carries two jobs, the Graph call volume
+     evidence this project was started to produce and detection for the pending stream-mapping
+     leak phase 5a deliberately left unfixed, since the tractable half of that item is detection
+     rather than repair.
+6. **Write tools**, sliced vertically rather than horizontally, per
+   `docs/superpowers/specs/2026-09-18-rename-write-path-design.md`: a write layer built ahead of any
+   caller is precisely the shape this project already rejected once.
+   - **6a: the rename write path. Complete and verified live on 2026-09-19.**
+     `generate_rename_plan` and `execute_rename_plan`, the first write this server has ever made,
+     plus only the substrate those two tools need: a `GraphClient` PATCH verb carrying `If-Match`
+     and distinguishing success, a 412 precondition failure, and a 404 not-found; `StateStore` plan
+     persistence, one entity shape shared by a forward plan and the reversal log that reverses it,
+     since a reversal log is a plan by the Decision Record's own words; and a pure domain module,
+     `src/domain/rename/plan.ts`, that pairs each `misnamed` artifact with its canonical name and
+     excludes what it cannot resolve without `conflictBehavior`. The plan stores concrete
+     library-relative paths and a plan-time ETag fetch, not a rule, so a profile edited between
+     generating and executing cannot silently retarget an already-reviewed plan. Execution is
+     per-item: one file refused on a stale precondition does not block any other file in the same
+     plan, and the reversal log is written before any write and corrected as each rename lands, so
+     a crash mid-apply fails in the safe direction rather than silently. Deliberately out of this
+     slice, and left for 6b and 6c: `generate_move_plan` and `execute_move_plan`, including async
+     cross-library polling; `replicate_template`; the `$batch` builder; and `conflictBehavior`.
+     Every one of them arrives with the caller that exercises it, the same rule that moved `$batch`
+     out of phase 2. **The full loop ran against the sandbox tenant on 2026-09-19 and passed**: a
+     plan generated, dry run, applied for real, the renames confirmed by a fresh delta scan, rolled
+     back through the reversal log, the library confirmed back where it started, and then one file
+     edited between generating and executing so that item alone was refused on its own precondition
+     while the other still applied. Two facts about Graph that this project had only assumed are now
+     measured. A `driveItem` PATCH does return the updated item carrying its new `eTag`, so the
+     reversal entries were refreshed from the response and the rollback was not refused. And Graph
+     evaluates `If-Match` BEFORE existence: a stale precondition against a path holding nothing
+     answers 412 `resourceModified`, not 404. Since this server always sends `If-Match`, its
+     `not_found` outcome is unreachable in practice; `execute_rename_plan` reports that refusal as
+     `precondition_refused` and says only that the item at that path is not the one the plan
+     recorded, without naming which of "changed" or "absent" caused it, since 412 alone cannot
+     tell the two apart and telling them apart would cost a GET per refusal.
+     `docs/OPEN-ITEMS.md` carries the dated record, including what the sitting did not establish.
+   - **6b-1: the same-library move write path. Complete and verified live on 2026-09-24.**
+     `generate_move_plan` and `execute_move_plan`, per
+     `docs/superpowers/specs/2026-09-22-move-write-path-design.md`, built by generalizing 6a rather
+     than duplicating it: one Graph verb, `relocateDriveItem`, that renames, moves, or both in one
+     PATCH; one executor, `applyPlan` in `src/tools/plans/apply.ts`, with each execute tool a thin
+     wrapper that refuses the other's plan kind before any write; and one stored plan entity whose
+     `kind` is `"rename"` or `"move"`. The pure pairing is `src/domain/move/plan.ts`, sharing its
+     collision rules with the rename pairing through `src/domain/plans/collisions.ts`. A file found
+     in another library, as a winner or as a losing copy, is excluded naming that library; a target
+     folder that does not exist is excluded rather than created. An occupied target name at
+     execution is now its own outcome, `target_name_taken`, in both execute tools, where a rename
+     used to report it as a generic failure. Two probes came first, and the second overturned the
+     plan: a move's target folder must be written raw, not percent-encoded. The live sitting ran the
+     spec's steps and passed, including a mixed run that returned `moved`, `precondition_refused`
+     and `target_name_taken` in one plan, and a rename regression through the shared executor.
+     `docs/OPEN-ITEMS.md` carries the dated record and what the sitting did not establish.
+   - **6d: operator-authored plans and library-only profiles. Complete and verified live on
+     2026-09-24.** `generate_custom_plan` and `execute_custom_plan`, per
+     `docs/superpowers/specs/2026-09-23-custom-plans-design.md` and its amendments. A request is up to
+     20 steps, each a selector (folder, recursion, name, extension, modified dates) and a move, a
+     literal rename (set, replace, prefix, suffix), or both; a pure resolver in
+     `src/domain/custom/resolve.ts` turns them into exact files against the index, refusing with
+     evidence (an unknown folder names the nearest existing one and its subfolders) or excluding a
+     file with a reason (matched by two steps, no change, extension change, invalid SharePoint name,
+     occupied target, shared target). Extensions never change, steps never see each other, and plans
+     cap at 100 files. Execution is the shared 6b-1 executor. A profile may now be library-only.
+     The live sitting ran a mixed plan (two moves into a folder with a space, a setName, a combined
+     move and rename, a prefix) through dry run, execution, verification, rollback, a stale
+     precondition refusing one file while four applied, and both exclusion types from real data.
+   - **6b-2 and 6c.** Held rather than started: cross-library moves, which begin with a live probe
+     of how Graph moves an item between drives; `replicate_template`, the plausible first caller for
+     folder creation, where the prior-art read suggests a created folder's reversal could go to the
+     recycle bin rather than be deleted; and `$batch`.
+   Then **Copilot Studio integration and governance**, then the **evaluation suite**, whose
+   questions are already written in `docs/EVALUATION-QUESTIONS.md`. They exist early on purpose, so
+   phase 3 has a concrete target rather than inventing its own test afterward.
+
+Of the three decisions the parent spec required before phase 2, two are settled and recorded in
+`docs/OPEN-ITEMS.md`: the per-site grant does not accept a delegated token, and the MCP endpoint
+authenticates through Container Apps built-in Entra auth. The third, which delegated scopes the
+setup command's device-code sign-in must request, is still open. It governs that sign-in rather
+than the server's own Graph access, which is why it has blocked no phase so far and blocked none
+through 6a.
+
+A fourth question, which nobody thought to ask, was settled the hard way on 2026-09-16: whether the
+Excel API accepts an app-only token at all. It does not. The lesson is recorded here rather than
+only in `docs/OPEN-ITEMS.md` because it generalizes past Excel. Phase 2b-1 was built, reviewed
+across six tasks, and merged without one call ever reaching the endpoint it was written for, and
+every fake in the suite answered as though the call had been accepted. A fake proves the code does
+what the author believed the API would do. When a phase depends on an API surface this project has
+never actually called, the cheapest possible live probe against that surface comes first, before
+the design that assumes it.
+
+Phase 6a produced a related failure on 2026-09-18, against this project's own reconciliation engine
+rather than an external API, and it belongs here because the rule it teaches generalizes, not
+because it was caught the same way. The phase 6a spec's "What a rename plan is" section made two
+wrong assumptions about what `reconcile()` returns for two files competing for one canonical name:
+that they would appear as two separate `ArtifactFinding` entries, and that the collision would be
+found by grouping those entries by target path. `matchArtifacts` resolves one winner per slot and
+demotes every other candidate to a `DuplicateFinding`, never a second artifact, so neither
+assumption survives contact with the engine.
+
+That defect was not found by a dedicated test written to catch it. Task 4's twelve tool-level tests
+for `generate_rename_plan` already called the real `reconcile()` through the tool's own handler.
+Nine of them failed first, against a separate wrong assumption, that `expectedPath` is a full file
+path rather than the rendered taxonomy folder it actually is. Once that was fixed, the twelfth test
+still failed, and tracing `match.ts` from that one remaining failure is what found the
+two-artifacts-collide assumption above. `tests/domain/rename/plan.reconcile.test.ts` was written
+afterward, so a future mismatch of this kind fails directly in the domain layer instead of only
+surfacing as a tool-test failure that still has to be traced back to its cause. It closes the gap
+this incident found; it did not itself catch this one.
+
+A second, distinct family lived in four separate fixtures across three review rounds, and it is not
+the same mistake as the grouping error above, though it is adjacent to it: each fixture hand-built a
+report in which an artifact, a duplicate, or an orphan already occupied a rename candidate's target
+path, independently of how `matchArtifacts` actually resolves competing candidates for one slot, a
+shape that turns out to be unreachable once traced against the engine's own resolution. Three were
+deleted in `55dc5ee`, "fix(tools): correct rename exclusion reasons and cost reporting found in
+review", by a reviewer reading them and reproducing against the engine. The fourth, the
+orphan-occupancy fixture, was found by the implementer's own reasoning during a later fix round and
+deleted in `b7d48ef`, whose own message says as much: "each survived review until traced against the
+engine." Every one of these four fixtures passed its own review before being caught, at the cost of
+human tracing across three separate rounds, and none was caught by any reconcile()-backed test; each
+was simply shown unreachable and deleted, with no replacement.
+
+The rule both incidents point to: when a module consumes another module's output, at least one test
+must obtain that output from the real producer rather than construct it. A fixture proves the code
+does what its author believed the producer returns, which is exactly the shape of the Excel lesson
+above, just aimed inward instead of outward. `plan.reconcile.test.ts` is what stops the next one
+from surviving at all; it is not what caught either family described here.

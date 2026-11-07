@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { ProfileSchema, type Profile } from "./schema.js";
+import { type Profile } from "./schema.js";
+import { ProfileIdSchema, SiteEntrySchema, normalizeProfileSites, refineIdentityAgreesWithSites } from "./base.js";
 import { ProfileValidationError, loadProfile } from "./load.js";
 
 /**
@@ -12,19 +13,35 @@ import { ProfileValidationError, loadProfile } from "./load.js";
  * than silently ignored: a profile that looks configured for reconciliation
  * but is not would be read as a promise the server does not keep.
  */
+const LibrarySiteEntrySchema = SiteEntrySchema.omit({ workbookPath: true });
+const LIBRARY_SITE_KEYS = new Set<string>(Object.keys(LibrarySiteEntrySchema.shape));
+
 export const LibraryProfileSchema = z
   .object({
     kind: z.literal("library"),
-    profileId: ProfileSchema.innerType().shape.profileId,
-    identity: z
-      .object({
-        siteUrl: z.string().url(),
-        library: z.string().min(1),
-        searchRegion: z.string().min(1).optional(),
-      })
-      .strict(),
+    profileId: ProfileIdSchema,
+    identity: SiteEntrySchema.omit({ workbookPath: true }).strict(),
+    // Passthrough so the loop below, not zod's strict error, names each unknown
+    // key at its own path (sites.1.workbookPath), which is where an operator looks.
+    sites: z.array(LibrarySiteEntrySchema.passthrough()).min(1),
   })
-  .strict();
+  .strict()
+  .superRefine((profile, ctx) => {
+    refineIdentityAgreesWithSites(profile, ctx);
+    profile.sites.forEach((site, index) => {
+      for (const key of Object.keys(site)) {
+        if (LIBRARY_SITE_KEYS.has(key)) continue;
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sites", index, key],
+          message:
+            key === "workbookPath"
+              ? "a library profile has no workbook, so a site entry cannot carry a workbookPath"
+              : `"${key}" is not a field of a library profile's site entry`,
+        });
+      }
+    });
+  });
 
 export type LibraryProfile = z.infer<typeof LibraryProfileSchema>;
 
@@ -39,7 +56,8 @@ export function isLibraryProfile(profile: AnyProfile): profile is LibraryProfile
  * compliance profile, so every profile written before kinds existed loads
  * exactly as it did.
  */
-export function loadAnyProfile(input: unknown): AnyProfile {
+export function loadAnyProfile(rawInput: unknown): AnyProfile {
+  const input = normalizeProfileSites(rawInput);
   const kind = typeof input === "object" && input !== null ? (input as { kind?: unknown }).kind : undefined;
   if (kind === undefined || kind === "compliance") {
     const { kind: _ignored, ...rest } = input as Record<string, unknown>;

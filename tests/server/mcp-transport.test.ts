@@ -29,7 +29,7 @@ describe("POST /mcp", () => {
   let baseUrl: URL;
 
   beforeEach(async () => {
-    const app = createApp({ serverFactory: probeServerFactory });
+    const app = createApp({ auth: { mode: "none", header: "x-api-key" }, serverFactory: probeServerFactory });
     httpServer = await new Promise<Server>((resolve) => {
       const listener = app.listen(0, () => resolve(listener));
     });

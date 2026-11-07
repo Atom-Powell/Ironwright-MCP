@@ -9,7 +9,7 @@ import { createFakeToolContext } from "../tools/fake-context.js";
 let httpServer: Server | undefined;
 
 async function startServer(allowWrites: boolean): Promise<URL> {
-  const app = createApp({ serverFactory: () => buildServer({ allowWrites, context: createFakeToolContext() }) });
+  const app = createApp({ auth: { mode: "none", header: "x-api-key" }, serverFactory: () => buildServer({ allowWrites, context: createFakeToolContext() }) });
   httpServer = await new Promise<Server>((resolve) => {
     const listener = app.listen(0, () => resolve(listener));
   });

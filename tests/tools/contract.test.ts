@@ -19,6 +19,9 @@ describe("safety sentences", () => {
     expect(SAFETY_SENTENCES.additiveWrite).toBe(
       "Not read-only: this tool creates missing items in the repository when confirmed. It defaults to a dry run and skips items that already exist.",
     );
+    expect(SAFETY_SENTENCES.lifecycle).toBe(
+      "Not read-only: this tool advances an assessment by one stage when its preconditions hold. It creates records and files only at paths the server computes, overwrites only files it created and only under an ETag precondition, refuses when the prior stage is not verified, and records every write in the assessment journal. It needs no confirm flag and is safe to retry: a stage already completed is reported, not repeated.",
+    );
   });
 
   it("maps each kind to its own sentence", () => {
@@ -26,6 +29,7 @@ describe("safety sentences", () => {
     expect(requiredSentence("plan", false)).toBe(SAFETY_SENTENCES.plan);
     expect(requiredSentence("write", true)).toBe(SAFETY_SENTENCES.destructiveWrite);
     expect(requiredSentence("write", false)).toBe(SAFETY_SENTENCES.additiveWrite);
+    expect(requiredSentence("lifecycle", false)).toBe(SAFETY_SENTENCES.lifecycle);
   });
 });
 
@@ -56,6 +60,11 @@ describe("tool contract", () => {
       }
       if (tool.kind === "plan") {
         expect(tool.annotations.destructiveHint).toBe(false);
+      }
+      if (tool.kind === "lifecycle") {
+        expect(tool.annotations.destructiveHint).toBe(false);
+        expect(tool.annotations.idempotentHint).toBe(true);
+        expect(tool.annotations.openWorldHint).toBe(true);
       }
     },
   );

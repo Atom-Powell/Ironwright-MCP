@@ -1,6 +1,6 @@
-import { inventoryPartitionKey, MAX_TRANSACTION_SIZE, planInventoryChanges } from "./keys.js";
+import { inventoryPartitionKey, compareJournalEntries, journalPartitionKey, MAX_TRANSACTION_SIZE, planInventoryChanges } from "./keys.js";
 import { MAX_PLAN_JSON_CHARS, PlanTooLargeError, storedPlanJsonChars } from "./types.js";
-import type { ApplyResult, InventoryRecord, ScannedDrive, StateStore, StoredPlan } from "./types.js";
+import type { ApplyResult, InventoryRecord, JournalEntry, ScannedDrive, StateStore, StoredPlan } from "./types.js";
 
 /**
  * For tests and for a local run with no storage account. It counts batches the
@@ -12,6 +12,7 @@ export function createMemoryStateStore(): StateStore {
   const deltaLinks = new Map<string, { deltaLink: string; lastScanAt: string }>();
   const inventories = new Map<string, Map<string, InventoryRecord>>();
   const plans = new Map<string, StoredPlan>();
+  const journals = new Map<string, JournalEntry[]>();
 
   function inventoryFor(profileId: string, driveId: string): Map<string, InventoryRecord> {
     const key = inventoryPartitionKey(profileId, driveId);
@@ -104,6 +105,20 @@ export function createMemoryStateStore(): StateStore {
     async getPlan(profileId, planId) {
       const stored = plans.get(inventoryPartitionKey(profileId, planId));
       return stored === undefined ? undefined : structuredClone(stored);
+    },
+
+    async appendJournalEntry(profileId, assessmentId, entry) {
+      // Key first, so an unsafe id is refused before anything is stored.
+      const key = journalPartitionKey(profileId, assessmentId);
+      const entries = journals.get(key) ?? [];
+      entries.push(structuredClone(entry));
+      journals.set(key, entries);
+    },
+
+    async listJournal(profileId, assessmentId) {
+      const entries = journals.get(journalPartitionKey(profileId, assessmentId)) ?? [];
+      // Sorted here, not trusted to append order, so both stores answer alike.
+      return structuredClone(entries).sort(compareJournalEntries);
     },
   };
 }

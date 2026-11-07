@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { CustomExclusionReason, CustomStep } from "../domain/custom/resolve.js";
 
 export interface InventoryRecord {
@@ -40,6 +41,40 @@ export interface ScannedDrive {
   lastScanAt: string;
 }
 
+export interface JournalEntry {
+  /** The string `new Date().toISOString()` produces (UTC, three millisecond digits), because entries are ordered by string comparison. */
+  at: string;
+  correlationId: string;
+  /** The module's stage name, e.g. "ID", "DOSSIER". */
+  stage: string;
+  operation: "list_item_created" | "list_item_updated" | "folder_created" | "file_created" | "file_overwritten";
+  /** List name plus item id, or library-relative path, as the server computed it. */
+  target: string;
+  etagBefore?: string;
+  etagAfter?: string;
+  /** sha256 hex of what was written, for files. */
+  contentHash?: string;
+  /** The SharePoint version that held the prior content, on an overwrite. */
+  versionId?: string;
+}
+
+/**
+ * The shape `listJournal` insists on for every stored row. JSON that parses but
+ * has the wrong shape is as unreadable as JSON that does not parse, and a cast
+ * would hand it to callers as a valid entry.
+ */
+export const JournalEntrySchema = z.object({
+  at: z.string(),
+  correlationId: z.string(),
+  stage: z.string(),
+  operation: z.enum(["list_item_created", "list_item_updated", "folder_created", "file_created", "file_overwritten"]),
+  target: z.string(),
+  etagBefore: z.string().optional(),
+  etagAfter: z.string().optional(),
+  contentHash: z.string().optional(),
+  versionId: z.string().optional(),
+});
+
 export interface StateStore {
   getDeltaLink(profileId: string, driveId: string): Promise<string | undefined>;
   setDeltaLink(profileId: string, driveId: string, deltaLink: string, lastScanAt: string): Promise<void>;
@@ -74,6 +109,17 @@ export interface StateStore {
    */
   savePlan(profileId: string, plan: StoredPlan): Promise<void>;
   getPlan(profileId: string, planId: string): Promise<StoredPlan | undefined>;
+
+  /**
+   * Appends one entry to an assessment's journal. Append, never replace: the
+   * journal is the audit record of what a lifecycle tool did, and the
+   * reversal record for what is reversible, so an entry once written is
+   * never edited. Ordering is by `at` then `correlationId`, which is why
+   * both are required.
+   */
+  appendJournalEntry(profileId: string, assessmentId: string, entry: JournalEntry): Promise<void>;
+  /** Ascending by `at`, then `correlationId`, whatever order the entries were appended in. */
+  listJournal(profileId: string, assessmentId: string): Promise<JournalEntry[]>;
 }
 
 /**
@@ -243,6 +289,27 @@ export class PlanTooLargeError extends Error {
     this.name = "PlanTooLargeError";
     this.planId = planId;
     this.chars = chars;
+  }
+}
+
+/**
+ * Raised by `listJournal` when a stored journal row cannot be read. Names the
+ * partition and row key, never the content, which may carry customer paths.
+ * A journal is an audit record, so a row that cannot be read throws rather
+ * than being skipped, which would present an incomplete record as complete.
+ */
+export class MalformedJournalEntityError extends Error {
+  readonly partitionKey: string;
+  readonly rowKey: string;
+
+  constructor(partitionKey: string, rowKey: string, detail: string) {
+    super(
+      `The stored journal row "${partitionKey}" / "${rowKey}" cannot be read: its entry ${detail}. ` +
+        "Refused rather than skipped, because a journal missing a row reads as a complete record.",
+    );
+    this.name = "MalformedJournalEntityError";
+    this.partitionKey = partitionKey;
+    this.rowKey = rowKey;
   }
 }
 
