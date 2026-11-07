@@ -130,12 +130,16 @@ export async function runOpenAssessment(input: unknown, context: ToolContext): P
         }
       }
 
-      const root = await readDriveItem(context.graph, { driveId: ac.driveId, path: paths.root });
-      if (root.kind !== "found" || !root.item.isFolder) {
-        return {
-          isError: true,
-          content: [{ type: "text" as const, text: `The workspace root "${paths.root}" was created or found present, but reading it back ${root.kind === "found" ? "returned a file, not a folder" : "answered 404"}. The journal records what was created.` }],
-        };
+      // The pass takes a 409 as satisfied without reading what holds the name, which may be a file,
+      // so every folder is read back before the call claims the workspace exists.
+      for (const path of [paths.root, ...paths.subfolders]) {
+        const back = await readDriveItem(context.graph, { driveId: ac.driveId, path });
+        if (back.kind !== "found" || !back.item.isFolder) {
+          return {
+            isError: true,
+            content: [{ type: "text" as const, text: `${path} was expected to be a folder; reading it back answered ${back.kind === "found" ? "a file" : "404"}. The journal records what this call created.` }],
+          };
+        }
       }
     }
 
@@ -162,11 +166,12 @@ export async function runOpenAssessment(input: unknown, context: ToolContext): P
       correlationId: ac.correlationId,
       graphRequests: context.graph.requests() - before,
     };
+    const subfolderCount = `${paths.subfolders.length} ${paths.subfolders.length === 1 ? "subfolder" : "subfolders"}`;
     const text = created
-      ? `Opened ${output.assessmentId} for ${output.vendor} (${output.scope}): item ${output.itemId} in ${lists.assessments.name}, workspace ${paths.root} with ${paths.subfolders.length} subfolders, root read back.`
+      ? `Opened ${output.assessmentId} for ${output.vendor} (${output.scope}): item ${output.itemId} in ${lists.assessments.name}, workspace ${paths.root}, root and ${subfolderCount} read back.`
       : resumed
-        ? `Resumed ${output.assessmentId} for ${output.vendor} (${output.scope}), which was already in progress: this call ${writes.join(" and ")}. Workspace ${paths.root} read back.`
-        : `${output.assessmentId} for ${output.vendor} (${output.scope}) is already open; nothing was written. Workspace ${paths.root} and its ${paths.subfolders.length} subfolders are present.`;
+        ? `Resumed ${output.assessmentId} for ${output.vendor} (${output.scope}), which was already in progress: this call ${writes.join(" and ")}. Workspace ${paths.root}: root and ${subfolderCount} read back.`
+        : `${output.assessmentId} for ${output.vendor} (${output.scope}) is already open; nothing was written. Workspace ${paths.root}: root and ${subfolderCount} read as folders.`;
     return { structuredContent: output, content: [{ type: "text" as const, text }] };
   } catch (error) {
     console.error(`open_assessment failed for profile "${args.profileId}"`, error);

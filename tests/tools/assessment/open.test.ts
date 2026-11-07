@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { runOpenAssessment } from "../../../src/tools/assessment/open.js";
 import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, listItem, resultText } from "./fake-graph.js";
-import { assessmentFields, assessmentsQuery, firstOpenScript, folderCreates, idWriteBack, rootRead, workspaceReads, vendorsQuery } from "./open-script.js";
+import { assessmentFields, assessmentsQuery, firstOpenScript, folderCreates, idWriteBack, readBacks, workspaceReads, vendorsQuery } from "./open-script.js";
 
 const PROFILE = "vendor-assessments";
 const INPUT = { profileId: PROFILE, vendor: "Acme Corp", scope: "Security" };
@@ -25,8 +25,15 @@ describe("open_assessment", () => {
     expect(output.created).toBe(true);
     expect(output.resumed).toBe(false);
     expect(output.graphRequests).toBe(graph.requests());
+    const readBackPaths = calls.filter((call) => call.method === "get" && call.path.includes("/drives/drive-1/root:/")).map((call) => decodeURIComponent(call.path).split(":?")[0]);
+    expect(readBackPaths).toEqual([
+      "/drives/drive-1/root:/Assessments/Acme Corp/ASM-2026-00002",
+      "/drives/drive-1/root:/Assessments/Acme Corp/ASM-2026-00002/Research",
+      "/drives/drive-1/root:/Assessments/Acme Corp/ASM-2026-00002/Evidence",
+      "/drives/drive-1/root:/Assessments/Acme Corp/ASM-2026-00002/Published",
+    ]);
     expect(resultText(result)).toBe(
-      "Opened ASM-2026-00002 for Acme Corp (Security): item 2 in Assessments, workspace Assessments/Acme Corp/ASM-2026-00002 with 3 subfolders, root read back.",
+      "Opened ASM-2026-00002 for Acme Corp (Security): item 2 in Assessments, workspace Assessments/Acme Corp/ASM-2026-00002, root and 3 subfolders read back.",
     );
 
     const assessmentCreate = calls.find((call) => call.method === "post" && call.path.includes("/lists/Assessments/items"));
@@ -81,7 +88,7 @@ describe("open_assessment", () => {
       expect(await context.store.listJournal(PROFILE, key)).toEqual([]);
     }
     expect(resultText(result)).toBe(
-      "ASM-2026-00002 for Acme Corp (Security) is already open; nothing was written. Workspace Assessments/Acme Corp/ASM-2026-00002 and its 3 subfolders are present.",
+      "ASM-2026-00002 for Acme Corp (Security) is already open; nothing was written. Workspace Assessments/Acme Corp/ASM-2026-00002: root and 3 subfolders read as folders.",
     );
   });
 
@@ -92,7 +99,7 @@ describe("open_assessment", () => {
       assessmentsQuery("Acme Corp", [listItem("3", assessmentFields("Acme Corp"))]),
       ...idWriteBack("Acme Corp", "3", "ASM-2026-00003"),
       ...folderCreates("Acme Corp", "ASM-2026-00003"),
-      rootRead("Acme Corp", "ASM-2026-00003"),
+      ...readBacks("Acme Corp", "ASM-2026-00003"),
     ]);
     const context = assessmentToolContext(graph);
 
@@ -106,7 +113,7 @@ describe("open_assessment", () => {
     expect(output.graphRequests).toBe(graph.requests());
     expect(resultText(result)).toBe(
       "Resumed ASM-2026-00003 for Acme Corp (Security), which was already in progress: this call wrote the assessment id to item 3 and created 6 folders. " +
-        "Workspace Assessments/Acme Corp/ASM-2026-00003 read back.",
+        "Workspace Assessments/Acme Corp/ASM-2026-00003: root and 3 subfolders read back.",
     );
     expect(calls.filter((call) => call.method === "patch").map((call) => call.body)).toEqual([{ AssessmentId: "ASM-2026-00003" }]);
     expect(calls.filter((call) => call.method === "post" && call.path.includes("/lists/"))).toEqual([]);
@@ -122,7 +129,7 @@ describe("open_assessment", () => {
       assessmentsQuery("Acme Corp", [listItem("2", { ...assessmentFields("Acme Corp"), AssessmentId: "ASM-2026-00002" })]),
       ...workspaceReads("Acme Corp", "ASM-2026-00002", "(root)"),
       ...folderCreates("Acme Corp", "ASM-2026-00002", ["Assessments", "Acme Corp"]),
-      rootRead("Acme Corp", "ASM-2026-00002"),
+      ...readBacks("Acme Corp", "ASM-2026-00002"),
     ]);
     const context = assessmentToolContext(graph);
 
@@ -135,7 +142,7 @@ describe("open_assessment", () => {
     expect(calls.filter((call) => call.method === "patch")).toEqual([]);
     expect(resultText(result)).toBe(
       "Resumed ASM-2026-00002 for Acme Corp (Security), which was already in progress: this call created 4 folders. " +
-        "Workspace Assessments/Acme Corp/ASM-2026-00002 read back.",
+        "Workspace Assessments/Acme Corp/ASM-2026-00002: root and 3 subfolders read back.",
     );
     expect((await context.store.listJournal(PROFILE, "ASM-2026-00002")).map((entry) => entry.operation)).toEqual(Array<string>(4).fill("folder_created"));
   });
@@ -147,7 +154,7 @@ describe("open_assessment", () => {
       assessmentsQuery("Acme Corp", [listItem("2", { ...assessmentFields("Acme Corp"), AssessmentId: "ASM-2026-00002" })]),
       ...workspaceReads("Acme Corp", "ASM-2026-00002", "Evidence"),
       ...folderCreates("Acme Corp", "ASM-2026-00002", ["Assessments", "Acme Corp", "ASM-2026-00002", "Research", "Published"]),
-      rootRead("Acme Corp", "ASM-2026-00002"),
+      ...readBacks("Acme Corp", "ASM-2026-00002"),
     ]);
     const context = assessmentToolContext(graph);
 
@@ -160,7 +167,7 @@ describe("open_assessment", () => {
     expect(calls.filter((call) => call.method === "post")).toHaveLength(6);
     expect(resultText(result)).toBe(
       "Resumed ASM-2026-00002 for Acme Corp (Security), which was already in progress: this call created 1 folder. " +
-        "Workspace Assessments/Acme Corp/ASM-2026-00002 read back.",
+        "Workspace Assessments/Acme Corp/ASM-2026-00002: root and 3 subfolders read back.",
     );
     expect((await context.store.listJournal(PROFILE, "ASM-2026-00002")).map((entry) => [entry.operation, entry.target])).toEqual([
       ["folder_created", "Assessments/Acme Corp/ASM-2026-00002/Evidence"],
@@ -187,7 +194,7 @@ describe("open_assessment", () => {
       { method: "post", pathIncludes: "/lists/Assessments/items", response: listItem("2", assessmentFields("ACME")) },
       ...idWriteBack("ACME", "2", "ASM-2026-00002"),
       ...folderCreates("ACME", "ASM-2026-00002"),
-      rootRead("ACME", "ASM-2026-00002"),
+      ...readBacks("ACME", "ASM-2026-00002"),
     ]);
     const context = assessmentToolContext(graph);
 

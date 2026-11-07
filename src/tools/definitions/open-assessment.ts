@@ -8,7 +8,7 @@ export const openAssessment: ToolDefinition = {
   kind: "lifecycle",
   title: "Open an assessment",
   description: [
-    "Start an assessment for a vendor and scope, or return the one already in progress for that pair. Creates the vendor record if absent, creates the assessment item, renders the assessment id from the item id and writes it back, then creates the workspace root and its subfolders at the paths the profile computes, reading everything back.",
+    "Start an assessment for a vendor and scope, or return the one already in progress for that pair. Creates the vendor record if absent, creates the assessment item, renders the assessment id from the item id and writes it back, then creates the workspace root and its subfolders at the paths the profile computes and reads the root and every subfolder back, refusing when any is absent or is a file.",
     "Call this once at the ID stage. Calling it again for the same vendor and scope returns the open assessment and creates nothing.",
     SAFETY_SENTENCES.lifecycle,
   ].join(" "),

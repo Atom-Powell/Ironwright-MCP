@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runOpenAssessment } from "../../../src/tools/assessment/open.js";
-import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, listItem, resultText } from "./fake-graph.js";
-import { assessmentFields, assessmentsQuery, folderCreates, idWriteBack, vendorsQuery } from "./open-script.js";
+import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, fileItem, listItem, resultText } from "./fake-graph.js";
+import { assessmentFields, assessmentsQuery, folderCreates, idWriteBack, readBacks, vendorsQuery, workspaceReads } from "./open-script.js";
 
 const PROFILE = "vendor-assessments";
 const INPUT = { profileId: PROFILE, vendor: "Acme Corp", scope: "Security" };
@@ -82,8 +82,34 @@ describe("open_assessment failures", () => {
     const result = await runOpenAssessment(INPUT, assessmentToolContext(graph));
 
     expect(result.isError).toBe(true);
-    expect(resultText(result)).toContain('"Assessments/Acme Corp/ASM-2026-00002"');
-    expect(resultText(result)).toContain("answered 404");
+    expect(resultText(result)).toBe(
+      "Assessments/Acme Corp/ASM-2026-00002 was expected to be a folder; reading it back answered 404. The journal records what this call created.",
+    );
+  });
+
+  it("refuses a retry whose subfolder name is held by a file, though every create answered 409", async () => {
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" })]),
+      assessmentsQuery("Acme Corp", [listItem("2", { ...assessmentFields("Acme Corp"), AssessmentId: "ASM-2026-00002" })]),
+      // The live read finds a file where Evidence belongs, so the folder pass runs; every name is taken.
+      ...workspaceReads("Acme Corp", "ASM-2026-00002").slice(0, 2),
+      { method: "get", pathIncludes: "/drives/drive-1/root:/Assessments/Acme Corp/ASM-2026-00002/Evidence:?", response: fileItem("Evidence", '"file-1"', 5) },
+      ...folderCreates("Acme Corp", "ASM-2026-00002", ["Assessments", "Acme Corp", "ASM-2026-00002", "Research", "Evidence", "Published"]),
+      ...readBacks("Acme Corp", "ASM-2026-00002", { Evidence: "file" }),
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runOpenAssessment(INPUT, context);
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toBe(
+      "Assessments/Acme Corp/ASM-2026-00002/Evidence was expected to be a folder; reading it back answered a file. The journal records what this call created.",
+    );
+    expect(resultText(result)).not.toContain("already open");
+    expect(calls.filter((call) => call.method === "patch")).toEqual([]);
+    expect(calls.some((call) => call.path.includes("/Published:?") && call.method === "get")).toBe(false);
+    expect(await context.store.listJournal(PROFILE, "ASM-2026-00002")).toEqual([]);
   });
 
   it("describes a 403 from the first list query without guessing a cause", async () => {

@@ -1,5 +1,5 @@
 import { NON_INDEXED_QUERY_HEADER } from "../../../src/graph/lists.js";
-import { RESOLVE_DRIVE_SCRIPT, folderItem, listItem, page, type ScriptEntry } from "./fake-graph.js";
+import { RESOLVE_DRIVE_SCRIPT, fileItem, folderItem, listItem, page, type ScriptEntry } from "./fake-graph.js";
 
 /** Script pieces for open_assessment's own tests, named for the step each one answers. */
 export function assessmentFields(folder: string): Record<string, unknown> {
@@ -49,8 +49,23 @@ export function folderCreates(folder: string, assessmentId: string, conflict: st
   );
 }
 
-export function rootRead(folder: string, assessmentId: string): ScriptEntry {
-  return { method: "get", pathIncludes: `/drives/drive-1/root:/Assessments/${folder}/${assessmentId}:?`, response: folderItem(assessmentId) };
+/**
+ * The read back after the folder pass: the root, then each subfolder. `answers` scripts one of
+ * them otherwise, by name ("(root)" for the root): "absent" answers 404 and "file" answers a file.
+ * The reads stop at the first one scripted otherwise, as open does.
+ */
+export function readBacks(folder: string, assessmentId: string, answers: Record<string, "absent" | "file"> = {}): ScriptEntry[] {
+  const root = `/drives/drive-1/root:/Assessments/${folder}/${assessmentId}`;
+  const reads: ScriptEntry[] = [];
+  for (const name of ["(root)", "Research", "Evidence", "Published"]) {
+    const path = name === "(root)" ? `${root}:?` : `${root}/${name}:?`;
+    const shown = name === "(root)" ? assessmentId : name;
+    const answer = answers[name];
+    if (answer === "absent") return [...reads, { method: "get", pathIncludes: path, throws: { status: 404, code: "itemNotFound" } }];
+    if (answer === "file") return [...reads, { method: "get", pathIncludes: path, response: fileItem(shown, '"file-1"', 5) }];
+    reads.push({ method: "get", pathIncludes: path, response: folderItem(shown) });
+  }
+  return reads;
 }
 
 /**
@@ -80,6 +95,6 @@ export function firstOpenScript(conflict: string[] = []): ScriptEntry[] {
     { method: "post", pathIncludes: "/lists/Assessments/items", response: listItem("2", assessmentFields("Acme Corp")) },
     ...idWriteBack("Acme Corp", "2", "ASM-2026-00002"),
     ...folderCreates("Acme Corp", "ASM-2026-00002", conflict),
-    rootRead("Acme Corp", "ASM-2026-00002"),
+    ...readBacks("Acme Corp", "ASM-2026-00002"),
   ];
 }
