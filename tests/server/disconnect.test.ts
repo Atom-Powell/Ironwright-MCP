@@ -1,6 +1,5 @@
 // tests/server/disconnect.test.ts
-import { createServer } from "node:http";
-import { request as httpRequest } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createApp } from "../../src/server/app.js";
@@ -15,6 +14,14 @@ describe("a tool handler survives its client going away", () => {
       release = resolve;
     });
     let completed = false;
+    let markEntered: () => void = () => {};
+    const entered = new Promise<void>((resolve) => {
+      markEntered = resolve;
+    });
+    let markFinished: () => void = () => {};
+    const finished = new Promise<void>((resolve) => {
+      markFinished = resolve;
+    });
 
     const slow: ToolDefinition = {
       name: "slow_fixture",
@@ -25,8 +32,10 @@ describe("a tool handler survives its client going away", () => {
       inputSchema: z.object({}),
       outputSchema: { ok: z.boolean() },
       handler: async () => {
+        markEntered();
         await gate;
         completed = true;
+        markFinished();
         return { structuredContent: { ok: true }, content: [{ type: "text", text: "ok" }] };
       },
     };
@@ -40,28 +49,41 @@ describe("a tool handler survives its client going away", () => {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const port = (server.address() as { port: number }).port;
 
-    const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "slow_fixture", arguments: {} } });
-    const req = httpRequest({
-      host: "127.0.0.1",
-      port,
-      method: "POST",
-      path: "/mcp",
-      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", "content-length": Buffer.byteLength(body) },
-    });
-    req.on("error", () => {});
-    req.end(body);
+    try {
+      const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "slow_fixture", arguments: {} } });
+      const req = httpRequest({
+        host: "127.0.0.1",
+        port,
+        method: "POST",
+        path: "/mcp",
+        headers: { "content-type": "application/json", accept: "application/json, text/event-stream", "content-length": Buffer.byteLength(body) },
+      });
+      req.on("error", () => {});
+      req.end(body);
 
-    // Give the server time to enter the handler, then drop the connection
-    // the way an edge timeout does.
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    req.destroy();
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(completed).toBe(false);
+      // The handler is observed running, not assumed: drop the connection the
+      // way an edge timeout does only once it has been entered.
+      await entered;
+      req.destroy();
+      // The gate is still closed, so this holds without waiting.
+      expect(completed).toBe(false);
 
-    release();
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(completed).toBe(true);
-
-    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+      release();
+      let timer: NodeJS.Timeout | undefined;
+      try {
+        await Promise.race([
+          finished,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error("handler did not finish after the client left")), 2000);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+      expect(completed).toBe(true);
+    } finally {
+      release();
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    }
   });
 });
