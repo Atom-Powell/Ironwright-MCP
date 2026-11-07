@@ -79,4 +79,29 @@ describe("loadInboundAuth", () => {
     }
     expect(message).not.toContain(key);
   });
+
+  it("does not echo a rejected IW_INBOUND_AUTH value", () => {
+    const rejected = "oauth-secret-value";
+    let message = "";
+    try {
+      loadInboundAuth({ IW_INBOUND_AUTH: rejected, IW_INBOUND_KEY: "test-key-0123456789abcdef" });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toMatch(/IW_INBOUND_AUTH.*apikey.*bearer.*none/);
+    expect(message).not.toContain(rejected);
+  });
+
+  it("refuses a key with surrounding whitespace, naming the variable and never the value", () => {
+    for (const key of [" test-key-0123456789abcdef", "test-key-0123456789abcdef\n"]) {
+      let message = "";
+      try {
+        loadInboundAuth({ IW_INBOUND_KEY: key });
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toMatch(/IW_INBOUND_KEY.*whitespace/);
+      expect(message).not.toContain("test-key-0123456789abcdef");
+    }
+  });
 });

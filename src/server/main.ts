@@ -62,7 +62,11 @@ async function main(): Promise<void> {
   });
 
   const profileCount = profiles.ids().length;
-  const server = app.listen(config.port, () => {
+  // Mode "none" binds loopback only: the documentation and the loader's own
+  // error message promise it, and a promise the code does not keep is this
+  // project's named worst defect.
+  const host = inboundAuth.mode === "none" ? "127.0.0.1" : undefined;
+  const onListening = (): void => {
     // Express calls this callback on failure as well as on success, so it
     // cannot assume it is being called because the port was bound. Its
     // `app.listen` registers the callback as `server.once("error", done)`
@@ -80,11 +84,12 @@ async function main(): Promise<void> {
     if (!server.listening) return;
 
     console.log(
-      `listening on port ${config.port}, site ${grantedSiteUrl}, writes ${config.allowWrites ? "enabled" : "disabled"}, ` +
+      `listening on ${host === undefined ? "port " : `${host}:`}${config.port}, site ${grantedSiteUrl}, writes ${config.allowWrites ? "enabled" : "disabled"}, ` +
         `${profileCount} ${profileCount === 1 ? "profile" : "profiles"} from ${config.profileDir}, ` +
         `${storeKind} store, inbound auth ${inboundAuth.mode}`,
     );
-  });
+  };
+  const server = host === undefined ? app.listen(config.port, onListening) : app.listen(config.port, host, onListening);
 
   // Without this, a bind failure was silent and the process exited 0: a
   // container that never bound its port reporting success to the platform that

@@ -75,12 +75,15 @@ export class LibraryProfileError extends Error {
  */
 function loadThroughModule(contents: unknown, modules: readonly DomainModule[]): AnyProfile {
   const normalized = normalizeProfileSites(contents);
-  const kind =
-    typeof normalized === "object" && normalized !== null ? ((normalized as { kind?: unknown }).kind ?? "compliance") : "compliance";
-  const module = moduleForKind(String(kind), modules);
+  // Only an absent kind means compliance. `?? "compliance"` would also take a
+  // null, which loadAnyProfile refuses, and two dispatchers disagreeing on one
+  // input is a way for a profile to load through one path and not the other.
+  const declared = typeof normalized === "object" && normalized !== null ? (normalized as { kind?: unknown }).kind : undefined;
+  const kind = declared === undefined ? "compliance" : declared;
+  const module = moduleForKind(kind as string, modules);
   if (module === undefined) {
     throw new ProfileValidationError([
-      `kind "${String(kind)}" is not one this server has a module for; the configured kinds are ${modules.map((m) => `"${m.kind}"`).join(", ")}`,
+      `kind ${JSON.stringify(kind)} is not one this server has a module for; the configured kinds are ${modules.map((m) => `"${m.kind}"`).join(", ")}`,
     ]);
   }
   const result = module.profileSchema.safeParse(normalized);

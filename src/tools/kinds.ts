@@ -4,7 +4,7 @@ export type ToolKind = "read" | "plan" | "write" | "lifecycle";
  * Fixed sentences rather than free prose, so the contract test can assert the
  * description actually says what the annotations claim. `plan` is a third kind
  * on purpose: a plan generator writes a plan to the state store, so calling it
- * read-only would be exactly the decorative annotation this avoids.
+ * read-only would be exactly the decorative annotation this project avoids.
  *
  * A lifecycle tool is gated by live preconditions and a journal rather than a
  * dry run, per the 2026-11-06 Decision Record amendment.

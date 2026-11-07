@@ -64,6 +64,7 @@ describe("tool contract", () => {
       if (tool.kind === "lifecycle") {
         expect(tool.annotations.destructiveHint).toBe(false);
         expect(tool.annotations.idempotentHint).toBe(true);
+        expect(tool.annotations.openWorldHint).toBe(true);
       }
     },
   );

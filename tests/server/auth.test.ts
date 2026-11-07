@@ -20,6 +20,12 @@ describe("inbound authentication", () => {
     expect(res.status).toBe(200);
   });
 
+  it("serves /health with no credential in bearer mode", async () => {
+    const auth = loadInboundAuth({ IW_INBOUND_AUTH: "bearer", IW_INBOUND_KEY: KEY });
+    const res = await request(app(auth)).get("/health");
+    expect(res.status).toBe(200);
+  });
+
   it("accepts the key in the default header", async () => {
     const res = await request(app()).post("/mcp").set(MCP_HEADERS).set("x-api-key", KEY).send(listTools);
     expect(res.status).toBe(200);

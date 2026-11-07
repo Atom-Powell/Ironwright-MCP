@@ -27,10 +27,12 @@ const PURITY_PATTERNS = [
       "**/store/**",
       "**/scan/**",
       "**/workbook/**",
+      "**/modules/**",
+      "**/profiles/**",
       "**/config.js",
     ],
     message:
-      "The domain layer must not depend on the transport, tool, setup, Graph, store, scan, workbook, or config layers.",
+      "The domain layer must not depend on the transport, tool, setup, Graph, store, scan, workbook, module, profile-registry, or config layers.",
   },
 ];
 

@@ -107,7 +107,9 @@ export function loadShutdownDeadlineMs(env: NodeJS.ProcessEnv): number {
 export function loadInboundAuth(env: NodeJS.ProcessEnv): InboundAuthConfig {
   const rawMode = env.IW_INBOUND_AUTH?.trim() ?? "apikey";
   if (rawMode !== "apikey" && rawMode !== "bearer" && rawMode !== "none") {
-    throw new Error(`IW_INBOUND_AUTH must be apikey, bearer or none, received "${rawMode}"`);
+    // The rejected value is not echoed: a mistyped secret pasted into this
+    // variable would otherwise land in a startup log.
+    throw new Error("IW_INBOUND_AUTH must be apikey, bearer or none");
   }
   const mode: InboundAuthMode = rawMode;
   const header = env.IW_INBOUND_KEY_HEADER?.trim() || "x-api-key";
@@ -128,6 +130,9 @@ export function loadInboundAuth(env: NodeJS.ProcessEnv): InboundAuthConfig {
       `IW_INBOUND_KEY is required and must be at least ${MIN_INBOUND_KEY_LENGTH} characters: it is the shared key every ` +
         "request to this server must carry. Generate one with: node -e \"console.log(require('node:crypto').randomBytes(24).toString('hex'))\"",
     );
+  }
+  if (key !== key.trim()) {
+    throw new Error("IW_INBOUND_KEY must not have leading or trailing whitespace: surrounding whitespace is not allowed.");
   }
   return { mode, key, header };
 }

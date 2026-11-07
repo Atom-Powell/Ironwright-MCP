@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { type Profile } from "./schema.js";
-import { ProfileIdSchema, SiteEntrySchema, SitesSchema, normalizeProfileSites, refineIdentityAgreesWithSites } from "./base.js";
+import { ProfileIdSchema, SiteEntrySchema, normalizeProfileSites, refineIdentityAgreesWithSites } from "./base.js";
 import { ProfileValidationError, loadProfile } from "./load.js";
 
 /**
@@ -13,22 +13,31 @@ import { ProfileValidationError, loadProfile } from "./load.js";
  * than silently ignored: a profile that looks configured for reconciliation
  * but is not would be read as a promise the server does not keep.
  */
+const LibrarySiteEntrySchema = SiteEntrySchema.omit({ workbookPath: true });
+const LIBRARY_SITE_KEYS = new Set<string>(Object.keys(LibrarySiteEntrySchema.shape));
+
 export const LibraryProfileSchema = z
   .object({
     kind: z.literal("library"),
     profileId: ProfileIdSchema,
     identity: SiteEntrySchema.omit({ workbookPath: true }).strict(),
-    sites: SitesSchema,
+    // Passthrough so the loop below, not zod's strict error, names each unknown
+    // key at its own path (sites.1.workbookPath), which is where an operator looks.
+    sites: z.array(LibrarySiteEntrySchema.passthrough()).min(1),
   })
   .strict()
   .superRefine((profile, ctx) => {
     refineIdentityAgreesWithSites(profile, ctx);
     profile.sites.forEach((site, index) => {
-      if (site.workbookPath !== undefined) {
+      for (const key of Object.keys(site)) {
+        if (LIBRARY_SITE_KEYS.has(key)) continue;
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ["sites", index, "workbookPath"],
-          message: "a library profile has no workbook, so a site entry cannot carry a workbookPath",
+          path: ["sites", index, key],
+          message:
+            key === "workbookPath"
+              ? "a library profile has no workbook, so a site entry cannot carry a workbookPath"
+              : `"${key}" is not a field of a library profile's site entry`,
         });
       }
     });
