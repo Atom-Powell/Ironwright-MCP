@@ -26,7 +26,9 @@ export const SAVE_OUTPUT_SCHEMA = {
   assessmentId: z.string().describe('For example "ASM-2026-00002".'),
   kind: z.string().describe('For example "dossier".'),
   path: z.string().describe('Library-relative path written, for example "Assessments/Acme Corp/ASM-2026-00002/Research/Acme Corp_Research_Dossier.md".'),
-  operation: z.enum(["created", "overwritten"]).describe('Which write happened, for example "created" on the first save.'),
+  operation: z
+    .enum(["created", "overwritten", "unchanged"])
+    .describe('Which write happened, for example "created" on the first save, or "unchanged" when the file already held exactly this content and nothing was written.'),
   stage: z.string().describe('Journal stage recorded, for example "DOSSIER", or "CORRECTION" when the dossier was overwritten.'),
   bytes: z.number().int().describe("Bytes read back, for example 2048."),
   sha256: z.string().describe('sha256 of the bytes read back, for example "9f86d0...".'),
@@ -104,7 +106,26 @@ export async function runSaveAssessmentArtifact(input: unknown, context: ToolCon
       if (artifact.eTag === undefined) {
         return failure(`The file at ${path} was read without an ETag, so no If-Match precondition could be sent. Nothing was written.`);
       }
-      priorHash = sha256Hex(await downloadDriveItem(context.graph, { driveId: ac.driveId, workbookPath: path }));
+      const prior = await downloadDriveItem(context.graph, { driveId: ac.driveId, workbookPath: path });
+      priorHash = sha256Hex(prior);
+      // A retry of a save that already landed is a completed stage: it is reported, not repeated,
+      // so nothing is written, journaled or advanced.
+      if (priorHash === sent) {
+        const output = {
+          assessmentId: args.assessmentId,
+          kind: args.kind,
+          path,
+          operation: "unchanged" as const,
+          stage: stageFor(args.kind, true),
+          bytes: prior.byteLength,
+          sha256: priorHash,
+          eTag: artifact.eTag,
+          correlationId: ac.correlationId,
+          graphRequests: context.graph.requests() - before,
+        };
+        const text = `The ${args.kind} at ${path} already holds this content (${prior.byteLength} bytes, sha256 ${priorHash.slice(0, 12)}), so nothing was written and no stage was recorded.`;
+        return { structuredContent: output, content: [{ type: "text" as const, text }] };
+      }
       const outcome = await overwriteFile(context.graph, { ...target, etag: artifact.eTag });
       if (outcome.kind === "precondition_failed") {
         return failure(`The file at ${path} changed between the read and the write: Graph answered 412 to If-Match ${artifact.eTag}, so nothing was replaced; call again to save over the current version.`);

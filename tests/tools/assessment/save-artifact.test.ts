@@ -86,6 +86,18 @@ describe("save_assessment_artifact", () => {
     expect(journal[1]).toMatchObject({ operation: "list_item_updated", stage: "CORRECTION" });
   });
 
+  it("reports a present dossier already holding identical content as unchanged, writing and journaling nothing", async () => {
+    const { graph, calls } = createScriptedGraph([...stateScript({ dossier: dossierItem('"e1"', BYTES.byteLength) }), contentRead(DOSSIER_PATH, BYTES)]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runSaveAssessmentArtifact({ profileId: PROFILE, assessmentId: ID, kind: "dossier", content: CONTENT }, context);
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toMatchObject({ operation: "unchanged", path: DOSSIER_PATH, bytes: BYTES.byteLength, sha256: sha256Hex(BYTES), eTag: '"e1"', graphRequests: graph.requests() });
+    expect(calls.filter((call) => call.method === "putBytes" || call.method === "patch")).toEqual([]);
+    expect(await context.store.listJournal(PROFILE, ID)).toEqual([]);
+  });
+
   it("records another kind under its own stage at its own path", async () => {
     const { graph } = createScriptedGraph([...stateScript(), ...createScript(SUMMARY_PATH, `${ID}_Executive_Summary.md`, BYTES, "EXECUTIVE_SUMMARY")]);
     const context = assessmentToolContext(graph);
