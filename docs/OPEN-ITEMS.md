@@ -39,7 +39,7 @@ sections below say what was proven and what was not. Last updated 2026-11-06.
 | 8 Evaluation suite | Not started; questions written in `docs/EVALUATION-QUESTIONS.md` | |
 | 9a Probes and the grant | Complete: probes L and F run live 2026-11-07, fifteen of seventeen steps as designed and the spec amended on the other two (`If-Match` on a content PUT does not guard an absent path; a filtered list query needs the non-indexed header); A3 and B1 stay unverified until 9d | `docs/superpowers/specs/evidence/2026-11-07-assessment-probe/`; sitting below; PR #24 |
 | 9b Core: modules, site sets, inbound authentication, lifecycle kind, journal | Complete against fakes, merged 2026-11-07; nothing in it has met a live tenant yet | PR #22, merged 2026-11-07 |
-| 9c Assessment module and the four Graph operations | Designed 2026-11-06; 9a evidence in hand since 2026-11-07, plan not yet written | same spec |
+| 9c Assessment module and the four Graph operations | Built against fakes and the 9a recordings, merged 2026-11-07; live sitting pending (Task 9 of the 9c plan) | PR pending; `docs/superpowers/plans/2026-11-07-phase-9c-assessment-module.md` |
 | 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9c and carries the unverified A3 and B1 probes, and is the item that slips first | same spec |
 | Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
 | CPA practice domain (multi-site scan and queries, grant issuer loop over a sites file, folder template taxonomy) | Not started; the phase after 9 | same spec |
@@ -259,6 +259,28 @@ nothing whatsoever, because the API that replaced that property defers its callb
 `generate_rename_plan` already takes, so the one rule that needed an object-level refinement no
 longer exists. The SDK defect that blocked it is unchanged and still recorded under "The MCP SDK
 cannot advertise a refined input schema" below, for the next tool that needs such a rule.
+
+**Carried from phase 9c, 2026-11-07: the journal's `versionId` waits on a `/versions` probe.**
+Reading a SharePoint version id needs a call this project has never made, and the assumption gate
+forbids building against it. The journal carries `priorContentHash` instead, from a download of the
+prior bytes. The probe comes first and the field follows.
+
+**Carried from phase 9c, 2026-11-07: provisioning the three lists from the profile.** The profile
+names the lists and their columns, and nothing creates them; an operator prepares them by hand, as
+`docs/SETUP.md` describes. Building it needs a live probe of list and column creation under
+`Sites.Selected` first.
+
+**Carried from phase 9c, 2026-11-07: the OData filter encoding.** The module builds
+`fields/{column} eq '{value}'` with single quotes doubled and the whole expression passed through
+`encodeURIComponent`, while the 9a probe sent the expression raw. The encoded form is the HTTP
+layer's representation of the same query, but it has not been called that way, so the first live
+filtered query of the Task 9 sitting is its check.
+
+**Carried from phase 9c, 2026-11-07: multi-line columns have not been written live.** The module
+compares Graph's answer against the text it sent exactly, and the observation, recommendation and
+summary columns can hold several lines. If SharePoint normalizes line endings or wraps rich text,
+every such write would be reported as a mismatch and every retry as a rewrite. The Task 9 sitting
+sends a multi-line observation and a multi-line summary and reads them back as its check.
 
 ## Known minor issues
 

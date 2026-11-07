@@ -255,6 +255,37 @@ application, a secret, a service principal, and a consented role assignment, and
 failing at the per-site grant with a rollback that deletes everything it just made. Run
 `--create-bootstrap` first if you see this.
 
+## Assessment profiles and their lists
+
+An assessment profile (`kind: "assessment"`, an example at `examples/profiles/assessment-example.json`)
+names one site, one library for the workspace, and three SharePoint lists that the operator
+prepares: vendors, assessments and findings. Each list's `columns` map names a logical field and
+the internal column that holds it. The vendors list needs a folder name column. The assessments
+list needs columns for the assessment id, the vendor folder, the scope, the status, the state, the
+disposition, the risk and the summary. The findings list needs columns for the assessment id, the
+finding key, the observation, the risk and the recommendation. `Title` on each list is fixed by
+SharePoint and cannot be mapped: the module writes the vendor's display name there on vendors and
+assessments, and the finding key on findings.
+
+The module filters list items on the assessment id, vendor folder, scope and status columns of the
+assessments list, the assessment id column of the findings list, and `Title` of the vendors list.
+Index each of those in the list settings. Every filtered query sends `Prefer:
+HonorNonIndexedQueriesWarningMayFailRandomly`, which lets a query on a non-indexed column succeed,
+but SharePoint may refuse such a query once the list passes its view threshold (measured
+2026-11-07). The module reports that refusal as a plain error carrying this advice and does not
+retry it.
+
+The four lifecycle tools (`open_assessment`, `save_assessment_artifact`, `record_findings` and
+`transition_assessment`) are absent from the registry unless `IW_ALLOW_WRITES=true`, and the
+server application's grant must hold `write` for them. Widen it with
+`npm run probe:assessment:grant -- --roles=write` and restore it with `--roles=read`. Saved
+artifact content is capped at 4 MiB, and the `publication` kind is never written by this server,
+only verified.
+
+Provisioning the three lists from the profile is not built. An operator creates them by hand, or
+uses the probe's seed (`npm run probe:assessment:seed`, under `scripts/assessment-probe/`) as a
+pattern.
+
 ## The permission model
 
 **The server refuses to run with more than `Sites.Selected`.** Before it opens its port, and again
