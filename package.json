@@ -17,7 +17,8 @@
     "setup": "tsx src/setup/main.ts",
     "scan": "tsx src/scan/main.ts",
     "seed-library": "tsx scripts/seed-library.ts",
-    "probe:assessment:seed": "tsx scripts/assessment-probe/seed.ts"
+    "probe:assessment:seed": "tsx scripts/assessment-probe/seed.ts",
+    "probe:assessment": "tsx scripts/assessment-probe/main.ts"
   },
   "repository": {
     "type": "git",
