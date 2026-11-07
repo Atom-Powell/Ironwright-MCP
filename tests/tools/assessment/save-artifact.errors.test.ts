@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runSaveAssessmentArtifact } from "../../../src/tools/assessment/save-artifact.js";
 import { sha256Hex } from "../../../src/tools/assessment/hash.js";
 import { MAX_SMALL_UPLOAD_BYTES } from "../../../src/graph/items.js";
-import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, fileItem, resultText } from "./fake-graph.js";
-import { DOSSIER_PATH, ID, PROFILE, ROOT, assessmentByIdQuery, contentRead, dossierItem, itemRead, stateScript } from "./state-script.js";
+import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, fileItem, folderItem, resultText, type ScriptEntry } from "./fake-graph.js";
+import { DOSSIER_PATH, ID, PROFILE, ROOT, assessmentByIdQuery, contentRead, dossierItem, itemRead, stateFields, stateScript } from "./state-script.js";
 
 const CONTENT = "# Acme Corp research dossier\n";
 const BYTES = new TextEncoder().encode(CONTENT);
@@ -134,5 +134,76 @@ describe("save_assessment_artifact failures", () => {
     expect(journal.map((entry) => entry.operation)).toEqual(["file_created"]);
     expect(journal[0]!.contentHash).toBe(sha256Hex(BYTES));
     expect(calls.filter((call) => call.method === "patch")).toEqual([]);
+  });
+  /** The create of the dossier, answering created with ETag "e1". */
+  const CREATE: ScriptEntry = {
+    method: "putBytes",
+    pathIncludes: `${DOSSIER_PATH}:/content?@microsoft.graph.conflictBehavior=fail`,
+    response: dossierItem('"e1"', BYTES.byteLength),
+  };
+
+  it("reports a folder at the artifact's path without writing", async () => {
+    const { graph, calls } = createScriptedGraph(stateScript({ dossier: folderItem("Acme Corp_Research_Dossier.md") }));
+    const context = assessmentToolContext(graph);
+
+    const result = await runSaveAssessmentArtifact(INPUT, context);
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toContain(`A folder, not a file, is at ${DOSSIER_PATH}, where the profile puts the dossier. Nothing was written.`);
+    expect(calls.filter((call) => call.method !== "get")).toEqual([]);
+    expect(await context.store.listJournal(PROFILE, ID)).toEqual([]);
+  });
+
+  it("reports a present file read without an ETag and sends nothing", async () => {
+    const { graph, calls } = createScriptedGraph(stateScript({ dossier: { ...dossierItem('"e1"', 11), eTag: undefined } }));
+    const context = assessmentToolContext(graph);
+
+    const result = await runSaveAssessmentArtifact(INPUT, context);
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toContain(`The file at ${DOSSIER_PATH} was read without an ETag, so no If-Match precondition could be sent. Nothing was written.`);
+    expect(calls.filter((call) => call.method !== "get")).toEqual([]);
+    expect(await context.store.listJournal(PROFILE, ID)).toEqual([]);
+  });
+
+  it("reports a read back answering 404 after the write, keeping the write's journal entry and leaving State alone", async () => {
+    const { graph, calls } = createScriptedGraph([...stateScript(), CREATE, itemRead(DOSSIER_PATH, undefined)]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runSaveAssessmentArtifact(INPUT, context);
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toContain(`Graph accepted the write to ${DOSSIER_PATH}, but reading it back answered 404.`);
+    expect((await context.store.listJournal(PROFILE, ID)).map((entry) => entry.operation)).toEqual(["file_created"]);
+    expect(calls.filter((call) => call.method === "patch")).toEqual([]);
+  });
+
+  it("reports a read back answering a folder after the write, keeping the write's journal entry and leaving State alone", async () => {
+    const { graph, calls } = createScriptedGraph([...stateScript(), CREATE, itemRead(DOSSIER_PATH, folderItem("Acme Corp_Research_Dossier.md"))]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runSaveAssessmentArtifact(INPUT, context);
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toContain(`Graph accepted the write to ${DOSSIER_PATH}, but reading it back returned a folder.`);
+    expect((await context.store.listJournal(PROFILE, ID)).map((entry) => entry.operation)).toEqual(["file_created"]);
+    expect(calls.filter((call) => call.method === "patch")).toEqual([]);
+  });
+
+  it("reports a State update whose returned fields disagree, journaling both writes", async () => {
+    const { graph } = createScriptedGraph([
+      ...stateScript(),
+      CREATE,
+      itemRead(DOSSIER_PATH, dossierItem('"e1"', BYTES.byteLength)),
+      contentRead(DOSSIER_PATH, BYTES),
+      { method: "patch", pathIncludes: "/lists/Assessments/items/2/fields", response: stateFields({ State: "ID" }) },
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runSaveAssessmentArtifact(INPUT, context);
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toContain('the State update on Assessments item 2 answered "ID", not "DOSSIER". The journal records what was written.');
+    expect((await context.store.listJournal(PROFILE, ID)).map((entry) => entry.operation)).toEqual(["file_created", "list_item_updated"]);
   });
 });

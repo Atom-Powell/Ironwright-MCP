@@ -25,14 +25,18 @@ export const SAVE_INPUT_SCHEMA = {
 export const SAVE_OUTPUT_SCHEMA = {
   assessmentId: z.string().describe('For example "ASM-2026-00002".'),
   kind: z.string().describe('For example "dossier".'),
-  path: z.string().describe('Library-relative path written, for example "Assessments/Acme Corp/ASM-2026-00002/Research/Acme Corp_Research_Dossier.md".'),
+  path: z.string().describe('Library-relative path saved to, for example "Assessments/Acme Corp/ASM-2026-00002/Research/Acme Corp_Research_Dossier.md".'),
   operation: z
     .enum(["created", "overwritten", "unchanged"])
-    .describe('Which write happened, for example "created" on the first save, or "unchanged" when the file already held exactly this content and nothing was written.'),
-  stage: z.string().describe('Journal stage recorded, for example "DOSSIER", or "CORRECTION" when the dossier was overwritten.'),
-  bytes: z.number().int().describe("Bytes read back, for example 2048."),
-  sha256: z.string().describe('sha256 of the bytes read back, for example "9f86d0...".'),
-  eTag: z.string().optional().describe('The item\'s ETag after the write, for example "\\"{...},2\\"".'),
+    .describe('Which write happened, for example "created" on the first save, or "unchanged" when the file already held exactly this content and the file was not written.'),
+  stage: z
+    .string()
+    .describe(
+      'The stage this save stands for, which the State column holds when the call succeeds, for example "DOSSIER", or "CORRECTION" when the dossier was overwritten. On "unchanged" it is the kind\'s own stage, journaled only when the State column had to be set.',
+    ),
+  bytes: z.number().int().describe('Bytes of the file as last read: read back after a write, or as downloaded on "unchanged", for example 2048.'),
+  sha256: z.string().describe('sha256 of those bytes, equal to the hash of the content sent, for example "9f86d0...".'),
+  eTag: z.string().optional().describe('The item\'s ETag as last read: after the write, or as found on "unchanged", for example "\\"{...},2\\"".'),
   correlationId: z.string().describe('For example "6f1c...".'),
   graphRequests: z.number().int().describe("For example 9."),
 } satisfies z.ZodRawShape;
@@ -91,6 +95,24 @@ export async function runSaveAssessmentArtifact(input: unknown, context: ToolCon
       return failure(`A folder, not a file, is at ${path}, where the profile puts the ${args.kind}. Nothing was written.`);
     }
 
+    // The State write and its journal entry, shared by a save that wrote the file and one that found
+    // the content already there. The PATCH answers with the item's whole fields object after the
+    // update (L2b), which is the read back for this write. Returns the failure text on a mismatch.
+    const recordStage = async (stage: string, saved: string): Promise<string | undefined> => {
+      const fields = await updateListItemFields(context.graph, { siteId: ac.siteId, listName, itemId: item.itemId, fields: fieldsFor(columns, { state: stage }) });
+      await appendJournal(context, ac, args.assessmentId, {
+        stage,
+        operation: "list_item_updated",
+        target: `${listName}/${item.itemId}`,
+        ...(item.etag !== undefined ? { etagBefore: item.etag } : {}),
+      });
+      if (fields[columns.state] === stage) return undefined;
+      return (
+        `${saved}, but the ${columns.state} update on ${listName} item ${item.itemId} answered ${JSON.stringify(fields[columns.state] ?? null)}, not "${stage}". ` +
+        "The journal records what was written."
+      );
+    };
+
     const contentType = path.endsWith(".md") ? "text/markdown" : "text/plain";
     const target = { driveId: ac.driveId, path, bytes, contentType };
     const sent = sha256Hex(bytes);
@@ -108,22 +130,33 @@ export async function runSaveAssessmentArtifact(input: unknown, context: ToolCon
       }
       const prior = await downloadDriveItem(context.graph, { driveId: ac.driveId, workbookPath: path });
       priorHash = sha256Hex(prior);
-      // A retry of a save that already landed is a completed stage: it is reported, not repeated,
-      // so nothing is written, journaled or advanced.
+      // The file already holds exactly this content, so the file is not written again. Its stage is
+      // the kind's own, since nothing was corrected, and the State column read with the record is
+      // compared with it: a save whose file write landed but whose State write did not is completed
+      // here rather than left stranded.
       if (priorHash === sent) {
+        const stage = stageFor(args.kind, false);
+        const stateSet = item.state !== stage;
+        if (stateSet) {
+          const mismatch = await recordStage(stage, `The ${args.kind} at ${path} already held this content (sha256 ${priorHash})`);
+          if (mismatch !== undefined) return failure(mismatch);
+        }
         const output = {
           assessmentId: args.assessmentId,
           kind: args.kind,
           path,
           operation: "unchanged" as const,
-          stage: stageFor(args.kind, true),
+          stage,
           bytes: prior.byteLength,
           sha256: priorHash,
           eTag: artifact.eTag,
           correlationId: ac.correlationId,
           graphRequests: context.graph.requests() - before,
         };
-        const text = `The ${args.kind} at ${path} already holds this content (${prior.byteLength} bytes, sha256 ${priorHash.slice(0, 12)}), so nothing was written and no stage was recorded.`;
+        const held = `The ${args.kind} at ${path} already held this content (${prior.byteLength} bytes, sha256 ${priorHash.slice(0, 12)}), so the file was not written`;
+        const text = stateSet
+          ? `${held}; ${columns.state} on ${listName} item ${item.itemId} read ${JSON.stringify(item.state ?? null)}, so it was set to ${stage}.`
+          : `${held}, and ${columns.state} on ${listName} item ${item.itemId} already read ${stage}. Nothing was written.`;
         return { structuredContent: output, content: [{ type: "text" as const, text }] };
       }
       const outcome = await overwriteFile(context.graph, { ...target, etag: artifact.eTag });
@@ -163,21 +196,8 @@ export async function runSaveAssessmentArtifact(input: unknown, context: ToolCon
       );
     }
 
-    // The PATCH answers with the item's whole fields object after the update (L2b), which is the
-    // read back for this write.
-    const fields = await updateListItemFields(context.graph, { siteId: ac.siteId, listName, itemId: item.itemId, fields: fieldsFor(columns, { state: stage }) });
-    await appendJournal(context, ac, args.assessmentId, {
-      stage,
-      operation: "list_item_updated",
-      target: `${listName}/${item.itemId}`,
-      ...(item.etag !== undefined ? { etagBefore: item.etag } : {}),
-    });
-    if (fields[columns.state] !== stage) {
-      return failure(
-        `${path} was saved and read back with sha256 ${hashBack}, but the ${columns.state} update on ${listName} item ${item.itemId} answered ${JSON.stringify(fields[columns.state] ?? null)}, not "${stage}". ` +
-          "The journal records both writes.",
-      );
-    }
+    const mismatch = await recordStage(stage, `${path} was saved and read back with sha256 ${hashBack}`);
+    if (mismatch !== undefined) return failure(mismatch);
 
     const output = {
       assessmentId: args.assessmentId,

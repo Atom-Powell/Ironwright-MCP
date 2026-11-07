@@ -6,7 +6,7 @@ import { sha256Hex } from "../../../src/tools/assessment/hash.js";
 import type { GraphClient } from "../../../src/graph/client.js";
 import type { ToolContext } from "../../../src/tools/context.js";
 import { createFakeToolContext } from "../fake-context.js";
-import { SITE_URL, assessmentToolContext, createScriptedGraph, fileItem, type ScriptEntry } from "./fake-graph.js";
+import { SITE_URL, assessmentToolContext, createScriptedGraph, fileItem, resultText, type ScriptEntry } from "./fake-graph.js";
 import { DOSSIER_PATH, ID, NOT_FOUND, PROFILE, ROOT, SUMMARY_PATH, contentRead, dossierItem, itemRead, stateFields, stateScript } from "./state-script.js";
 
 const CONTENT = "# Acme Corp research dossier\n\nFindings follow.\n";
@@ -86,16 +86,47 @@ describe("save_assessment_artifact", () => {
     expect(journal[1]).toMatchObject({ operation: "list_item_updated", stage: "CORRECTION" });
   });
 
-  it("reports a present dossier already holding identical content as unchanged, writing and journaling nothing", async () => {
-    const { graph, calls } = createScriptedGraph([...stateScript({ dossier: dossierItem('"e1"', BYTES.byteLength) }), contentRead(DOSSIER_PATH, BYTES)]);
+  it("reports identical content on a present dossier as unchanged, writing nothing when State already reads DOSSIER", async () => {
+    const { graph, calls } = createScriptedGraph([
+      ...stateScript({ fields: { State: "DOSSIER" }, dossier: dossierItem('"e1"', BYTES.byteLength) }),
+      contentRead(DOSSIER_PATH, BYTES),
+    ]);
     const context = assessmentToolContext(graph);
 
     const result = await runSaveAssessmentArtifact({ profileId: PROFILE, assessmentId: ID, kind: "dossier", content: CONTENT }, context);
 
     expect(result.isError).toBeUndefined();
-    expect(result.structuredContent).toMatchObject({ operation: "unchanged", path: DOSSIER_PATH, bytes: BYTES.byteLength, sha256: sha256Hex(BYTES), eTag: '"e1"', graphRequests: graph.requests() });
+    expect(result.structuredContent).toMatchObject({
+      operation: "unchanged",
+      stage: "DOSSIER",
+      path: DOSSIER_PATH,
+      bytes: BYTES.byteLength,
+      sha256: sha256Hex(BYTES),
+      eTag: '"e1"',
+      graphRequests: graph.requests(),
+    });
+    expect(resultText(result)).toContain("already read DOSSIER. Nothing was written.");
     expect(calls.filter((call) => call.method === "putBytes" || call.method === "patch")).toEqual([]);
     expect(await context.store.listJournal(PROFILE, ID)).toEqual([]);
+  });
+
+  it("reports identical content as unchanged and sets State when an earlier save left it behind", async () => {
+    const { graph, calls } = createScriptedGraph([
+      ...stateScript({ fields: { State: "ID" }, dossier: dossierItem('"e1"', BYTES.byteLength) }),
+      contentRead(DOSSIER_PATH, BYTES),
+      fieldsPatch("DOSSIER"),
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runSaveAssessmentArtifact({ profileId: PROFILE, assessmentId: ID, kind: "dossier", content: CONTENT }, context);
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toMatchObject({ operation: "unchanged", stage: "DOSSIER", sha256: sha256Hex(BYTES) });
+    expect(resultText(result)).toContain('read "ID", so it was set to DOSSIER.');
+    expect(calls.filter((call) => call.method === "putBytes")).toEqual([]);
+    expect(calls.filter((call) => call.method === "patch").map((call) => call.body)).toEqual([{ State: "DOSSIER" }]);
+    const journal = await context.store.listJournal(PROFILE, ID);
+    expect(journal.map((entry) => [entry.operation, entry.stage])).toEqual([["list_item_updated", "DOSSIER"]]);
   });
 
   it("records another kind under its own stage at its own path", async () => {
