@@ -37,10 +37,10 @@ sections below say what was proven and what was not. Last updated 2026-11-06.
 | `$batch` | Held: no caller yet whose measured cost justifies it | |
 | 7 Copilot Studio integration and governance | In progress: track 1 spec drafted (pre-probe) and probe server built; no Copilot Studio contact yet | `docs/superpowers/specs/2026-10-11-copilot-studio-integration-design.md` |
 | 8 Evaluation suite | Not started; questions written in `docs/EVALUATION-QUESTIONS.md` | |
-| 9a Probes and the grant | Designed 2026-11-06, pre-probe; blocks 9c and 9d, and the live verification of 9b | `docs/superpowers/specs/2026-11-06-domain-platform-and-assessment-domain-design.md` |
+| 9a Probes and the grant | Complete: probes L and F run live 2026-11-07, fifteen of seventeen steps as designed and the spec amended on the other two (`If-Match` on a content PUT does not guard an absent path; a filtered list query needs the non-indexed header); A3 and B1 stay unverified until 9d | `docs/superpowers/specs/evidence/2026-11-07-assessment-probe/`; sitting below; PR #24 |
 | 9b Core: modules, site sets, inbound authentication, lifecycle kind, journal | Complete against fakes, merged 2026-11-07; nothing in it has met a live tenant yet | PR #22, merged 2026-11-07 |
-| 9c Assessment module and the four Graph operations | Designed 2026-11-06; waits on 9a evidence | same spec |
-| 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9a and 9c, and is the item that slips first | same spec |
+| 9c Assessment module and the four Graph operations | Designed 2026-11-06; 9a evidence in hand since 2026-11-07, plan not yet written | same spec |
+| 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9c and carries the unverified A3 and B1 probes, and is the item that slips first | same spec |
 | Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
 | CPA practice domain (multi-site scan and queries, grant issuer loop over a sites file, folder template taxonomy) | Not started; the phase after 9 | same spec |
 
@@ -2292,6 +2292,44 @@ A third finding is worth recording because of where it was: two places claimed t
 ordering regression "by position", and under that exact regression only one of the two tests failed.
 The branch that fixed a documented-but-never-printed log corrected a documented-but-never-run
 assertion before merging.
+
+## The plan 9a probe sitting, 2026-11-07: the assessment domain's Graph assumptions measured
+
+Run from main at `358d70c` plus the grant script, against the developer tenant's IronwrightTest
+site, under the server application's own token, which the runner checked carried exactly
+`Sites.Selected` before the first request. The grant issuer had to be stood up again first: the
+registration from 2026-09-16 still existed with its expired secret, so it was deleted and purged
+with `--delete-bootstrap --confirm` and recreated with `--create-bootstrap`. The server application
+from 2026-09-16 is still the one in use; it was given a new client secret in the portal rather
+than recreated, because a normal setup run would have created a second application. Its grant was
+widened to `write` with `npm run probe:assessment:grant -- --roles=write`, the command added for
+this sitting, and restored to `read` at the end.
+
+**Three runs, two of them short.** The first stopped at the drive steps because `IW_PROBE_LIBRARY`
+named the default library by its URL segment, `Shared Documents`, and Graph lists that drive as
+`Documents`. The second stopped at the first list write with 403 `accessDenied`, because the grant
+had been restored to `read` between runs; `npm run probe:assessment:grant` showed it, one PATCH
+widened it again, and the 403 did not recur. The third ran all seventeen steps. Fifteen answered as
+the spec's Assumptions table assumed. Two did not: a content PUT under `If-Match` to an absent path
+created the file and answered 201 rather than 412, and a filtered list query on a text column
+answered 400 until the non-indexed query header was sent. Both amended the spec the same day; the
+amendment at the end of
+`docs/superpowers/specs/2026-11-06-domain-platform-and-assessment-domain-design.md` carries the
+reasoning and the design changes, and the Assumptions table there now names the evidence per row.
+
+**What the evidence folder holds.** `recordings.jsonl` is every request and response of the third
+run with the site id, drive ids, host, tenant label, GUIDs, ETags and download URLs redacted and no
+Authorization header ever recorded; `report.md` is the per-step table. The redaction was read
+before the files were committed. Opaque driveItem ids survive in the bodies by design, since they
+address nothing without the redacted drive id. The unredacted raw recordings stay under
+`.superpowers/`, which is git-ignored.
+
+**Residue left in the tenant, deliberately.** Three lists, `IW Probe Vendors`, `IW Probe
+Assessments` and `IW Probe Findings`, with items 1 and 2 in Assessments; a folder `IW-Probe` at
+the library root holding `probe 20261107T203924Z`, which holds `dossier.md` and `absent.md`. The
+probe deletes nothing because this server has never deleted anything and a probe is not where that
+starts. Remove them by hand before the 9c sitting if a clean library is wanted, or leave them as
+the 9c sitting's own fixtures. The grant issuer remains, on a seven-day secret.
 
 ## The phase 6d live sitting, 2026-09-24: plans an operator describes
 
