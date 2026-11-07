@@ -17,8 +17,8 @@ const REQUIRES_COMPLIANCE = new Set([
 // Ruling 4: a tool that accepts a library profile accepts an assessment profile too, because
 // both carry only a site and a library and these tools read nothing else.
 const ACCEPTS_SITE_PROFILES = new Set(["inventory_tree", "query_repository", "generate_custom_plan", "execute_custom_plan"]);
-// The assessment module's own tools, which no other kind of profile can use. Filled in when they are registered.
-const ACCEPTS_ASSESSMENT = new Set<string>();
+// The assessment module's own tools, which no other kind of profile can use.
+const ACCEPTS_ASSESSMENT = new Set(["open_assessment", "get_assessment"]);
 const TAKES_NO_PROFILE = new Set(["describe_workbook"]);
 
 describe("which tools accept a library-only profile", () => {
@@ -68,6 +68,31 @@ describe("which tools accept a library-only profile", () => {
       const text = result.content.map((entry) => ("text" in entry ? entry.text : "")).join(" ");
       expect(text, tool.name).toContain("assessment profile");
       expect(context.graph.requests(), tool.name).toBe(0);
+    }
+  });
+
+  it("refuses a compliance profile and a library profile before any Graph request in every assessment tool", async () => {
+    const profiles = createProfileRegistry(
+      [
+        { source: "example.json", contents: JSON.parse(readFileSync("examples/profiles/example.json", "utf8")) },
+        { source: "library-example.json", contents: JSON.parse(readFileSync("examples/profiles/library-example.json", "utf8")) },
+        { source: "assessment-example.json", contents: JSON.parse(readFileSync("examples/profiles/assessment-example.json", "utf8")) },
+      ],
+      SITE,
+    );
+    const tools = ALL_TOOLS.filter((t) => ACCEPTS_ASSESSMENT.has(t.name) && t.handler !== undefined);
+    expect(tools.map((t) => t.name).sort()).toEqual([...ACCEPTS_ASSESSMENT].sort());
+    for (const tool of tools) {
+      for (const profileId of ["example", "shared-docs"]) {
+        const context = createFakeToolContext({ profiles });
+        // vendor alone satisfies get_assessment's one-of rule; open_assessment also needs a scope, which get_assessment ignores.
+        const result = await tool.handler!({ profileId, vendor: "Acme Corp", scope: "Security" }, context);
+
+        expect(result.isError, `${tool.name} ${profileId}`).toBe(true);
+        const text = result.content.map((entry) => ("text" in entry ? entry.text : "")).join(" ");
+        expect(text, `${tool.name} ${profileId}`).toContain("assessment profile");
+        expect(context.graph.requests(), `${tool.name} ${profileId}`).toBe(0);
+      }
     }
   });
 });

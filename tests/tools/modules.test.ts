@@ -16,13 +16,18 @@ describe("domain modules", () => {
     expect(ALL_TOOLS.map((t) => t.name)).toEqual(ALL_MODULES.flatMap((m) => m.tools.map((t) => t.name)));
   });
 
-  it("keeps the twelve tools that existed before modules did, under the same names", () => {
-    expect(ALL_TOOLS.map((t) => t.name).sort()).toEqual(
-      [
+  it("still carries the twelve tools that existed before modules did, under the same names", () => {
+    expect(ALL_TOOLS.map((t) => t.name)).toEqual(
+      expect.arrayContaining([
         "inventory_tree", "describe_workbook", "reconcile_workbook_vs_repository", "query_repository", "validate_structure",
         "generate_rename_plan", "execute_rename_plan", "generate_move_plan", "execute_move_plan",
         "generate_custom_plan", "execute_custom_plan", "replicate_template",
-      ].sort(),
+      ]),
     );
+  });
+
+  it("gives the assessment module the tools registered so far", () => {
+    const assessment = ALL_MODULES.find((m) => m.kind === "assessment");
+    expect(assessment?.tools.map((t) => t.name)).toEqual(["open_assessment", "get_assessment"]);
   });
 });
