@@ -1,6 +1,7 @@
 // scripts/assessment-probe/plan.ts
 import { siteLookupPath } from "../../src/graph/drive.js";
 import { graphErrorCodeFromBody } from "../../src/graph/errors.js";
+import { driveItemPath } from "../../src/graph/paths.js";
 
 /**
  * The probe sequence for the assessment domain's Graph assumptions. Pure: a
@@ -94,6 +95,10 @@ function expectStatus(status: number, label: string): (res: ProbeResponse) => Ve
   return (res) => (res.status === status ? { kind: "pass" } : { kind: "fail", because: `expected ${label}, received ${res.status}` });
 }
 
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function listUrl(ctx: ProbeContext, suffix: string): string {
   const name = encodeURIComponent(`${ctx.listPrefix} Assessments`);
   return `${ctx.graphBase}/sites/${need(ctx, "siteId")}/lists/${name}/items${suffix}`;
@@ -103,12 +108,25 @@ function renderedId(ctx: ProbeContext): string {
   return `PRB-${ctx.runId}-${need(ctx, "itemId").padStart(5, "0")}`;
 }
 
+// The space is deliberate: 9c builds workspace paths from vendor folder names,
+// so the recorded URLs and responses must include a segment that needs encoding.
 function folderName(ctx: ProbeContext): string {
-  return `probe-${ctx.runId}`;
+  return `probe ${ctx.runId}`;
 }
 
 function filePath(ctx: ProbeContext): string {
   return `${PROBE_ROOT}/${folderName(ctx)}/dossier.md`;
+}
+
+function absentPath(ctx: ProbeContext): string {
+  return `${PROBE_ROOT}/${folderName(ctx)}/absent.md`;
+}
+
+// Built through the same helper the server uses, so the probe measures the URL
+// 9c will send. The result ends at the path's trailing colon (or at "root"), so
+// callers append "/children" or "/content" themselves.
+function itemUrl(ctx: ProbeContext, libraryRelativePath: string): string {
+  return `${ctx.graphBase}${driveItemPath(need(ctx, "driveId"), libraryRelativePath)}`;
 }
 
 function json(method: ProbeRequest["method"], url: string, body: unknown, headers: Record<string, string> = {}): ProbeRequest {
@@ -225,7 +243,7 @@ export function probeSteps(): ProbeStep[] {
       assumption: "the probe root folder exists at the library root (created once, 409 on later runs)",
       expected: "201, or 409 nameAlreadyExists",
       request: (ctx) =>
-        json("POST", `${ctx.graphBase}/drives/${need(ctx, "driveId")}/root/children`, {
+        json("POST", `${itemUrl(ctx, "")}/children`, {
           name: PROBE_ROOT,
           folder: {},
           "@microsoft.graph.conflictBehavior": "fail",
@@ -240,7 +258,7 @@ export function probeSteps(): ProbeStep[] {
       assumption: "folder create by path with conflictBehavior fail returns the item with an ETag",
       expected: "201 with eTag",
       request: (ctx) =>
-        json("POST", `${ctx.graphBase}/drives/${need(ctx, "driveId")}/root:/${PROBE_ROOT}:/children`, {
+        json("POST", `${itemUrl(ctx, PROBE_ROOT)}/children`, {
           name: folderName(ctx),
           folder: {},
           "@microsoft.graph.conflictBehavior": "fail",
@@ -258,7 +276,7 @@ export function probeSteps(): ProbeStep[] {
       assumption: "a second create of the same folder answers 409 nameAlreadyExists",
       expected: "409 nameAlreadyExists",
       request: (ctx) =>
-        json("POST", `${ctx.graphBase}/drives/${need(ctx, "driveId")}/root:/${PROBE_ROOT}:/children`, {
+        json("POST", `${itemUrl(ctx, PROBE_ROOT)}/children`, {
           name: folderName(ctx),
           folder: {},
           "@microsoft.graph.conflictBehavior": "fail",
@@ -274,7 +292,7 @@ export function probeSteps(): ProbeStep[] {
       expected: "201 with eTag",
       request: (ctx) => ({
         method: "PUT",
-        url: `${ctx.graphBase}/drives/${need(ctx, "driveId")}/root:/${filePath(ctx)}:/content?@microsoft.graph.conflictBehavior=fail`,
+        url: `${itemUrl(ctx, filePath(ctx))}/content?@microsoft.graph.conflictBehavior=fail`,
         headers: { "content-type": "text/plain" },
         body: "# probe\n",
       }),
@@ -292,7 +310,7 @@ export function probeSteps(): ProbeStep[] {
       expected: "409 nameAlreadyExists",
       request: (ctx) => ({
         method: "PUT",
-        url: `${ctx.graphBase}/drives/${need(ctx, "driveId")}/root:/${filePath(ctx)}:/content?@microsoft.graph.conflictBehavior=fail`,
+        url: `${itemUrl(ctx, filePath(ctx))}/content?@microsoft.graph.conflictBehavior=fail`,
         headers: { "content-type": "text/plain" },
         body: "# must not land\n",
       }),
@@ -307,7 +325,7 @@ export function probeSteps(): ProbeStep[] {
       expected: "200 with a different eTag",
       request: (ctx) => ({
         method: "PUT",
-        url: `${ctx.graphBase}/drives/${need(ctx, "driveId")}/root:/${filePath(ctx)}:/content`,
+        url: `${itemUrl(ctx, filePath(ctx))}/content`,
         headers: { "content-type": "text/plain", "if-match": need(ctx, "fileEtag") },
         body: "# probe v2\n",
       }),
@@ -327,11 +345,31 @@ export function probeSteps(): ProbeStep[] {
       expected: "412",
       request: (ctx) => ({
         method: "PUT",
-        url: `${ctx.graphBase}/drives/${need(ctx, "driveId")}/root:/${filePath(ctx)}:/content`,
+        url: `${itemUrl(ctx, filePath(ctx))}/content`,
         headers: { "content-type": "text/plain", "if-match": need(ctx, "fileEtag") },
         body: "# must not land\n",
       }),
-      judge: expectStatus(412, "412"),
+      judge: (res, ctx) => {
+        if (res.status !== 412) return { kind: "fail", because: `expected 412, received ${received(res)}` };
+        // A 412 only shows a stale precondition was refused if F3a changed the
+        // eTag, so the If-Match sent here is known to be out of date.
+        if (ctx.newEtag === undefined || ctx.newEtag === ctx.fileEtag) {
+          return { kind: "observed", note: "412 received but F3a did not capture a changed eTag, so staleness was not established" };
+        }
+        return { kind: "pass" };
+      },
+    },
+    {
+      id: "F3c",
+      assumption: "a content PUT under If-Match against an absent path answers 412, so the precondition is checked before existence",
+      expected: "412",
+      request: (ctx) => ({
+        method: "PUT",
+        url: `${itemUrl(ctx, absentPath(ctx))}/content`,
+        headers: { "content-type": "text/plain", "if-match": need(ctx, "fileEtag") },
+        body: "# must not land\n",
+      }),
+      judge: (res) => (res.status === 412 ? { kind: "pass" } : { kind: "fail", because: `expected 412, received ${received(res)}` }),
     },
     {
       id: "F4",
@@ -339,7 +377,7 @@ export function probeSteps(): ProbeStep[] {
       expected: "the overwritten text",
       request: (ctx) => ({
         method: "GET",
-        url: `${ctx.graphBase}/drives/${need(ctx, "driveId")}/root:/${filePath(ctx)}:/content`,
+        url: `${itemUrl(ctx, filePath(ctx))}/content`,
         readBodyAsText: true,
       }),
       judge: (res) => (res.status === 200 && res.body === "# probe v2\n" ? { kind: "pass" } : { kind: "fail", because: `received ${res.status} with ${JSON.stringify(res.body.slice(0, 40))}` }),
@@ -360,6 +398,8 @@ export function redact(record: ProbeRecord, ctx: ProbeContext, etags: Map<string
   if (ctx.siteId !== undefined) replacements.push([ctx.siteId, "<site-id>"], [encodeURIComponent(ctx.siteId), "<site-id>"]);
   if (ctx.driveId !== undefined) replacements.push([ctx.driveId, "<drive-id>"], [encodeURIComponent(ctx.driveId), "<drive-id>"]);
   replacements.push([host, "<host>"]);
+  const label = host.split(".")[0] ?? "";
+  const tenantLabel = label.length === 0 ? undefined : new RegExp(escapeRegExp(label), "gi");
 
   function scrub(text: string): string {
     let out = text;
@@ -381,6 +421,10 @@ export function redact(record: ProbeRecord, ctx: ProbeContext, etags: Map<string
     // query string is a bearer credential.
     out = out.replace(/("@microsoft\.graph\.downloadUrl"\s*:\s*)"[^"]*"/g, '$1"<download-url>"');
     out = out.replace(/tempauth=[^&"\s\\]+/g, "tempauth=<tempauth>");
+    // Done after the exact host replacement so "<host>" is not damaged. Covers
+    // the -my host and the onmicrosoft.com domain, which share the label.
+    if (tenantLabel !== undefined) out = out.replace(tenantLabel, "<tenant>");
+    out = out.replace(/("email"\s*:\s*)"[^"]*"/g, '$1"<email>"');
     out = out.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "<guid>");
     return out;
   }
@@ -395,6 +439,13 @@ export function redact(record: ProbeRecord, ctx: ProbeContext, etags: Map<string
     return out;
   }
 
+  // A judge builds its text from the raw body, so it can name an id or a host.
+  function scrubVerdict(verdict: Verdict): Verdict {
+    if (verdict.kind === "fail") return { kind: "fail", because: scrub(verdict.because) };
+    if (verdict.kind === "observed") return { kind: "observed", note: scrub(verdict.note) };
+    return { kind: "pass" };
+  }
+
   return {
     ...record,
     request: {
@@ -404,6 +455,7 @@ export function redact(record: ProbeRecord, ctx: ProbeContext, etags: Map<string
       ...(record.request.body === undefined ? {} : { body: scrub(record.request.body) }),
     },
     response: { status: record.response.status, headers: scrubHeaders(record.response.headers) ?? {}, body: scrub(record.response.body) },
+    verdict: scrubVerdict(record.verdict),
   };
 }
 
@@ -411,7 +463,8 @@ export function reportMarkdown(records: ProbeRecord[], runId: string, tokenRoles
   const lines = [
     `# Assessment probe report, run ${runId}`,
     "",
-    `Each row is one request sent under a token whose roles the runner verified to be exactly: ${tokenRoles.join(", ")}.`,
+    `Each row whose Observed status is not 0 is one request sent under a token whose roles the runner verified to be exactly: ${tokenRoles.join(", ")}.`,
+    "A row whose Observed status is 0 was not sent, because its request could not be built.",
     "The site is the one configured in IW_SITE_URL, which the recordings show as <host>. Verdicts are the",
     "judge's reading of the status and body; the redacted request and response are in recordings.jsonl",
     "beside this file.",

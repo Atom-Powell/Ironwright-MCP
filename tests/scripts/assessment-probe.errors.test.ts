@@ -39,6 +39,28 @@ describe("judges name what they saw", () => {
     expect(v).toEqual({ kind: "fail", because: "expected 412, received 200" });
   });
 
+  it("F3b records a 412 as observed, not passed, when F3a captured no changed eTag", () => {
+    const res = { status: 412, headers: {}, body: "{}" };
+    const note = "412 received but F3a did not capture a changed eTag, so staleness was not established";
+    expect(step("F3b").judge(res, { ...base, fileEtag: "e" })).toEqual({ kind: "observed", note });
+    expect(step("F3b").judge(res, { ...base, fileEtag: "e", newEtag: "e" })).toEqual({ kind: "observed", note });
+  });
+
+  it("F3c fails on a 201, naming the status, because an absent path must not be created under a stale precondition", () => {
+    const v = step("F3c").judge({ status: 201, headers: {}, body: "{}" }, { ...base, driveId: "d", fileEtag: "e" });
+    expect(v).toEqual({ kind: "fail", because: "expected 412, received 201" });
+  });
+
+  it("F3c names the error code when the status is wrong and the body carries one", () => {
+    const body = JSON.stringify({ error: { code: "itemNotFound", message: "x" } });
+    const v = step("F3c").judge({ status: 404, headers: {}, body }, { ...base, driveId: "d", fileEtag: "e" });
+    expect(v).toEqual({ kind: "fail", because: "expected 412, received 404 itemNotFound" });
+  });
+
+  it("F3c throws when no file etag was captured", () => {
+    expect(() => step("F3c").request({ ...base, siteId: "s", driveId: "d" })).toThrow(/fileEtag/);
+  });
+
   it("F1b names the error code it saw when the status was right but the code was not", () => {
     const body = JSON.stringify({ error: { code: "accessDenied", message: "x" } });
     const v = step("F1b").judge({ status: 409, headers: {}, body }, { ...base, driveId: "d" });

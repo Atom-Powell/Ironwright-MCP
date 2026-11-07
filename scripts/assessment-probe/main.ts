@@ -106,6 +106,13 @@ async function writeOutputs(raw: ProbeRecord[], ctx: ProbeContext, out: string):
   await mkdir(rawDir, { recursive: true });
   await writeFile(join(rawDir, `${ctx.runId}.raw.jsonl`), raw.map((r) => JSON.stringify(r)).join("\n") + "\n");
 
+  // A run that sent nothing (for example the token roles check threw) must not
+  // overwrite an earlier run's evidence with a report of an empty run.
+  if (!raw.some((r) => r.response.status !== 0)) {
+    console.error(`no request was sent, so ${out} was left untouched`);
+    return;
+  }
+
   // One map for the whole run so etag tokens are numbered per run, not per record.
   const etags = new Map<string, string>();
   const redacted = raw.map((r) => redact(r, ctx, etags));
@@ -122,8 +129,9 @@ async function writeOutputs(raw: ProbeRecord[], ctx: ProbeContext, out: string):
   if (answered201("L2a")) {
     created.push(`a list item in the Assessments list ${ctx.itemId !== undefined ? `with id ${ctx.itemId}` : "whose id was not captured"}`);
   }
-  if (answered201("F1a")) created.push(`the folder IW-Probe/probe-${ctx.runId}`);
-  if (answered201("F2a")) created.push(`the file IW-Probe/probe-${ctx.runId}/dossier.md`);
+  if (answered201("F1a")) created.push(`the folder IW-Probe/probe ${ctx.runId}`);
+  if (answered201("F2a")) created.push(`the file IW-Probe/probe ${ctx.runId}/dossier.md`);
+  if (answered201("F3c")) created.push(`the file IW-Probe/probe ${ctx.runId}/absent.md`);
   console.error(
     created.length === 0
       ? "cleanup: no create step answered 201, so nothing is known to have been created"

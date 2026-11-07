@@ -47,7 +47,7 @@ function step(id: string) {
 describe("probe steps", () => {
   it("runs in the order the spec's assumptions depend on each other", () => {
     expect(probeSteps().map((s) => s.id)).toEqual([
-      "R1", "R2", "L1", "L2a", "L2b", "L1b", "L3a", "L3b", "F0", "F1a", "F1b", "F2a", "F2b", "F3a", "F3b", "F4",
+      "R1", "R2", "L1", "L2a", "L2b", "L1b", "L3a", "L3b", "F0", "F1a", "F1b", "F2a", "F2b", "F3a", "F3b", "F3c", "F4",
     ]);
   });
 
@@ -85,14 +85,14 @@ describe("probe steps", () => {
   it("creates the probe folder with conflictBehavior fail", () => {
     const req = step("F1a").request(ctx());
     expect(req.url).toBe("https://graph.microsoft.com/v1.0/drives/b!driveid/root:/IW-Probe:/children");
-    expect(JSON.parse(req.body!)).toEqual({ name: "probe-20261107T093000Z", folder: {}, "@microsoft.graph.conflictBehavior": "fail" });
+    expect(JSON.parse(req.body!)).toEqual({ name: "probe 20261107T093000Z", folder: {}, "@microsoft.graph.conflictBehavior": "fail" });
   });
 
   it("creates the file by content PUT with conflictBehavior fail in the query and text/plain content", () => {
     const req = step("F2a").request(ctx());
     expect(req.method).toBe("PUT");
     expect(req.url).toBe(
-      "https://graph.microsoft.com/v1.0/drives/b!driveid/root:/IW-Probe/probe-20261107T093000Z/dossier.md:/content?@microsoft.graph.conflictBehavior=fail",
+      "https://graph.microsoft.com/v1.0/drives/b!driveid/root:/IW-Probe/probe%2020261107T093000Z/dossier.md:/content?@microsoft.graph.conflictBehavior=fail",
     );
     expect(req.headers?.["content-type"]).toBe("text/plain");
     expect(req.body).toBe("# probe\n");
@@ -105,9 +105,22 @@ describe("probe steps", () => {
     expect(req.body).toBe("# probe v2\n");
   });
 
+  it("addresses the root folder create through the shared path helper", () => {
+    expect(step("F0").request(ctx()).url).toBe("https://graph.microsoft.com/v1.0/drives/b!driveid/root/children");
+  });
+
+  it("sends F3c as the F3a overwrite shape against an absent file in the run folder", () => {
+    const req = step("F3c").request(ctx());
+    expect(req.method).toBe("PUT");
+    expect(req.url).toBe("https://graph.microsoft.com/v1.0/drives/b!driveid/root:/IW-Probe/probe%2020261107T093000Z/absent.md:/content");
+    expect(req.headers?.["if-match"]).toBe('"{AAAA},1"');
+    expect(req.headers?.["content-type"]).toBe("text/plain");
+    expect(req.body).toBe("# must not land\n");
+  });
+
   it("reads the file content back as text", () => {
     const req = step("F4").request(ctx());
-    expect(req.url.endsWith("/dossier.md:/content")).toBe(true);
+    expect(req.url.endsWith("/probe%2020261107T093000Z/dossier.md:/content")).toBe(true);
     expect(req.readBodyAsText).toBe(true);
   });
 });
@@ -118,8 +131,12 @@ describe("judges", () => {
     expect(step("F1b").judge({ status: 409, headers: {}, body }, ctx())).toEqual({ kind: "pass" });
   });
 
-  it("passes F3b only on a 412", () => {
-    expect(step("F3b").judge({ status: 412, headers: {}, body: "{}" }, ctx())).toEqual({ kind: "pass" });
+  it("passes F3b on a 412 once F3a captured an eTag that differs from the one sent", () => {
+    expect(step("F3b").judge({ status: 412, headers: {}, body: "{}" }, ctx({ newEtag: '"{AAAA},2"' }))).toEqual({ kind: "pass" });
+  });
+
+  it("passes F3c on a 412", () => {
+    expect(step("F3c").judge({ status: 412, headers: {}, body: "{}" }, ctx())).toEqual({ kind: "pass" });
   });
 
   it("passes F3a when the response etag differs from the one sent", () => {
@@ -168,6 +185,35 @@ describe("redaction", () => {
     const out = redact(record, ctx());
     expect(out.request.headers?.["if-match"]).toBe("<etag-1>");
     expect(out.response.body).toBe('{"eTag":"<etag-1>"}');
+  });
+
+  it("scrubs the verdict text with the same placeholders as the request and response", () => {
+    const c = ctx();
+    const record: ProbeRecord = {
+      id: "R2", assumption: "a", expected: "e",
+      request: { method: "GET", url: "u" },
+      response: { status: 200, headers: {}, body: "{}" },
+      verdict: { kind: "fail", because: `no drive among ${c.driveId} at contoso.sharepoint.com` },
+    };
+    expect(redact(record, c).verdict).toEqual({ kind: "fail", because: "no drive among <drive-id> at <host>" });
+    const observed: ProbeRecord = { ...record, verdict: { kind: "observed", note: `saw ${c.driveId}` } };
+    expect(redact(observed, c).verdict).toEqual({ kind: "observed", note: "saw <drive-id>" });
+  });
+
+  it("replaces the tenant label in a -my host and in an onmicrosoft.com domain", () => {
+    const body = JSON.stringify({ a: "https://Contoso-my.sharepoint.com/personal/x", b: "x@contoso.onmicrosoft.com", c: "https://contoso.sharepoint.com/sites/Probe" });
+    const record: ProbeRecord = { id: "X", assumption: "a", expected: "e", request: { method: "GET", url: "u" }, response: { status: 200, headers: {}, body }, verdict: { kind: "pass" } };
+    const out = redact(record, ctx()).response.body;
+    expect(out.toLowerCase()).not.toContain("contoso");
+    expect(out).toContain("<tenant>-my.sharepoint.com");
+    expect(out).toContain("x@<tenant>.onmicrosoft.com");
+    expect(out).toContain("<host>/sites/Probe");
+  });
+
+  it("replaces the value of an email key", () => {
+    const body = JSON.stringify({ createdBy: { user: { email: "someone@example.org", displayName: "d" } } });
+    const record: ProbeRecord = { id: "X", assumption: "a", expected: "e", request: { method: "GET", url: "u" }, response: { status: 200, headers: {}, body }, verdict: { kind: "pass" } };
+    expect(redact(record, ctx()).response.body).toContain('"email":"<email>"');
   });
 
   it("never carries an Authorization header into the record", () => {
@@ -229,5 +275,6 @@ describe("report", () => {
     expect(md).toContain("20261107T093000Z");
     expect(md).toContain("exactly: Sites.Selected.");
     expect(md).not.toContain("developer tenant");
+    expect(md).toContain("A row whose Observed status is 0 was not sent, because its request could not be built.");
   });
 });
