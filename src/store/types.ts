@@ -56,6 +56,8 @@ export interface JournalEntry {
   contentHash?: string;
   /** The SharePoint version that held the prior content, on an overwrite. */
   versionId?: string;
+  /** sha256 hex of the bytes an overwrite replaced. */
+  priorContentHash?: string;
 }
 
 /**
@@ -73,6 +75,7 @@ export const JournalEntrySchema = z.object({
   etagAfter: z.string().optional(),
   contentHash: z.string().optional(),
   versionId: z.string().optional(),
+  priorContentHash: z.string().optional(),
 });
 
 export interface StateStore {
