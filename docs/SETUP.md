@@ -481,6 +481,11 @@ library-only profile may not carry compliance fields; the server refuses one tha
 ignoring them. The tools that need a workbook refuse a library-only profile by name and say which
 tools do work with it. `examples/profiles/library-example.json` is the committed example.
 
+Any profile, of either kind, may be written with `sites` instead of `identity`. `sites` is a
+non-empty list of entries with `siteUrl` and `library`, and optionally `searchRegion`, `clientId`
+and `workbookPath`; `identity` is then the first entry. This phase still checks every listed site
+against the one granted site, `IW_SITE_URL`, so a profile naming a second site fails at startup.
+
 ## Running the server
 
 `npm start` runs the MCP server itself, `dist/server/main.js`. It reads its own environment at
@@ -524,10 +529,11 @@ development build afterward puts the setup output back.
   an earlier run to resume from. That is a reasonable local run and a poor deployment, which is
   why the deployment contract below lists it as optional rather than required: the distinction is
   what the server enforces, not what an operator should do. The Azure Table state store creates
-  three tables under this connection string, each on first use: `DeltaLinks`, one row per drive's
-  persisted continuation link; `Inventory`, the repository snapshot each scan reconciles against;
-  and `Plans`, which holds generated rename plans and the reversal logs that undo them, both under
-  the same entity shape.
+  four tables under this connection string, each on first use (`ensureTables` creates all four):
+  `DeltaLinks`, one row per drive's persisted continuation link; `Inventory`, the repository
+  snapshot each scan reconciles against; `Plans`, which holds generated rename plans and the
+  reversal logs that undo them, both under the same entity shape; and `Journal`, the per-assessment
+  journal that plan 9c's lifecycle tools append to.
 - `PORT` defaults to 3000 if unset.
 - `IW_ALLOW_WRITES` stays unset, and writes stay disabled, until an operator opts a deployment in
   by setting it to `true`, regardless of the site permission granted by the normal setup run.
@@ -539,6 +545,14 @@ Until phase 4a wired the first tool, none of this was read by the server itself:
 `IW_PROFILE_DIR` at all. As of this branch the server requires these variables at startup and
 will not come up without them. See `src/server/config.ts` and `src/config.ts` for what is
 actually checked.
+
+### Ingress
+
+Three ways to put the server in front of a caller such as Copilot Studio are designed. Dev tunnels
+are the quick start for trying it from a workstation. Cloudflare Tunnel on a domain the operator
+owns is the durable path that needs no Azure subscription. Azure Container Apps is the reference
+cloud deployment. Plan 9d carries the full procedure for each; this phase builds the inbound key
+all three rely on.
 
 ## Deployment configuration contract
 
@@ -563,6 +577,22 @@ adds the one that phase 5a introduced.
 - `IW_PROFILE_DIR`. Names the directory holding this deployment's profile files, each validated
   once at startup. Profiles are deployment configuration and are never committed, so there is no
   default to fall back to.
+- `IW_INBOUND_KEY`. The shared key every request except `/health` must carry. At least 16
+  characters; required unless `IW_INBOUND_AUTH` is `none`.
+
+Inbound authentication has three more variables, all optional.
+
+- `IW_INBOUND_AUTH`. `apikey` (the default) reads the key from a header, `bearer` reads it from
+  `Authorization: Bearer`, and `none` disables the check.
+- `IW_INBOUND_KEY_HEADER`. The header that carries the key in `apikey` mode. Defaults to
+  `x-api-key`.
+- `IW_ALLOW_ANONYMOUS`. Must be `1` for `IW_INBOUND_AUTH=none` to start.
+
+The server refuses to start without a key. `src/config.ts` names the missing variable and suggests
+a generator: `node -e "console.log(require('node:crypto').randomBytes(24).toString('hex'))"`.
+Mode `none` is for loopback development only and needs `IW_ALLOW_ANONYMOUS=1` as a second,
+deliberate confirmation. `/health` stays open and every other route is behind the check. The key
+never appears in logs, and the startup line prints only the mode.
 
 **Optional.**
 

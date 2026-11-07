@@ -384,3 +384,19 @@ Four implementation plans, in this order, each its own branch and PR:
 - `docs/OPEN-ITEMS.md`: the status table rows for the four plans above and the held items.
 - `docs/SETUP.md`: the inbound key and the three ingress paths, once built.
 - `docs/COPILOT-STUDIO-PROBE.md`: A3 gains the Access header question, B1 the Cloudflare hostname.
+
+## Amendments, 2026-11-06, during plan 9b
+
+Module objects reference the tool definitions in place under `src/tools/definitions/`, where the
+design said the definitions would move under `src/modules/`. The physical move is deferred. It is
+a rename-only commit when it happens, so nothing about behavior waits on it.
+
+`ProfileSchema` is wrapped in `z.preprocess` with the site normalization, so direct callers of the
+schema, such as scripts and fixtures, accept the legacy `identity` shape as well as `sites`. The
+parsed `Profile` type carries `sites`, with `identity` kept as the first entry.
+
+A journal row key carries a random suffix, so two entries with the same instant and correlation id
+are both kept. Append never replaces. A retried append after an ambiguous failure therefore writes
+a duplicate row, which means a lifecycle tool journals after its write is confirmed, not before.
+
+The Azure table is named `Journal`, matching the capitalization of the other three.

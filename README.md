@@ -36,6 +36,11 @@ The server will not start without its configuration. `IW_PROFILE_DIR`, `IW_SITE_
 naming the one it is missing. `docs/SETUP.md` carries the full deployment configuration contract,
 including the optional variables and where the identity values come from.
 
+Inbound requests are authenticated too. `IW_INBOUND_KEY` (at least 16 characters) is required
+unless `IW_INBOUND_AUTH=none`, which also needs `IW_ALLOW_ANONYMOUS=1` and is for loopback
+development only. `IW_INBOUND_AUTH` selects `apikey` (the default), `bearer` or `none`, and
+`IW_INBOUND_KEY_HEADER` names the header in `apikey` mode (default `x-api-key`). `/health` is open.
+
 The server listens on port 3000 unless `PORT` says otherwise. MCP clients connect to `POST /mcp`,
 which speaks Streamable HTTP in stateless mode, so there is no session to establish and no SSE
 stream to open. `GET /health` is a separate route for container probes and answers

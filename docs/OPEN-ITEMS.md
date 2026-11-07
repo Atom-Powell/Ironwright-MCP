@@ -38,7 +38,7 @@ sections below say what was proven and what was not. Last updated 2026-11-06.
 | 7 Copilot Studio integration and governance | In progress: track 1 spec drafted (pre-probe) and probe server built; no Copilot Studio contact yet | `docs/superpowers/specs/2026-10-11-copilot-studio-integration-design.md` |
 | 8 Evaluation suite | Not started; questions written in `docs/EVALUATION-QUESTIONS.md` | |
 | 9a Probes and the grant | Designed 2026-11-06, pre-probe; blocks 9b to 9d | `docs/superpowers/specs/2026-11-06-domain-platform-and-assessment-domain-design.md` |
-| 9b Core: modules, site sets, inbound authentication, lifecycle kind, Graph operations, journal | Designed 2026-11-06; waits on 9a | same spec |
+| 9b Core: modules, site sets, inbound authentication, lifecycle kind, Graph operations, journal | Built 2026-11-06 on branch phase-9b-core-platform; in review, pending merge | same spec |
 | 9c Assessment module | Designed 2026-11-06; waits on 9b | same spec |
 | 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9b, and is the item that slips first | same spec |
 | Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
