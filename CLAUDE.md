@@ -118,9 +118,20 @@ persisted and was read back by `execute_rename_plan` in a separate tool call, th
 `@azure/data-tables` client against Azurite. Azurite rather than a real Azure Table Storage
 account, which no part of this store has met yet.
 
-**Hosting.** Azure Container Apps, Node-native and stateless, minimum one replica. Cloudflare
-Workers was considered and rejected for this workload. Do not relitigate without a real cost or
-latency reason.
+**Hosting. Amended 2026-11-06; the previous entry named Azure Container Apps as the hosting.**
+The product is self-hosted in the customer's tenant. The container image is the unit of
+deployment and ingress is the customer's choice; the server needs TLS termination in front of it
+and nothing else, because inbound authentication is the server's own job. Three ingress paths are
+documented: Microsoft dev tunnels as the quick start, Cloudflare Tunnel as the durable no-Azure
+path, and Azure Container Apps as the reference cloud deployment, demoted from the only answer to
+one of three. The reason was a hard constraint, no Azure spend and no pay-as-you-go anywhere, and
+the shape it forced is the better product: one server per customer tenant, an app registration
+and a `Sites.Selected` grant created in the customer's tenant, uncommitted profiles, and a license
+that already forbids running it as a service for others. A hostname under Ironwright's own domain
+fronts only what the operator runs, never a customer endpoint. Cloudflare Workers running the
+workload was considered and rejected before this amendment and stays rejected; a tunnel is not
+that. The reasoning is in
+`docs/superpowers/specs/2026-11-06-domain-platform-and-assessment-domain-design.md`.
 
 **Identity.** Entra confidential client scoped via `Sites.Selected`, never tenant-wide
 `Sites.ReadWrite.All`. This is the real least-privilege boundary, because Copilot Studio's DLP
@@ -146,6 +157,17 @@ profile data rather than code. Profiles are deployment configuration and are nev
 Since phase 6d the product also serves general file work inside a granted site, through
 operator-authored plans and library-only profiles, with compliance still the centerpiece.
 
+Amended 2026-11-06: compliance stays the centerpiece and is no longer the only domain. The
+product is a core platform (Graph access, state, scan coordination, transport, inbound
+authentication) hosting domain modules, each with its own profile kind and tools. The first three
+modules are `compliance`, `library` and `assessment`, the last a governed assessment workspace
+whose first consumer is a vendor risk agent. A profile addresses a set of sites rather than one,
+settled now because the next domain after assessment, a CPA practice with one site per client,
+needs it and it is a schema shape that is cheap before a second domain exists and expensive after.
+The code holds invariants and the profile holds every convention a customer would recognize as
+theirs; no customer constant enters the code. Spec:
+`docs/superpowers/specs/2026-11-06-domain-platform-and-assessment-domain-design.md`.
+
 **Setup.** Two phases, because a live run proved Graph refuses a delegated token on the per-site
 grant endpoint even for a Global Administrator. A separate grant-issuer application holds
 `Sites.FullControl.All` and issues that grant with an app-only token, so the server's own
@@ -156,6 +178,18 @@ reviewable persisted plan; a separate `execute_*` tool applies it. Dry run is th
 and live execution needs an explicit confirm flag. Every execute path writes a reversal log
 before applying, and that log is itself a valid plan, so rollback runs through the same code
 path rather than a separate one.
+
+Amended 2026-11-06: that rule governs every mutating tool over content the server did not create.
+A lifecycle tool, the fourth tool kind, is gated by state preconditions instead of a dry run: it
+refuses unless the prior stage is verified live in the lists and the drive, it creates records and
+files only at paths the server computes, it overwrites only a file it created and only under an
+ETag precondition, and it records every write in a per-assessment journal. One call per stage, no
+confirm flag, safe to retry because a completed stage is reported rather than repeated. The reason
+is a collision between the dry-run default and the assessment consumer's operating model, which
+says never ask permission between workflow stages; a confirm flag is the moment generative
+orchestration has been observed stopping to ask. The human review the dry run protected exists in
+that workflow at the Evidence Auditor and the published document. Rollback of lifecycle writes is
+held, because it would be this server's first delete.
 
 ## Tool Set
 
@@ -181,7 +215,9 @@ Graph request, and `tests/tools/profile-kinds.test.ts` makes every tool declare 
 
 There are three kinds, not two. A plan generator writes a plan, so `readOnlyHint` is false for
 it. Calling one read-only would be exactly the decorative annotation this project exists to
-avoid.
+avoid. A fourth kind, `lifecycle`, was designed on 2026-11-06 for the assessment module and is
+described in the Write-tool design amendment above; its seven tools join this table when the
+module ships.
 
 Every tool carries a Zod input schema with real constraints and worked examples, an
 `outputSchema` with `structuredContent`, all four annotations set explicitly, and a description
@@ -272,6 +308,12 @@ frozen at the end of `docs/OPEN-ITEMS.md`.
    6c: `replicate_template` and folder creation. 6d: operator-authored custom plans and
    library-only profiles. `$batch` arrives with the first caller whose measured cost justifies it.
 7. **Copilot Studio integration and governance.**
+9. **Domain platform and the assessment domain**, added 2026-11-06 and numbered after 8 because
+   the order of the earlier phases does not change. Sliced into four plans per
+   `docs/superpowers/specs/2026-11-06-domain-platform-and-assessment-domain-design.md`: 9a probes
+   and the grant, 9b the core (modules, site sets, inbound authentication, the lifecycle kind, the
+   Graph operations, the journal), 9c the assessment module, 9d ingress and Copilot Studio contact.
+   The CPA practice domain follows as its own phase once 9 is verified live.
 8. **Evaluation suite**, whose questions are already written in `docs/EVALUATION-QUESTIONS.md`, so
    that phase 3 had a concrete target rather than inventing its own test afterward.
 

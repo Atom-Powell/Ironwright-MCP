@@ -13,7 +13,7 @@ ordered by when they will matter, not by when they were written.
 This table is the one place status lives. `CLAUDE.md`, the README and the PAI vault note point
 here and restate none of it, so a change of state is one edit in one file, made in the same commit
 as the sitting, merge, or decision that caused it. The table says where each phase is; the dated
-sections below say what was proven and what was not. Last updated 2026-09-29.
+sections below say what was proven and what was not. Last updated 2026-11-06.
 
 | Phase | State | Evidence |
 |---|---|---|
@@ -27,7 +27,7 @@ sections below say what was proven and what was not. Last updated 2026-09-29.
 | 4b Index-served read tools | Complete, verified live 2026-09-18 | PR #14 |
 | 4c `describe_workbook` | Complete, verified live 2026-09-18 | PR #15 |
 | 5a Deployable server | Complete, compiled output verified live 2026-09-18; the shutdown deadline is covered by tests only | PR #16 |
-| 5b Image, managed identity, Container Apps, front door, CI/CD, telemetry | Held: needs an Azure subscription and real spending | |
+| 5b Image, managed identity, Container Apps, front door, CI/CD, telemetry | Redefined 2026-11-06 as the documentation of the Container Apps ingress path, one of three; still needs an Azure subscription to verify | |
 | 6a Rename write path | Complete, verified live 2026-09-19 | PRs #17, #18 |
 | 6b-1 Same-library moves | Complete, verified live 2026-09-24 | PR #19 |
 | Token role guard | Complete | PR #20 |
@@ -37,6 +37,12 @@ sections below say what was proven and what was not. Last updated 2026-09-29.
 | `$batch` | Held: no caller yet whose measured cost justifies it | |
 | 7 Copilot Studio integration and governance | In progress: track 1 spec drafted (pre-probe) and probe server built; no Copilot Studio contact yet | `docs/superpowers/specs/2026-10-11-copilot-studio-integration-design.md` |
 | 8 Evaluation suite | Not started; questions written in `docs/EVALUATION-QUESTIONS.md` | |
+| 9a Probes and the grant | Designed 2026-11-06, pre-probe; blocks 9b to 9d | `docs/superpowers/specs/2026-11-06-domain-platform-and-assessment-domain-design.md` |
+| 9b Core: modules, site sets, inbound authentication, lifecycle kind, Graph operations, journal | Designed 2026-11-06; waits on 9a | same spec |
+| 9c Assessment module | Designed 2026-11-06; waits on 9b | same spec |
+| 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9b, and is the item that slips first | same spec |
+| Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
+| CPA practice domain (multi-site scan and queries, grant issuer loop over a sites file, folder template taxonomy) | Not started; the phase after 9 | same spec |
 
 Still open from the parent spec's pre-phase-2 decisions: which delegated scopes the setup
 command's device-code sign-in must request. It governs that sign-in rather than the server's own
