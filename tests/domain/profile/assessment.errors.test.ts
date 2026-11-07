@@ -37,6 +37,14 @@ describe("assessment profile refusals", () => {
     expectIssue(broken((p) => { p.workspace.root = "Assessments/{client}/{assessmentId}"; }), "workspace.root", /client/);
   });
 
+  it("refuses a date placeholder in the workspace root and lists the three it allows", () => {
+    expectIssue(
+      broken((p) => { p.workspace.root = "Assessments/{yyyy}/{vendorFolder}/{assessmentId}"; }),
+      "workspace.root",
+      /"\{yyyy\}" is not a workspace placeholder; the placeholders are \{vendor\}, \{vendorFolder\} and \{assessmentId\}/,
+    );
+  });
+
   it("refuses an unknown assessment id placeholder", () => {
     expectIssue(broken((p) => { p.assessmentId.template = "{prefix}-{vendor}"; }), "assessmentId.template", /vendor/);
   });

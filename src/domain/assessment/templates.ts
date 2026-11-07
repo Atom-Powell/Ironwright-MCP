@@ -5,7 +5,16 @@ import { extractPlaceholders } from "../profile/placeholders.js";
  * a typo in a profile is a validation error at load time rather than a path
  * that renders with a literal brace and is created on the customer's site.
  */
-export const WORKSPACE_PLACEHOLDERS = ["vendor", "vendorFolder", "assessmentId", "yyyy", "mm"] as const;
+/**
+ * The workspace set carries no date. Every tool renders the workspace paths
+ * afresh on every call, so a dated folder rendered from the current clock
+ * would change under an open assessment once the month turned: later tools
+ * would look in a folder that does not exist, and a retried open would create
+ * a second tree. The id is rendered once and stored, so a customer who wants
+ * the date in a path puts it in the id template and gets it through
+ * {assessmentId}.
+ */
+export const WORKSPACE_PLACEHOLDERS = ["vendor", "vendorFolder", "assessmentId"] as const;
 export const ID_PLACEHOLDERS = ["prefix", "yyyy", "mm", "item"] as const;
 
 const ITEM_WIDTH = /^item:([1-9]\d?)$/;
@@ -24,7 +33,6 @@ export interface WorkspaceValues {
   vendor: string;
   vendorFolder: string;
   assessmentId: string;
-  now: Date;
 }
 
 export interface IdValues {
@@ -58,8 +66,6 @@ export function renderWorkspaceTemplate(template: string, values: WorkspaceValue
         case "vendor": return values.vendor;
         case "vendorFolder": return values.vendorFolder;
         case "assessmentId": return values.assessmentId;
-        case "yyyy": return yyyy(values.now);
-        case "mm": return mm(values.now);
         default: return undefined;
       }
     },

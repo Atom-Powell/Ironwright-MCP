@@ -2,7 +2,7 @@ import type { GraphClient } from "../../graph/client.js";
 import { readDriveItem } from "../../graph/items.js";
 import { odataString, queryListItems } from "../../graph/lists.js";
 import { joinWorkspacePath, renderWorkspaceTemplate, sanitizeFolderName } from "../../domain/assessment/templates.js";
-import { recordFromFields, type AssessmentRecord, type AssessmentState } from "../../domain/assessment/state.js";
+import { recordFromFields, rootPathUnavailable, type AssessmentRecord, type AssessmentState } from "../../domain/assessment/state.js";
 import type { AssessmentContext } from "./context.js";
 
 export interface WorkspacePaths {
@@ -12,7 +12,7 @@ export interface WorkspacePaths {
 }
 
 export function workspacePaths(ac: AssessmentContext, record: { vendorTitle: string; vendorFolder: string; assessmentId: string }): WorkspacePaths {
-  const values = { vendor: record.vendorTitle, vendorFolder: record.vendorFolder, assessmentId: record.assessmentId, now: ac.now };
+  const values = { vendor: record.vendorTitle, vendorFolder: record.vendorFolder, assessmentId: record.assessmentId };
   const root = joinWorkspacePath(renderWorkspaceTemplate(ac.profile.workspace.root, values));
   const subfolders = ac.profile.workspace.subfolders.map((template) => joinWorkspacePath(root, renderWorkspaceTemplate(template, values)));
   const artifacts: Record<string, string> = {};
@@ -87,8 +87,9 @@ export async function findInProgressAssessment(
 
 /** Reads the drive side of the state for a record whose id and folder are known. */
 export async function readAssessmentState(graph: Pick<GraphClient, "get">, ac: AssessmentContext, record: AssessmentRecord | undefined): Promise<AssessmentState> {
+  const unavailable = rootPathUnavailable(record);
   if (record === undefined || record.assessmentId === undefined || record.vendorFolder === undefined || record.vendorTitle === undefined) {
-    return { record, rootPath: undefined, rootPresent: false, artifacts: [] };
+    return { record, rootPath: undefined, rootPathUnavailable: unavailable, rootPresent: false, artifacts: [] };
   }
   const paths = workspacePaths(ac, { vendorTitle: record.vendorTitle, vendorFolder: record.vendorFolder, assessmentId: record.assessmentId });
   const root = await readDriveItem(graph, { driveId: ac.driveId, path: paths.root });

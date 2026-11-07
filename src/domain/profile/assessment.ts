@@ -18,7 +18,7 @@ export const AssessmentProfileSchema = z
     sites: z.array(AssessmentSiteEntrySchema).length(1, "an assessment profile addresses exactly one site in this phase"),
     workspace: z
       .object({
-        root: Template.describe('Library-relative folder template of one assessment, for example "Assessments/{vendorFolder}/{assessmentId}".'),
+        root: Template.describe('Library-relative folder template of one assessment, for example "Assessments/{vendorFolder}/{assessmentId}". The placeholders are {vendor}, {vendorFolder} and {assessmentId}; there is no date placeholder, because the paths are rendered on every call and a date from the clock would move the folder under an open assessment. Put a date in the assessment id template instead.'),
         subfolders: z.array(Template).default([]).describe('Folders created under the root at open, for example ["Research", "Evidence"].'),
         artifacts: z
           .record(z.string().regex(/^[a-z][a-z0-9_]*$/, "an artifact kind: lowercase letters, digits and underscores"), Template)
@@ -69,7 +69,7 @@ export const AssessmentProfileSchema = z
 
     const checkPath = (template: string, path: (string | number)[]): void => {
       for (const token of unknownWorkspacePlaceholders(template)) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path, message: `"{${token}}" is not a workspace placeholder; the placeholders are {vendor}, {vendorFolder}, {assessmentId}, {yyyy} and {mm}` });
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path, message: `"{${token}}" is not a workspace placeholder; the placeholders are {vendor}, {vendorFolder} and {assessmentId}` });
       }
       if (template.startsWith("/")) ctx.addIssue({ code: z.ZodIssueCode.custom, path, message: "a workspace template is library-relative and does not start with /" });
       if (template.split("/").some((segment) => segment === "..")) ctx.addIssue({ code: z.ZodIssueCode.custom, path, message: "a workspace template cannot contain a .. segment" });

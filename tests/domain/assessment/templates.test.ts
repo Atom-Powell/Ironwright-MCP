@@ -7,12 +7,12 @@ import {
 const NOW = new Date("2026-11-07T20:39:24Z");
 
 describe("renderWorkspaceTemplate", () => {
-  it("fills vendor, vendorFolder, assessmentId, yyyy and mm", () => {
+  it("fills vendor, vendorFolder and assessmentId", () => {
     expect(
-      renderWorkspaceTemplate("Assessments/{yyyy}/{mm}/{vendorFolder}/{assessmentId}/{vendor}", {
-        vendor: "Acme Corp", vendorFolder: "Acme Corp", assessmentId: "ASM-2026-00002", now: NOW,
+      renderWorkspaceTemplate("Assessments/{vendorFolder}/{assessmentId}/{vendor}", {
+        vendor: "Acme Corp", vendorFolder: "Acme Corp", assessmentId: "ASM-2026-00002",
       }),
-    ).toBe("Assessments/2026/11/Acme Corp/ASM-2026-00002/Acme Corp");
+    ).toBe("Assessments/Acme Corp/ASM-2026-00002/Acme Corp");
   });
 });
 
@@ -42,7 +42,7 @@ describe("sanitizeFolderName", () => {
 
 describe("placeholder validation", () => {
   it("accepts every workspace placeholder and names an unknown one", () => {
-    expect(unknownWorkspacePlaceholders("{vendor}/{vendorFolder}/{assessmentId}/{yyyy}/{mm}")).toEqual([]);
+    expect(unknownWorkspacePlaceholders("{vendor}/{vendorFolder}/{assessmentId}")).toEqual([]);
     expect(unknownWorkspacePlaceholders("{client}/{assessmentId}")).toEqual(["client"]);
   });
   it("accepts item with and without a width and names anything else", () => {
