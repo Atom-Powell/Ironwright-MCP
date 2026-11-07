@@ -45,6 +45,8 @@ describe("write gate over the wire", () => {
     // A lifecycle tool writes, so the gate withholds it with the write tools.
     expect(names).not.toContain("open_assessment");
     expect(names).not.toContain("save_assessment_artifact");
+    expect(names).not.toContain("record_findings");
+    expect(names).not.toContain("transition_assessment");
     expect(names).toContain("read_assessment_artifact");
     expect(names).toContain("verify_publication");
     expect(names).toContain("generate_rename_plan");
@@ -88,9 +90,11 @@ describe("write gate over the wire", () => {
   it("advertises write tools when writes are enabled", async () => {
     const names = await listToolNames(await startServer(true));
 
-    expect(names).toHaveLength(17);
+    expect(names).toHaveLength(19);
     expect(names).toContain("open_assessment");
     expect(names).toContain("save_assessment_artifact");
+    expect(names).toContain("record_findings");
+    expect(names).toContain("transition_assessment");
     expect(names).toContain("execute_rename_plan");
     expect(names).toContain("execute_move_plan");
     expect(names).toContain("replicate_template");

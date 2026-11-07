@@ -59,3 +59,13 @@ export function stateScript(options: StateOptions = {}): ScriptEntry[] {
 export function dossierItem(eTag: string, size: number): Record<string, unknown> {
   return fileItem("Acme Corp_Research_Dossier.md", eTag, size);
 }
+
+/** The Findings query for this assessment's id, answering the items given. */
+export function findingsQuery(items: unknown[]): ScriptEntry {
+  return { method: "get", pathIncludes: ["/lists/Findings/items?", `AssessmentId eq '${ID}'`], headersInclude: NON_INDEXED_QUERY_HEADER, response: page(items) };
+}
+
+/** A Findings item as the list holds it, filed under this assessment's id. */
+export function findingFields(key: string, observation: string, risk: string, recommendation: string): Record<string, unknown> {
+  return { Title: key, AssessmentId: ID, FindingKey: key, Observation: observation, Risk: risk, Recommendation: recommendation };
+}

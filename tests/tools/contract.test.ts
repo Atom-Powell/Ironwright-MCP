@@ -124,6 +124,8 @@ const EXPECTED_TOOL_NAMES = [
   "save_assessment_artifact",
   "read_assessment_artifact",
   "verify_publication",
+  "record_findings",
+  "transition_assessment",
 ];
 
 describe("tool surface completeness", () => {

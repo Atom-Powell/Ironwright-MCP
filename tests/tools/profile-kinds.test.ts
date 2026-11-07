@@ -18,7 +18,7 @@ const REQUIRES_COMPLIANCE = new Set([
 // both carry only a site and a library and these tools read nothing else.
 const ACCEPTS_SITE_PROFILES = new Set(["inventory_tree", "query_repository", "generate_custom_plan", "execute_custom_plan"]);
 // The assessment module's own tools, which no other kind of profile can use.
-const ACCEPTS_ASSESSMENT = new Set(["open_assessment", "get_assessment", "save_assessment_artifact", "read_assessment_artifact", "verify_publication"]);
+const ACCEPTS_ASSESSMENT = new Set(["open_assessment", "get_assessment", "save_assessment_artifact", "read_assessment_artifact", "verify_publication", "record_findings", "transition_assessment"]);
 const TAKES_NO_PROFILE = new Set(["describe_workbook"]);
 
 describe("which tools accept a library-only profile", () => {
@@ -86,8 +86,22 @@ describe("which tools accept a library-only profile", () => {
       for (const profileId of ["example", "shared-docs"]) {
         const context = createFakeToolContext({ profiles });
         // vendor alone satisfies get_assessment's one-of rule; open_assessment also needs a scope, which get_assessment ignores.
-        // The tools that act on one assessment need its id, and save also a kind and content; get_assessment would refuse an id beside the vendor.
-        const byId = tool.name === "get_assessment" ? {} : { assessmentId: "ASM-2026-00002", kind: "dossier", content: "# dossier" };
+        // The tools that act on one assessment need its id, save also a kind and content, record_findings findings and a summary,
+        // and transition_assessment a target and labels; get_assessment would refuse an id beside the vendor.
+        const finding = { key: "F-1", observation: "An observation.", risk: "High", recommendation: "A recommendation." };
+        const byId =
+          tool.name === "get_assessment"
+            ? {}
+            : {
+                assessmentId: "ASM-2026-00002",
+                kind: "dossier",
+                content: "# dossier",
+                findings: [finding],
+                summary: "One finding.",
+                target: "completed",
+                disposition: "Approved",
+                risk: "Low",
+              };
         const result = await tool.handler!({ profileId, vendor: "Acme Corp", scope: "Security", ...byId }, context);
 
         expect(result.isError, `${tool.name} ${profileId}`).toBe(true);

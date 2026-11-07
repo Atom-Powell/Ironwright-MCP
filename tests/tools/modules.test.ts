@@ -26,8 +26,16 @@ describe("domain modules", () => {
     );
   });
 
-  it("gives the assessment module the tools registered so far", () => {
+  it("gives the assessment module its seven tools in module order", () => {
     const assessment = ALL_MODULES.find((m) => m.kind === "assessment");
-    expect(assessment?.tools.map((t) => t.name)).toEqual(["open_assessment", "get_assessment", "save_assessment_artifact", "read_assessment_artifact", "verify_publication"]);
+    expect(assessment?.tools.map((t) => t.name)).toEqual([
+      "open_assessment",
+      "save_assessment_artifact",
+      "read_assessment_artifact",
+      "record_findings",
+      "transition_assessment",
+      "verify_publication",
+      "get_assessment",
+    ]);
   });
 });
