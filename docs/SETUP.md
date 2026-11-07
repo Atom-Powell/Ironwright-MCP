@@ -272,8 +272,8 @@ assessments list, the assessment id column of the findings list, and `Title` of 
 Index each of those in the list settings. Every filtered query sends `Prefer:
 HonorNonIndexedQueriesWarningMayFailRandomly`, which lets a query on a non-indexed column succeed,
 but SharePoint may refuse such a query once the list passes its view threshold (measured
-2026-11-07). The module reports that refusal as a plain error carrying this advice and does not
-retry it.
+2026-11-07). A refused filtered query surfaces as the Graph error, whose own message names the
+column as not indexed and names the header, and the server does not retry it.
 
 The four lifecycle tools (`open_assessment`, `save_assessment_artifact`, `record_findings` and
 `transition_assessment`) are absent from the registry unless `IW_ALLOW_WRITES=true`, and the

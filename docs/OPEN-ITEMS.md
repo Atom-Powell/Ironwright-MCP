@@ -13,7 +13,7 @@ ordered by when they will matter, not by when they were written.
 This table is the one place status lives. `CLAUDE.md`, the README and the PAI vault note point
 here and restate none of it, so a change of state is one edit in one file, made in the same commit
 as the sitting, merge, or decision that caused it. The table says where each phase is; the dated
-sections below say what was proven and what was not. Last updated 2026-11-06.
+sections below say what was proven and what was not. Last updated 2026-11-07.
 
 | Phase | State | Evidence |
 |---|---|---|
@@ -39,7 +39,7 @@ sections below say what was proven and what was not. Last updated 2026-11-06.
 | 8 Evaluation suite | Not started; questions written in `docs/EVALUATION-QUESTIONS.md` | |
 | 9a Probes and the grant | Complete: probes L and F run live 2026-11-07, fifteen of seventeen steps as designed and the spec amended on the other two (`If-Match` on a content PUT does not guard an absent path; a filtered list query needs the non-indexed header); A3 and B1 stay unverified until 9d | `docs/superpowers/specs/evidence/2026-11-07-assessment-probe/`; sitting below; PR #24 |
 | 9b Core: modules, site sets, inbound authentication, lifecycle kind, journal | Complete against fakes, merged 2026-11-07; nothing in it has met a live tenant yet | PR #22, merged 2026-11-07 |
-| 9c Assessment module and the four Graph operations | Built against fakes and the 9a recordings, merged 2026-11-07; live sitting pending (Task 9 of the 9c plan) | PR pending; `docs/superpowers/plans/2026-11-07-phase-9c-assessment-module.md` |
+| 9c Assessment module and the four Graph operations | Built against fakes and the 9a recordings; PR pending; live sitting pending (Task 9 of the 9c plan) | PR pending; `docs/superpowers/plans/2026-11-07-phase-9c-assessment-module.md` |
 | 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9c and carries the unverified A3 and B1 probes, and is the item that slips first | same spec |
 | Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
 | CPA practice domain (multi-site scan and queries, grant issuer loop over a sites file, folder template taxonomy) | Not started; the phase after 9 | same spec |

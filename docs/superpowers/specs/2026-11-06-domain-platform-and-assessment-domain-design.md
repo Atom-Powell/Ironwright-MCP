@@ -433,8 +433,10 @@ HonorNonIndexedQueriesWarningMayFailRandomly` as the way to allow it; the same q
 header answered 200 with the one matching item (L3a, L3b). The module sends that header on every
 filtered list query. The header's own name carries the caveat: SharePoint may refuse such a query
 once a list passes its view threshold, so the setup documentation tells the operator to index the
-columns the module filters on in the consumer's lists, and the module treats a 400 on a filtered
-query as a plain error carrying that advice rather than something to retry.
+columns the module filters on in the consumer's lists, and a 400 on a filtered
+query surfaces as the Graph error, whose own message names the column as not indexed and names the
+header, rather than something to retry (corrected 2026-11-07 during plan 9c: the code passes
+Graph's own error through unwrapped).
 
 **The default library's drive is named `Documents`.** Its URL segment is `Shared Documents`, and
 the probe's first run matched no drive by that name and stopped before the drive steps. The server
