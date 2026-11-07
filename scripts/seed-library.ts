@@ -812,7 +812,7 @@ export function splitPath(path: string): { parentPath: string; name: string } {
 // test, which is worse than not having the capability: a future change to the
 // real getBytes would silently diverge from this copy until some caller was
 // finally wired to it.
-export interface SeedGraphClient extends Omit<GraphClient, "getBytes"> {
+export interface SeedGraphClient extends Omit<GraphClient, "getBytes" | "putBytes"> {
   createFolder(driveId: string, parentPath: string, name: string): Promise<{ status: number }>;
   createFile(driveId: string, parentPath: string, name: string, content: string): Promise<{ status: number }>;
   putBytes(driveId: string, path: string, bytes: Uint8Array, contentType: string): Promise<{ status: number }>;

@@ -43,6 +43,15 @@ export interface GraphClient {
    * missing or untruthful header must not be the only guard.
    */
   getBytes(pathOrUrl: string, maxBytes?: number): Promise<Uint8Array>;
+  /**
+   * Bytes to a driveItem's content endpoint, the small upload path. Through
+   * this client for the same reason getBytes is: the request counter and the
+   * Retry-After policy must see it. Not retried on a transport rejection, as
+   * POST and PATCH are not, because a replayed upload that already landed
+   * would answer 409 under conflictBehavior fail or overwrite twice under
+   * If-Match, and either is a confident wrong report of what happened.
+   */
+  putBytes<T>(pathOrUrl: string, body: Uint8Array, contentType: string, headers?: Record<string, string>): Promise<T>;
   /** Requests issued since creation, retries included. This is the number the scan reports. */
   requests(): number;
 }
@@ -60,8 +69,11 @@ interface RawResponse {
 }
 
 interface RequestOptions {
-  method: "GET" | "POST" | "PATCH";
+  method: "GET" | "POST" | "PATCH" | "PUT";
   body?: unknown;
+  /** Raw bytes, sent as they are with `contentType`; never JSON encoded. Mutually exclusive with `body`. */
+  rawBody?: Uint8Array;
+  contentType?: string;
   headers?: Record<string, string>;
   /**
    * A transport rejection means the request may or may not have reached the
@@ -83,7 +95,8 @@ export function createGraphClient(options: GraphClientOptions): GraphClient {
     // expiry would otherwise replay a dead bearer and turn a throttle into a 401.
     const token = await options.tokenProvider.getToken();
     requests += 1;
-    const hasBody = requestOptions.body !== undefined;
+    const hasJsonBody = requestOptions.body !== undefined;
+    const hasRawBody = requestOptions.rawBody !== undefined;
     // Per-call headers are spread first and the always-set ones overwrite them,
     // because object spread gives the later key precedence. A caller passing
     // `authorization` therefore cannot strip the bearer token, which would fail
@@ -99,12 +112,14 @@ export function createGraphClient(options: GraphClientOptions): GraphClient {
       ...requestOptions.headers,
       authorization: `Bearer ${token}`,
       accept: "application/json",
-      ...(hasBody ? { "content-type": "application/json" } : {}),
+      ...(hasJsonBody ? { "content-type": "application/json" } : {}),
+      ...(hasRawBody ? { "content-type": requestOptions.contentType ?? "application/octet-stream" } : {}),
     };
     const response = await fetchImpl(url, {
       method: requestOptions.method,
       headers,
-      ...(hasBody ? { body: JSON.stringify(requestOptions.body) } : {}),
+      ...(hasJsonBody ? { body: JSON.stringify(requestOptions.body) } : {}),
+      ...(hasRawBody ? { body: requestOptions.rawBody } : {}),
     });
     return {
       status: response.status,
@@ -186,6 +201,16 @@ export function createGraphClient(options: GraphClientOptions): GraphClient {
         method: "PATCH",
         retryTransportErrors: false,
         body,
+        ...(headers === undefined ? {} : { headers }),
+      });
+    },
+
+    async putBytes<T>(pathOrUrl: string, body: Uint8Array, contentType: string, headers?: Record<string, string>): Promise<T> {
+      return request<T>(pathOrUrl, {
+        method: "PUT",
+        retryTransportErrors: false,
+        rawBody: body,
+        contentType,
         ...(headers === undefined ? {} : { headers }),
       });
     },

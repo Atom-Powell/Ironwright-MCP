@@ -185,3 +185,29 @@ describe("createGraphClient", () => {
     expect(attempts).toBe(1);
   });
 });
+
+describe("createGraphClient putBytes", () => {
+  it("sends the bytes as they are with the caller's content type and keeps a caller header", async () => {
+    const bytes = new Uint8Array([35, 32, 112, 114, 111, 98, 101, 10]);
+    const seen: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const client = createGraphClient({
+      tokenProvider: TOKEN,
+      fetchImpl: (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+        seen.push({ url: input as string, init });
+        return new Response(JSON.stringify({ id: "i1", eTag: "<etag-3>" }), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    const value = await client.putBytes<{ id: string }>("/drives/d1/root:/a.md:/content", bytes, "text/markdown", { "if-match": "<etag-3>" });
+
+    const headers = seen[0]?.init?.headers as Record<string, string>;
+    expect(value.id).toBe("i1");
+    expect(seen[0]?.url).toBe("https://graph.microsoft.com/v1.0/drives/d1/root:/a.md:/content");
+    expect(seen[0]?.init?.method).toBe("PUT");
+    expect(seen[0]?.init?.body).toBe(bytes);
+    expect(headers["content-type"]).toBe("text/markdown");
+    expect(headers.accept).toBe("application/json");
+    expect(headers.authorization).toBe("Bearer token-1");
+    expect(headers["if-match"]).toBe("<etag-3>");
+  });
+});

@@ -12,6 +12,7 @@ function fakeClient(responses: Record<string, unknown>, seen: string[] = []): Gr
     },
     post: async <T,>(): Promise<T> => { throw new Error("this fake does not implement post"); },
     patch: () => Promise.reject(new Error("this fake Graph client does not implement patch")),
+    putBytes: () => Promise.reject(new Error("this fake Graph client does not implement putBytes")),
     getBytes: async (): Promise<Uint8Array> => { throw new Error("this fake does not implement getBytes"); },
   };
 }

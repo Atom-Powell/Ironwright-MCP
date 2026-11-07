@@ -21,6 +21,7 @@ function recordingGraph(): GraphClient & { bodies: unknown[] } {
     bodies,
     get: reject,
     post: reject,
+    putBytes: reject,
     getBytes: reject,
     async patch<T>(_path: string, body: unknown): Promise<T> {
       requestCount += 1;

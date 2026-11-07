@@ -11,7 +11,7 @@ function countingGraph(): GraphClient {
     requestCount += 1;
     return Promise.reject(new Error("this fake answers nothing"));
   };
-  return { get: answer, post: answer, patch: answer, getBytes: answer, requests: () => requestCount };
+  return { get: answer, post: answer, patch: answer, putBytes: answer, getBytes: answer, requests: () => requestCount };
 }
 
 afterEach(() => {

@@ -21,6 +21,7 @@ function scriptedClient(responses: Record<string, unknown>): GraphClient {
     },
     post: async <T,>(): Promise<T> => { throw new Error("this fake does not implement post"); },
     patch: () => Promise.reject(new Error("this fake Graph client does not implement patch")),
+    putBytes: () => Promise.reject(new Error("this fake Graph client does not implement putBytes")),
     getBytes: async (): Promise<Uint8Array> => { throw new Error("this fake does not implement getBytes"); },
   };
 }
@@ -251,6 +252,7 @@ describe("runScan", () => {
         requests += 1;
         return Promise.reject(new Error("this fake Graph client does not implement patch"));
       },
+      putBytes: () => Promise.reject(new Error("this fake Graph client does not implement putBytes")),
       getBytes: async (): Promise<Uint8Array> => {
         throw new Error("this fake does not implement getBytes");
       },

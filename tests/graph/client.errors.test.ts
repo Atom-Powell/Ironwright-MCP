@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createGraphClient } from "../../src/graph/client.js";
 import { GraphRequestError } from "../../src/graph/errors.js";
+import { F3B_STALE_ETAG } from "./fixtures/assessment-probe.js";
 import { defaultRetryPolicy } from "../../src/graph/retry.js";
 import { requireExactRoles, SERVER_TOKEN_ROLES, TokenRequestError, UnexpectedTokenRolesError } from "../../src/graph/token.js";
 
@@ -237,5 +238,34 @@ describe("createGraphClient failures", () => {
       await expect(client.getBytes("/drives/d1/items/i1/content")).rejects.toBeInstanceOf(UnexpectedTokenRolesError);
       expect(counts()).toEqual({ asked: 1, sleeps: 0, fetches: 0, requests: 0 });
     });
+  });
+});
+
+describe("createGraphClient putBytes failures", () => {
+  it("throws a GraphRequestError carrying the 412 status and Graph's code for a stale ETag", async () => {
+    const client = createGraphClient({
+      tokenProvider: TOKEN,
+      fetchImpl: (async () => new Response(JSON.stringify(F3B_STALE_ETAG), { status: 412 })) as typeof fetch,
+    });
+
+    await expect(client.putBytes("/drives/d1/root:/a.md:/content", new Uint8Array([1]), "text/markdown")).rejects.toMatchObject({
+      name: "GraphRequestError",
+      status: 412,
+      code: "notAllowed",
+    });
+  });
+
+  it("does not replay a PUT that rejected at the transport, since the upload may already have landed", async () => {
+    let attempts = 0;
+    const client = createGraphClient({
+      tokenProvider: TOKEN,
+      fetchImpl: (async () => {
+        attempts += 1;
+        throw new TypeError("network down");
+      }) as unknown as typeof fetch,
+    });
+
+    await expect(client.putBytes("/drives/d1/root:/a.md:/content", new Uint8Array([1]), "text/markdown")).rejects.toThrow("network down");
+    expect(attempts).toBe(1);
   });
 });

@@ -240,6 +240,10 @@ export function etagGraphClient(etagsByPath: Record<string, EtagFixture>): Graph
       state.set(path, nextEtag);
       return { eTag: nextEtag, name: (body as { name?: unknown }).name } as unknown as T;
     },
+    putBytes: () => {
+      requestCount += 1;
+      return Promise.reject(new Error("this fake Graph client does not implement putBytes"));
+    },
     getBytes: () => {
       requestCount += 2;
       return Promise.reject(new Error("the fake etag client does not implement getBytes"));
@@ -393,6 +397,10 @@ export function renamingGraphClient(options: RenamingClientOptions = {}): GraphC
       version += 1;
       return { eTag: `"{GUID},${String(version)}"` } as unknown as T;
     },
+    putBytes: () => {
+      requestCount += 1;
+      return Promise.reject(new Error("this fake Graph client does not implement putBytes"));
+    },
     getBytes: () => {
       requestCount += 2;
       return Promise.reject(new Error("the fake renaming client does not implement getBytes"));
@@ -473,6 +481,10 @@ export function libraryGraphClient(etagsByPath: Record<string, string>): GraphCl
       state.delete(path);
       state.set(moved, etag);
       return { eTag: etag } as unknown as T;
+    },
+    putBytes: () => {
+      requestCount += 1;
+      return Promise.reject(new Error("this fake Graph client does not implement putBytes"));
     },
     getBytes: () => {
       requestCount += 2;
