@@ -121,6 +121,9 @@ const EXPECTED_TOOL_NAMES = [
   "replicate_template",
   "open_assessment",
   "get_assessment",
+  "save_assessment_artifact",
+  "read_assessment_artifact",
+  "verify_publication",
 ];
 
 describe("tool surface completeness", () => {

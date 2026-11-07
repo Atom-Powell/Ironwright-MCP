@@ -22,6 +22,16 @@ export function workspacePaths(ac: AssessmentContext, record: { vendorTitle: str
   return { root, subfolders, artifacts };
 }
 
+/**
+ * The paths for an item read from the list, or undefined when the item lacks a
+ * field the templates need: an item an interrupted open left behind has no id,
+ * and a path rendered from a missing value would name a file nobody wrote.
+ */
+export function recordWorkspacePaths(ac: AssessmentContext, record: AssessmentRecord): WorkspacePaths | undefined {
+  if (record.assessmentId === undefined || record.vendorFolder === undefined || record.vendorTitle === undefined) return undefined;
+  return workspacePaths(ac, { vendorTitle: record.vendorTitle, vendorFolder: record.vendorFolder, assessmentId: record.assessmentId });
+}
+
 export interface VendorLookup {
   /** True when the Vendors list holds an item with this Title. */
   found: boolean;

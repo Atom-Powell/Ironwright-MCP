@@ -31,3 +31,18 @@ export async function resolveAssessmentContext(context: ToolContext, profileId: 
   const location = await resolveDrive(context.graph, profile.identity.siteUrl, profile.identity.library);
   return { profile, siteId: location.siteId, driveId: location.driveId, correlationId: randomUUID(), now: context.now() };
 }
+
+/**
+ * The profile's artifact kinds, read from the registry without Graph so a kind
+ * the profile does not name is refused before any request. Undefined for a
+ * profile that is not an assessment profile, which resolveAssessmentContext
+ * then reports in its own words.
+ */
+export function profileArtifactKinds(context: ToolContext, profileId: string): string[] | undefined {
+  const profile = context.profiles.getAny(profileId);
+  return isAssessmentProfile(profile) ? Object.keys(profile.workspace.artifacts) : undefined;
+}
+
+export function unknownKindText(profileId: string, kind: string, kinds: readonly string[]): string {
+  return `Profile "${profileId}" names no artifact kind "${kind}". Its kinds are ${kinds.join(", ")}. Nothing was read or written.`;
+}
