@@ -38,4 +38,21 @@ describe("judges name what they saw", () => {
     const v = step("F3b").judge({ status: 200, headers: {}, body: "{}" }, { ...base, driveId: "d", fileEtag: "e" });
     expect(v).toEqual({ kind: "fail", because: "expected 412, received 200" });
   });
+
+  it("F1b names the error code it saw when the status was right but the code was not", () => {
+    const body = JSON.stringify({ error: { code: "accessDenied", message: "x" } });
+    const v = step("F1b").judge({ status: 409, headers: {}, body }, { ...base, driveId: "d" });
+    expect(v).toEqual({ kind: "fail", because: "expected 409 nameAlreadyExists, received 409 accessDenied" });
+  });
+
+  it("F0 names the error code on a 409 that is not nameAlreadyExists", () => {
+    const body = JSON.stringify({ error: { code: "notAllowed", message: "x" } });
+    const v = step("F0").judge({ status: 409, headers: {}, body }, { ...base, driveId: "d" });
+    expect(v).toEqual({ kind: "fail", because: "expected 201 or 409 nameAlreadyExists, received 409 notAllowed" });
+  });
+
+  it("F2a notes a missing eTag the way F1a does", () => {
+    const v = step("F2a").judge({ status: 201, headers: {}, body: "{}" }, { ...base, driveId: "d" });
+    expect(v).toEqual({ kind: "fail", because: "expected 201 with eTag, received 201 without eTag" });
+  });
 });

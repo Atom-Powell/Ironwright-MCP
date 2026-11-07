@@ -83,6 +83,13 @@ function etagOf(body: string): string | undefined {
   return typeof parsed?.eTag === "string" ? parsed.eTag : undefined;
 }
 
+// Names the status and, when the body carries one, the Graph error code, so a
+// 409 with the wrong code is not reported as "expected 409, received 409".
+function received(res: ProbeResponse): string {
+  const code = graphErrorCodeFromBody(res.body);
+  return code === undefined ? String(res.status) : `${res.status} ${code}`;
+}
+
 function expectStatus(status: number, label: string): (res: ProbeResponse) => Verdict {
   return (res) => (res.status === status ? { kind: "pass" } : { kind: "fail", because: `expected ${label}, received ${res.status}` });
 }
@@ -226,7 +233,7 @@ export function probeSteps(): ProbeStep[] {
       judge: (res) =>
         res.status === 201 || (res.status === 409 && graphErrorCodeFromBody(res.body) === "nameAlreadyExists")
           ? { kind: "pass" }
-          : { kind: "fail", because: `expected 201 or 409 nameAlreadyExists, received ${res.status}` },
+          : { kind: "fail", because: `expected 201 or 409 nameAlreadyExists, received ${received(res)}` },
     },
     {
       id: "F1a",
@@ -259,7 +266,7 @@ export function probeSteps(): ProbeStep[] {
       judge: (res) =>
         res.status === 409 && graphErrorCodeFromBody(res.body) === "nameAlreadyExists"
           ? { kind: "pass" }
-          : { kind: "fail", because: `expected 409 nameAlreadyExists, received ${res.status}` },
+          : { kind: "fail", because: `expected 409 nameAlreadyExists, received ${received(res)}` },
     },
     {
       id: "F2a",
@@ -274,7 +281,7 @@ export function probeSteps(): ProbeStep[] {
       judge: (res) =>
         res.status === 201 && etagOf(res.body) !== undefined
           ? { kind: "pass" }
-          : { kind: "fail", because: `expected 201 with eTag, received ${res.status}` },
+          : { kind: "fail", because: `expected 201 with eTag, received ${res.status}${etagOf(res.body) === undefined ? " without eTag" : ""}` },
       capture: (res, ctx) => {
         ctx.fileEtag = etagOf(res.body);
       },
@@ -292,7 +299,7 @@ export function probeSteps(): ProbeStep[] {
       judge: (res) =>
         res.status === 409 && graphErrorCodeFromBody(res.body) === "nameAlreadyExists"
           ? { kind: "pass" }
-          : { kind: "fail", because: `expected 409 nameAlreadyExists, received ${res.status}` },
+          : { kind: "fail", because: `expected 409 nameAlreadyExists, received ${received(res)}` },
     },
     {
       id: "F3a",
@@ -346,12 +353,12 @@ export function probeSteps(): ProbeStep[] {
  * can still see that F3a's response ETag differs from F2a's. The redacted
  * record is what gets committed; the raw one stays under .superpowers/.
  */
-export function redact(record: ProbeRecord, ctx: ProbeContext): ProbeRecord {
-  const etags = new Map<string, string>();
+export function redact(record: ProbeRecord, ctx: ProbeContext, etags: Map<string, string> = new Map()): ProbeRecord {
   const host = new URL(ctx.siteUrl).hostname;
   const replacements: Array<[string, string]> = [];
-  if (ctx.siteId !== undefined) replacements.push([ctx.siteId, "<site-id>"]);
-  if (ctx.driveId !== undefined) replacements.push([ctx.driveId, "<drive-id>"]);
+  // Graph puts ids URL-encoded into @odata.context, so both forms are replaced.
+  if (ctx.siteId !== undefined) replacements.push([ctx.siteId, "<site-id>"], [encodeURIComponent(ctx.siteId), "<site-id>"]);
+  if (ctx.driveId !== undefined) replacements.push([ctx.driveId, "<drive-id>"], [encodeURIComponent(ctx.driveId), "<drive-id>"]);
   replacements.push([host, "<host>"]);
 
   function scrub(text: string): string {
@@ -368,6 +375,12 @@ export function redact(record: ProbeRecord, ctx: ProbeContext): ProbeRecord {
       etags.set(key, token);
       return token;
     });
+    // R2 lists every drive on the site, so other drives' ids appear too.
+    out = out.replace(/b(?:!|%21)[A-Za-z0-9_-]+/g, "<drive-id>");
+    // A content PUT response can carry a pre-authenticated download URL whose
+    // query string is a bearer credential.
+    out = out.replace(/("@microsoft\.graph\.downloadUrl"\s*:\s*)"[^"]*"/g, '$1"<download-url>"');
+    out = out.replace(/tempauth=[^&"\s\\]+/g, "tempauth=<tempauth>");
     out = out.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "<guid>");
     return out;
   }
@@ -394,13 +407,14 @@ export function redact(record: ProbeRecord, ctx: ProbeContext): ProbeRecord {
   };
 }
 
-export function reportMarkdown(records: ProbeRecord[], runId: string): string {
+export function reportMarkdown(records: ProbeRecord[], runId: string, tokenRoles: readonly string[]): string {
   const lines = [
     `# Assessment probe report, run ${runId}`,
     "",
-    "Each row is one request sent under the server application's Sites.Selected token against the",
-    "Ironwright developer tenant. Verdicts are the judge's reading of the status and body; the",
-    "redacted request and response are in recordings.jsonl beside this file.",
+    `Each row is one request sent under a token whose roles the runner verified to be exactly: ${tokenRoles.join(", ")}.`,
+    "The site is the one configured in IW_SITE_URL, which the recordings show as <host>. Verdicts are the",
+    "judge's reading of the status and body; the redacted request and response are in recordings.jsonl",
+    "beside this file.",
     "",
     "| Step | Assumption | Expected | Observed | Verdict |",
     "|---|---|---|---|---|",

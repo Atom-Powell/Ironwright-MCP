@@ -181,14 +181,53 @@ describe("redaction", () => {
   });
 });
 
+describe("redaction coverage", () => {
+  function rec(body: string, url = "u"): ProbeRecord {
+    return { id: "X", assumption: "a", expected: "e", request: { method: "GET", url }, response: { status: 200, headers: {}, body }, verdict: { kind: "pass" } };
+  }
+
+  it("replaces URL-encoded drive and site ids", () => {
+    const c = ctx();
+    const out = redact(rec(`https://g/v1.0/$metadata#drives('${encodeURIComponent(c.driveId!)}') ${encodeURIComponent(c.siteId!)}`), c);
+    expect(out.response.body).not.toContain("driveid");
+    expect(out.response.body).toContain("<drive-id>");
+    expect(out.response.body).toContain("<site-id>");
+  });
+
+  it("replaces other drives' ids in raw and encoded form", () => {
+    const out = redact(rec(JSON.stringify({ value: [{ id: "b!OtherDrive_1-x" }, { id: "b%21Enc_2" }] })), ctx());
+    expect(out.response.body).toBe('{"value":[{"id":"<drive-id>"},{"id":"<drive-id>"}]}');
+  });
+
+  it("replaces the download URL value and any tempauth parameter", () => {
+    const body = JSON.stringify({ "@microsoft.graph.downloadUrl": "https://h/x?tempauth=SECRET&a=1", other: "https://h/y?tempauth=SECRET2" });
+    const out = redact(rec(body), ctx());
+    expect(out.response.body).not.toContain("SECRET");
+    expect(out.response.body).toContain('"@microsoft.graph.downloadUrl":"<download-url>"');
+    expect(out.response.body).toContain("tempauth=<tempauth>");
+  });
+
+  it("continues etag numbering across records that share a map", () => {
+    const shared = new Map<string, string>();
+    const a = redact(rec(JSON.stringify({ eTag: '"{AAAA},1"' })), ctx(), shared);
+    const b = redact(rec(JSON.stringify({ eTag: '"{AAAA},2"' })), ctx(), shared);
+    const c = redact(rec(JSON.stringify({ eTag: '"{AAAA},1"' })), ctx(), shared);
+    expect(a.response.body).toBe('{"eTag":"<etag-1>"}');
+    expect(b.response.body).toBe('{"eTag":"<etag-2>"}');
+    expect(c.response.body).toBe('{"eTag":"<etag-1>"}');
+  });
+});
+
 describe("report", () => {
   it("writes one row per step with the verdict and the observed status", () => {
     const records: ProbeRecord[] = [{
       id: "L1", assumption: "Sites.Selected reaches list items", expected: "200",
       request: { method: "GET", url: "u" }, response: { status: 200, headers: {}, body: "{}" }, verdict: { kind: "pass" },
     }];
-    const md = reportMarkdown(records, "20261107T093000Z");
+    const md = reportMarkdown(records, "20261107T093000Z", ["Sites.Selected"]);
     expect(md).toContain("| L1 | Sites.Selected reaches list items | 200 | 200 | pass |");
     expect(md).toContain("20261107T093000Z");
+    expect(md).toContain("exactly: Sites.Selected.");
+    expect(md).not.toContain("developer tenant");
   });
 });
