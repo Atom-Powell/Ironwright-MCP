@@ -3,8 +3,8 @@ import { ALL_MODULES } from "../../src/modules/index.js";
 import { ALL_TOOLS } from "../../src/tools/registry.js";
 
 describe("domain modules", () => {
-  it("registers compliance and library, each with a distinct kind", () => {
-    expect(ALL_MODULES.map((m) => m.kind)).toEqual(["compliance", "library"]);
+  it("registers compliance, library and assessment, each with a distinct kind", () => {
+    expect(ALL_MODULES.map((m) => m.kind)).toEqual(["compliance", "library", "assessment"]);
   });
 
   it("owns every tool exactly once across modules", () => {
@@ -16,13 +16,26 @@ describe("domain modules", () => {
     expect(ALL_TOOLS.map((t) => t.name)).toEqual(ALL_MODULES.flatMap((m) => m.tools.map((t) => t.name)));
   });
 
-  it("keeps the twelve tools that existed before modules did, under the same names", () => {
-    expect(ALL_TOOLS.map((t) => t.name).sort()).toEqual(
-      [
+  it("still carries the twelve tools that existed before modules did, under the same names", () => {
+    expect(ALL_TOOLS.map((t) => t.name)).toEqual(
+      expect.arrayContaining([
         "inventory_tree", "describe_workbook", "reconcile_workbook_vs_repository", "query_repository", "validate_structure",
         "generate_rename_plan", "execute_rename_plan", "generate_move_plan", "execute_move_plan",
         "generate_custom_plan", "execute_custom_plan", "replicate_template",
-      ].sort(),
+      ]),
     );
+  });
+
+  it("gives the assessment module its seven tools in module order", () => {
+    const assessment = ALL_MODULES.find((m) => m.kind === "assessment");
+    expect(assessment?.tools.map((t) => t.name)).toEqual([
+      "open_assessment",
+      "save_assessment_artifact",
+      "read_assessment_artifact",
+      "record_findings",
+      "transition_assessment",
+      "verify_publication",
+      "get_assessment",
+    ]);
   });
 });

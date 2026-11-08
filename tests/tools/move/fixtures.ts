@@ -81,6 +81,10 @@ export function movingLibraryGraphClient(files: Record<string, string>, folders:
       state.set(target, etag);
       return { eTag: etag } as unknown as T;
     },
+    putBytes: () => {
+      requestCount += 1;
+      return Promise.reject(new Error("this fake Graph client does not implement putBytes"));
+    },
     getBytes: () => {
       requestCount += 2;
       return Promise.reject(new Error("the fake moving library does not implement getBytes"));

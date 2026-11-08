@@ -2,7 +2,7 @@ import { GraphRequestError } from "../graph/errors.js";
 import { LibraryNotFoundError } from "../graph/drive.js";
 import { TokenRequestError, UnexpectedTokenRolesError } from "../graph/token.js";
 import { WorkbookFileError, WorkbookMappingError, WorkbookUnreadableError } from "../workbook/errors.js";
-import { LibraryProfileError, UnknownProfileError } from "../profiles/registry.js";
+import { AssessmentProfileError, LibraryProfileError, UnknownProfileError } from "../profiles/registry.js";
 
 /**
  * What the failing call was about, for the messages that can name it. The site
@@ -48,6 +48,10 @@ export function describeToolFailure(error: unknown, subject: FailureSubject): st
   if (error instanceof LibraryProfileError) {
     // The error already names the profile, what it lacks and which tools do
     // work with it; only the failing tool's name is added.
+    return `${subject.tool} needs a compliance profile. ${error.message}`;
+  }
+
+  if (error instanceof AssessmentProfileError) {
     return `${subject.tool} needs a compliance profile. ${error.message}`;
   }
 

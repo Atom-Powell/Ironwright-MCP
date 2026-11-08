@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { type Profile } from "./schema.js";
 import { ProfileIdSchema, SiteEntrySchema, normalizeProfileSites, refineIdentityAgreesWithSites } from "./base.js";
+import { AssessmentProfileSchema, type AssessmentProfile } from "./assessment.js";
 import { ProfileValidationError, loadProfile } from "./load.js";
 
 /**
@@ -45,10 +46,14 @@ export const LibraryProfileSchema = z
 
 export type LibraryProfile = z.infer<typeof LibraryProfileSchema>;
 
-export type AnyProfile = (Profile & { kind?: "compliance" }) | LibraryProfile;
+export type AnyProfile = (Profile & { kind?: "compliance" }) | LibraryProfile | AssessmentProfile;
 
 export function isLibraryProfile(profile: AnyProfile): profile is LibraryProfile {
   return profile.kind === "library";
+}
+
+export function isAssessmentProfile(profile: AnyProfile): profile is AssessmentProfile {
+  return profile.kind === "assessment";
 }
 
 /**
@@ -63,8 +68,13 @@ export function loadAnyProfile(rawInput: unknown): AnyProfile {
     const { kind: _ignored, ...rest } = input as Record<string, unknown>;
     return loadProfile(rest);
   }
+  if (kind === "assessment") {
+    const assessment = AssessmentProfileSchema.safeParse(input);
+    if (assessment.success) return assessment.data;
+    throw new ProfileValidationError(assessment.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`));
+  }
   if (kind !== "library") {
-    throw new ProfileValidationError([`kind: must be "compliance" or "library", not ${JSON.stringify(kind)}`]);
+    throw new ProfileValidationError([`kind: must be "compliance", "library" or "assessment", not ${JSON.stringify(kind)}`]);
   }
   const result = LibraryProfileSchema.safeParse(input);
   if (result.success) return result.data;

@@ -119,6 +119,13 @@ const EXPECTED_TOOL_NAMES = [
   "generate_custom_plan",
   "execute_custom_plan",
   "replicate_template",
+  "open_assessment",
+  "get_assessment",
+  "save_assessment_artifact",
+  "read_assessment_artifact",
+  "verify_publication",
+  "record_findings",
+  "transition_assessment",
 ];
 
 describe("tool surface completeness", () => {

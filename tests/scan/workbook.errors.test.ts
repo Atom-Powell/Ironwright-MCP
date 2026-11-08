@@ -31,6 +31,7 @@ function clientDownloading(getBytes: GraphClient["getBytes"]): GraphClient {
       throw new Error("this test does not expect a post");
     },
     patch: () => Promise.reject(new Error("this fake Graph client does not implement patch")),
+    putBytes: () => Promise.reject(new Error("this fake Graph client does not implement putBytes")),
     getBytes,
   };
 }

@@ -207,17 +207,25 @@ held, because it would be this server's first delete.
 | `replicate_template` | write | Validates the source client internally before replicating |
 | `generate_custom_plan` | plan | Steps an operator describes, resolved against the index; no workbook needed |
 | `execute_custom_plan` | write | Dry run by default, ETag preconditions, reversal log; library-only profiles allowed |
+| `open_assessment` | lifecycle | Finds or creates the vendor, creates the assessment item, renders the id from the item id, creates the workspace; returns an open one instead of a second |
+| `save_assessment_artifact` | lifecycle | Creates at the profile's path or overwrites under the ETag it just read; reads back; `publication` refused |
+| `read_assessment_artifact` | read | The persisted text and its hash, for the auditor |
+| `record_findings` | lifecycle | One item per finding, keyed so a retry updates; writes the summary |
+| `transition_assessment` | lifecycle | Completed needs dossier and publication present; provisional needs the dossier |
+| `verify_publication` | read | What is at the publication's canonical path |
+| `get_assessment` | read | Status, artifact presence and the journal summary, by id or by vendor |
 
-A profile is `compliance` (the default: workbook, taxonomy, naming, deliverables) or `library`
-(site and library only). A library-only profile works with `inventory_tree`, `query_repository`'s
-`empty_folders` question and the two custom plan tools; every other tool refuses it before any
+A profile is `compliance` (the default: workbook, taxonomy, naming, deliverables), `library`
+(site and library only) or `assessment` (a site, a library, a workspace, three lists and the
+lifecycle labels). A library-only profile works with `inventory_tree`, `query_repository`'s
+`empty_folders` question and the two custom plan tools, and the four tools that accept a library
+profile accept an assessment profile too; every other tool refuses a library profile before any
 Graph request, and `tests/tools/profile-kinds.test.ts` makes every tool declare which it is.
 
 There are three kinds, not two. A plan generator writes a plan, so `readOnlyHint` is false for
 it. Calling one read-only would be exactly the decorative annotation this project exists to
-avoid. A fourth kind, `lifecycle`, was designed on 2026-11-06 for the assessment module and is
-described in the Write-tool design amendment above; its seven tools join this table when the
-module ships.
+avoid. The fourth kind, `lifecycle`, is described in the Write-tool design amendment above; it is
+built in the assessment module and its seven tools are in the table above.
 
 Every tool carries a Zod input schema with real constraints and worked examples, an
 `outputSchema` with `structuredContent`, all four annotations set explicitly, and a description

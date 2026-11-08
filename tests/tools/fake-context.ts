@@ -56,6 +56,10 @@ export function createFakeToolContext(overrides: Partial<ToolContext> = {}): Too
       requestCount += 1;
       return Promise.reject(new Error("this fake Graph client does not implement patch"));
     },
+    putBytes: () => {
+      requestCount += 1;
+      return Promise.reject(new Error("this fake Graph client does not implement putBytes"));
+    },
     getBytes: () => {
       requestCount += 1;
       return Promise.reject(new Error("the fake Graph client was called"));
@@ -129,6 +133,10 @@ export function createFakeWorkbookGraphClient(options: FakeWorkbookGraphOptions)
     patch: () => {
       requestCount += 1;
       return Promise.reject(new Error("this fake Graph client does not implement patch"));
+    },
+    putBytes: () => {
+      requestCount += 1;
+      return Promise.reject(new Error("this fake Graph client does not implement putBytes"));
     },
     async getBytes(pathOrUrl: string): Promise<Uint8Array> {
       // Two, not one: the real client's getBytes issues a request to Graph,

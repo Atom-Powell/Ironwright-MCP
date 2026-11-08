@@ -38,6 +38,7 @@ function scriptedClient(getResponses: Record<string, unknown>, bytes: Uint8Array
       requests += 1;
       return Promise.reject(new Error("this fake Graph client does not implement patch"));
     },
+    putBytes: () => Promise.reject(new Error("this fake Graph client does not implement putBytes")),
     getBytes: async (path: string): Promise<Uint8Array> => {
       requests += 1;
       if (path !== CONTENT_PATH) throw new Error(`unexpected getBytes ${path}`);

@@ -61,6 +61,17 @@ describe("generate_custom_plan", () => {
     expect(output.perStep).toEqual([2]);
   });
 
+  it("plans the same request for an assessment profile, which carries only a site and a library", async () => {
+    const context = customContext(customGraph());
+
+    const result = await generate(context, "vendor-assessments");
+    const output = outputOf(result);
+
+    expect(result.isError).not.toBe(true);
+    expect(output.profileId).toBe("vendor-assessments");
+    expect(output.items).toEqual(EXPECTED_ITEMS);
+  });
+
   it("names each move, the plan id, and ends pointing at execute_custom_plan with the dry-run default", async () => {
     const text = textOf(await generate(customContext(customGraph()), "shared-docs"));
     const lines = text.split("\n");

@@ -3,7 +3,7 @@ import type { SiteDrive } from "../graph/drive.js";
 import { searchDriveItems, type SearchHit } from "../graph/search.js";
 import { UnexpectedTokenRolesError } from "../graph/token.js";
 import type { RepositoryFile } from "../domain/reconcile/index.js";
-import { isLibraryProfile, type AnyProfile } from "../domain/profile/library.js";
+import { isAssessmentProfile, isLibraryProfile, type AnyProfile } from "../domain/profile/library.js";
 
 /**
  * The operator's remedy differs for each, which is the whole reason this is a
@@ -13,15 +13,19 @@ import { isLibraryProfile, type AnyProfile } from "../domain/profile/library.js"
  * listed library came back with no webUrl to search it by, which is a
  * listing-shape problem rather than a failed request, "page-cap-reached"
  * means the site has more matching files in one library than this cross-check
- * is willing to page through, and "library-profile" means the profile is
- * library-only and has no naming template for this cross-check to search for.
+ * is willing to page through, "library-profile" means the profile is
+ * library-only and has no naming template for this cross-check to search for,
+ * and "assessment-profile" means the same of an assessment profile. The two
+ * are separate reasons so each sentence states the kind of profile observed.
+ * Both are reachable: inventory_tree and the custom plan tools scan either kind.
  */
 export type CrossCheckSkipReason =
   | "no-region"
   | "search-failed"
   | "library-not-addressable"
   | "page-cap-reached"
-  | "library-profile";
+  | "library-profile"
+  | "assessment-profile";
 
 export interface CrossCheckResult {
   files: RepositoryFile[];
@@ -40,18 +44,19 @@ export interface CrossCheckResult {
  * `reason` is `undefined` for the one caller, the reconciliation tool, whose
  * own provenance can in principle report the cross-check incomplete without
  * having recorded why (see its own comment on `searchCrossCheckSkipReason`).
- * That caller must not upgrade "I do not know why" into any of the five known
- * causes, so this function gives it a sixth, honest sentence to say instead of
- * inventing one at the call site. `crossCheckOtherLibraries` itself always
- * names one of the five reasons whenever it does not complete, so this branch
+ * That caller must not upgrade "I do not know why" into any of the known
+ * causes, so this function gives it one more, honest sentence to say instead
+ * of inventing one at the call site. `crossCheckOtherLibraries` itself always
+ * names one of the known reasons whenever it does not complete, so this branch
  * is unreached from the scan CLI, which reads `reason` straight off that
- * function's own result. The reconciliation tool itself can never observe
- * "library-profile" either: it refuses a library-only profile through
- * `ProfileRegistry.get` before a scan ever runs. Nor can the scan CLI, which
+ * function's own result. The reconciliation tool itself never observes
+ * "library-profile" or "assessment-profile": it refuses both kinds through
+ * `ProfileRegistry.get` before a scan ever runs. Nor does the scan CLI, which
  * loads its profile through `loadProfile` and so accepts compliance profiles
- * only. That reason therefore reaches this function from no caller today; its
- * case below exists so a future caller that scans a library-only profile and
- * reports the skip gets a true sentence rather than the unrecorded default.
+ * only. The scan itself does record them, on every scan of a library or an
+ * assessment profile (inventory_tree, the custom plan tools), in
+ * `ScanResult.searchCrossCheckSkipReason`; the cases below give any caller
+ * that reports that result a true sentence rather than the unrecorded default.
  */
 export function describeCrossCheckSkipReason(reason: CrossCheckSkipReason | undefined): string {
   switch (reason) {
@@ -80,23 +85,28 @@ export function describeCrossCheckSkipReason(reason: CrossCheckSkipReason | unde
         "The Microsoft Search cross-check did not run because the profile is library-only and has no " +
         "naming template, so there is nothing for the cross-check to search for."
       );
+    case "assessment-profile":
+      return (
+        "The Microsoft Search cross-check did not run because the profile is an assessment profile and has no " +
+        "naming template, so there is nothing for the cross-check to search for."
+      );
     default:
       return "The Microsoft Search cross-check did not complete, for a reason this scan did not record.";
   }
 }
 
 /**
- * True only for the two reasons that mean no Graph request was ever sent:
- * `crossCheckOtherLibraries` checks for a library-only profile first and a
- * missing `searchRegion` second, and returns before attempting any library
- * either way, so "library-profile" and "no-region" are the sole cases where
+ * True only for the reasons that mean no Graph request was ever sent:
+ * `crossCheckOtherLibraries` checks for a library or assessment profile first
+ * and a missing `searchRegion` second, and returns before attempting any library
+ * either way, so those three are the sole cases where
  * nothing was learned about any library. Every other reason, an unrecorded
  * one included, means an attempt reached at least one library, which is why
  * an operator's next step differs by exactly this split rather than by which
- * of the six sentences above fired.
+ * of the sentences above fired.
  */
 export function crossCheckNeverAttempted(reason: CrossCheckSkipReason | undefined): boolean {
-  return reason === "no-region" || reason === "library-profile";
+  return reason === "no-region" || reason === "library-profile" || reason === "assessment-profile";
 }
 
 /**
@@ -307,7 +317,10 @@ export async function crossCheckOtherLibraries(
   // A library profile has no naming template, and the search query is built
   // from the template's literal extension, so there is nothing to search for.
   // Checked before the region so the reason names the real cause.
+  // An assessment profile has no naming template either. runScan calls this on
+  // every scan, so this branch runs for every library or assessment scan.
   if (isLibraryProfile(profile)) return { files: [], complete: false, reason: "library-profile" };
+  if (isAssessmentProfile(profile)) return { files: [], complete: false, reason: "assessment-profile" };
 
   const region = profile.identity.searchRegion;
   // Checked first and returned immediately, spending no Graph call at all:

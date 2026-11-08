@@ -491,6 +491,13 @@ export function stateStoreConformance(create: () => StateStore): void {
     await expect(store.listJournal("example", "ASM-2026-00001")).resolves.toEqual([earlier, later]);
   });
 
+  it("reads back the prior content hash an overwrite entry carries", async () => {
+    const store = create();
+    const entry = { at: "2026-11-07T10:00:00.000Z", correlationId: "c1", stage: "DOSSIER", operation: "file_overwritten" as const, target: "x", priorContentHash: "abc123" };
+    await store.appendJournalEntry("example", "ASM-2026-00001", entry);
+    await expect(store.listJournal("example", "ASM-2026-00001")).resolves.toEqual([entry]);
+  });
+
   it("keeps journals apart by profile and by assessment", async () => {
     const store = create();
     const entry = { at: "2026-11-07T10:00:00.000Z", correlationId: "c1", stage: "ID", operation: "list_item_created" as const, target: "Assessments#17" };

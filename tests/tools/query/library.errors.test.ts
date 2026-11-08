@@ -10,6 +10,7 @@ const SITE = "https://contoso.sharepoint.com/sites/Example";
 
 const EXAMPLE_PROFILE = JSON.parse(readFileSync("examples/profiles/example.json", "utf8"));
 const LIBRARY_PROFILE = JSON.parse(readFileSync("examples/profiles/library-example.json", "utf8"));
+const ASSESSMENT_PROFILE = JSON.parse(readFileSync("examples/profiles/assessment-example.json", "utf8"));
 
 const RECORDS: InventoryRecord[] = [
   { itemId: "1", path: "Reports", name: "Reports", isFolder: true, size: 0, modified: "2026-09-17T00:00:00.000Z", etag: "a" },
@@ -27,6 +28,7 @@ function libraryContext(): { context: ToolContext; listInventoryCalls: () => num
       [
         { source: "example.json", contents: EXAMPLE_PROFILE },
         { source: "library-example.json", contents: LIBRARY_PROFILE },
+        { source: "assessment-example.json", contents: ASSESSMENT_PROFILE },
       ],
       SITE,
     ),
@@ -60,6 +62,23 @@ describe("runQueryRepository refuses a library-only profile for a question needi
       const text = JSON.stringify(result.content);
       expect(text).toContain(question);
       expect(text).toContain("library-only");
+      expect(listInventoryCalls()).toBe(0);
+    },
+  );
+});
+
+describe("runQueryRepository refuses an assessment profile for a question needing a naming standard", () => {
+  it.each(["naming_violations", "recent_reports"] as const)(
+    "refuses %s without reading the stored inventory",
+    async (question) => {
+      const { context, listInventoryCalls } = libraryContext();
+
+      const result = await runQueryRepository({ profileId: "vendor-assessments", question }, context);
+
+      expect(result.isError).toBe(true);
+      const text = JSON.stringify(result.content);
+      expect(text).toContain(question);
+      expect(text).toContain("assessment profile");
       expect(listInventoryCalls()).toBe(0);
     },
   );

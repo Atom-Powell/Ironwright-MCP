@@ -10,6 +10,7 @@ const SITE = "https://contoso.sharepoint.com/sites/Example";
 
 const EXAMPLE_PROFILE = JSON.parse(readFileSync("examples/profiles/example.json", "utf8"));
 const LIBRARY_PROFILE = JSON.parse(readFileSync("examples/profiles/library-example.json", "utf8"));
+const ASSESSMENT_PROFILE = JSON.parse(readFileSync("examples/profiles/assessment-example.json", "utf8"));
 
 const SCANNED_AT = "2026-09-17T00:00:00.000Z";
 
@@ -30,6 +31,7 @@ function libraryContext(): ToolContext {
       [
         { source: "example.json", contents: EXAMPLE_PROFILE },
         { source: "library-example.json", contents: LIBRARY_PROFILE },
+        { source: "assessment-example.json", contents: ASSESSMENT_PROFILE },
       ],
       SITE,
     ),
@@ -52,6 +54,16 @@ function libraryContext(): ToolContext {
 describe("runQueryRepository over a library-only profile", () => {
   it("answers empty_folders without error", async () => {
     const result = await runQueryRepository({ profileId: "shared-docs", question: "empty_folders" }, libraryContext());
+
+    expect(result.isError).toBeFalsy();
+    const structured = result.structuredContent as { findings: Array<{ path: string }> };
+    expect(structured.findings.map((finding) => finding.path)).toEqual(["Reports/Empty"]);
+  });
+});
+
+describe("runQueryRepository over an assessment profile", () => {
+  it("answers empty_folders without error", async () => {
+    const result = await runQueryRepository({ profileId: "vendor-assessments", question: "empty_folders" }, libraryContext());
 
     expect(result.isError).toBeFalsy();
     const structured = result.structuredContent as { findings: Array<{ path: string }> };

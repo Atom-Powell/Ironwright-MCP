@@ -13,7 +13,7 @@ ordered by when they will matter, not by when they were written.
 This table is the one place status lives. `CLAUDE.md`, the README and the PAI vault note point
 here and restate none of it, so a change of state is one edit in one file, made in the same commit
 as the sitting, merge, or decision that caused it. The table says where each phase is; the dated
-sections below say what was proven and what was not. Last updated 2026-11-06.
+sections below say what was proven and what was not. Last updated 2026-11-07.
 
 | Phase | State | Evidence |
 |---|---|---|
@@ -39,7 +39,7 @@ sections below say what was proven and what was not. Last updated 2026-11-06.
 | 8 Evaluation suite | Not started; questions written in `docs/EVALUATION-QUESTIONS.md` | |
 | 9a Probes and the grant | Complete: probes L and F run live 2026-11-07, fifteen of seventeen steps as designed and the spec amended on the other two (`If-Match` on a content PUT does not guard an absent path; a filtered list query needs the non-indexed header); A3 and B1 stay unverified until 9d | `docs/superpowers/specs/evidence/2026-11-07-assessment-probe/`; sitting below; PR #24 |
 | 9b Core: modules, site sets, inbound authentication, lifecycle kind, journal | Complete against fakes, merged 2026-11-07; nothing in it has met a live tenant yet | PR #22, merged 2026-11-07 |
-| 9c Assessment module and the four Graph operations | Designed 2026-11-06; 9a evidence in hand since 2026-11-07, plan not yet written | same spec |
+| 9c Assessment module and the four Graph operations | Built against fakes and the 9a recordings; PR #25; live sitting pending (Task 9 of the 9c plan) | PR #25; `docs/superpowers/plans/2026-11-07-phase-9c-assessment-module.md` |
 | 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9c and carries the unverified A3 and B1 probes, and is the item that slips first | same spec |
 | Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
 | CPA practice domain (multi-site scan and queries, grant issuer loop over a sites file, folder template taxonomy) | Not started; the phase after 9 | same spec |
@@ -259,6 +259,46 @@ nothing whatsoever, because the API that replaced that property defers its callb
 `generate_rename_plan` already takes, so the one rule that needed an object-level refinement no
 longer exists. The SDK defect that blocked it is unchanged and still recorded under "The MCP SDK
 cannot advertise a refined input schema" below, for the next tool that needs such a rule.
+
+**Carried from phase 9c, 2026-11-07: the journal's `versionId` waits on a `/versions` probe.**
+Reading a SharePoint version id needs a call this project has never made, and the assumption gate
+forbids building against it. The journal carries `priorContentHash` instead, from a download of the
+prior bytes. The probe comes first and the field follows.
+
+**Carried from phase 9c, 2026-11-07: provisioning the three lists from the profile.** The profile
+names the lists and their columns, and nothing creates them; an operator prepares them by hand, as
+`docs/SETUP.md` describes. Building it needs a live probe of list and column creation under
+`Sites.Selected` first.
+
+**Carried from phase 9c, 2026-11-07: the OData filter encoding.** The module builds
+`fields/{column} eq '{value}'` with single quotes doubled and the whole expression passed through
+`encodeURIComponent`, while the 9a probe sent the expression raw. The encoded form is the HTTP
+layer's representation of the same query, but it has not been called that way, so the first live
+filtered query of the Task 9 sitting is its check.
+
+**Carried from phase 9c, 2026-11-07: multi-line columns have not been written live.** The module
+compares Graph's answer against the text it sent exactly, and the observation, recommendation and
+summary columns can hold several lines. If SharePoint normalizes line endings or wraps rich text,
+every such write would be reported as a mismatch and every retry as a rewrite. The Task 9 sitting
+sends a multi-line observation and a multi-line summary and reads them back as its check.
+
+**Carried from phase 9c, 2026-11-07: whether a content PUT creates a missing parent folder.**
+`save_assessment_artifact` checks only that the workspace root is present before it writes to a
+path under a subfolder. If Graph's content PUT creates a missing parent folder implicitly, a
+subfolder deleted after open would be recreated by a save with no `folder_created` entry in the
+journal. The Task 9 sitting measures it by deleting `Published` and saving the executive summary.
+
+**Carried from phase 9c, 2026-11-07: whether SharePoint looks the publication name up without
+regard to case.** `verify_publication` now compares the name the lookup answered against the
+expected name exactly and reports a case difference as not present. The artifact presence that
+`transition_assessment` and `get_assessment` read does not compare names, so if the lookup ignores
+case a misnamed publication counts there as present. The Task 9 sitting measures it by uploading
+the publication under a name differing only by case before the correctly named one.
+
+**Carried from phase 9c, 2026-11-07: a journal append that throws after a confirmed write.** When
+Graph confirms a write and the store then fails to append its journal entry, the call reports the
+store's error through `describeToolFailure`, which does not say that the Graph write happened, and
+the journal lacks the entry.
 
 ## Known minor issues
 

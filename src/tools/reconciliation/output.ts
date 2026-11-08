@@ -38,13 +38,14 @@ export interface ScanProvenance {
   scanSharedWithConcurrentCall: boolean;
   /**
    * Present only when the Search cross-check did not complete, naming why.
-   * `crossCheckOtherLibraries` always names one of the five reasons whenever
+   * `crossCheckOtherLibraries` always names one of its reasons whenever
    * it does not complete, "no-region" included, so absent means the
    * cross-check completed rather than "completed or never ran": every
    * reachable way for it to have never run at all, such as the profile
-   * carrying no searchRegion, is itself one of the five named reasons.
-   * "library-profile" is one of the five, but this report never carries it:
-   * `reconcile_workbook_vs_repository` refuses a library-only profile through
+   * carrying no searchRegion, is itself one of the named reasons.
+   * "library-profile" and "assessment-profile" are among the named reasons, but
+   * this report never carries either:
+   * `reconcile_workbook_vs_repository` refuses those profile kinds through
    * `ProfileRegistry.get` before any scan runs, so the case never reaches
    * this field. It is still part of the type so the enumeration stays
    * exhaustive rather than the two callers of `CrossCheckSkipReason`
@@ -170,10 +171,10 @@ export const RECONCILE_OUTPUT_SCHEMA = {
       graphRequestsByThisCall: z.number().int(),
       scanSharedWithConcurrentCall: z.boolean(),
       searchCrossCheckSkipReason: z
-        .enum(["no-region", "search-failed", "library-not-addressable", "page-cap-reached", "library-profile"])
+        .enum(["no-region", "search-failed", "library-not-addressable", "page-cap-reached", "library-profile", "assessment-profile"])
         .optional()
         .describe(
-          "Present only when the Search cross-check did not complete, naming why. Every way it can fail to run at all, including the profile carrying no searchRegion, is itself one of these named reasons, so absent means it completed. \"library-profile\" is listed for completeness only: this tool refuses a library-only profile before any scan runs, so a report never carries it.",
+          "Present only when the Search cross-check did not complete, naming why. Every way it can fail to run at all, including the profile carrying no searchRegion, is itself one of these named reasons, so absent means it completed. \"library-profile\" is listed for completeness only: this tool refuses a library-only profile before any scan runs, so a report never carries it. \"assessment-profile\" is the same case for an assessment profile.",
         ),
       searchCrossCheckGraphRequestsByThisCall: z
         .number()

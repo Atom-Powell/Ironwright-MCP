@@ -433,8 +433,10 @@ HonorNonIndexedQueriesWarningMayFailRandomly` as the way to allow it; the same q
 header answered 200 with the one matching item (L3a, L3b). The module sends that header on every
 filtered list query. The header's own name carries the caveat: SharePoint may refuse such a query
 once a list passes its view threshold, so the setup documentation tells the operator to index the
-columns the module filters on in the consumer's lists, and the module treats a 400 on a filtered
-query as a plain error carrying that advice rather than something to retry.
+columns the module filters on in the consumer's lists, and a 400 on a filtered
+query surfaces as the Graph error, whose own message names the column as not indexed and names the
+header, rather than something to retry (corrected 2026-11-07 during plan 9c: the code passes
+Graph's own error through unwrapped).
 
 **The default library's drive is named `Documents`.** Its URL segment is `Shared Documents`, and
 the probe's first run matched no drive by that name and stopped before the drive steps. The server
@@ -452,3 +454,66 @@ the same `nameAlreadyExists` code, so callers match the code.
 role answered 403 `accessDenied` with nothing more specific; the same request seconds after the
 role was patched to `write` answered 201, and an earlier run had seen the reverse. `npm run
 probe:assessment:grant` is the command for both directions.
+
+## Amendments, 2026-11-07, during plan 9c
+
+**The profile's lifecycle block.** The `lifecycle` block is `status` with three labels
+(`inProgress`, `completed`, `provisional`), a list of dispositions and a list of risks. The
+assessments list's state column is written by the server with the last stage it completed and is
+reported by `get_assessment`. It is never the sole input to a precondition, which always reads the
+artifacts and items directly.
+
+**The publication is never written here.** `save_assessment_artifact` refuses the `publication`
+kind. The consumer's own publisher writes it and this server only verifies it.
+
+**The journal's `versionId` stays unset.** Reading a SharePoint version id needs a `/versions`
+call this project has never made, and the assumption gate forbids planning against it. The journal
+carries `priorContentHash` instead, from a download of the prior bytes through the content path
+verified live since phase 2b-2.
+
+**Assessment profiles are accepted where library profiles are.** `inventory_tree`,
+`query_repository`, `generate_custom_plan` and `execute_custom_plan` also accept an assessment
+profile, since both carry a site and a library and nothing else those tools read. Tools that need a
+compliance profile refuse an assessment profile through `profiles.get`, the same gate that refuses
+a library profile.
+
+**The vendor folder name.** The server computes it from the vendor name by removing the characters
+SharePoint forbids in a name (`" * : < > ? / \ |`), collapsing whitespace and trimming. Once a
+vendor record exists, its stored folder name wins over recomputation, and `get_assessment` by
+vendor looks the vendor record up first and filters on that stored name, as open does, falling
+back to the sanitized name when no record exists.
+
+**The journal stage for a save** is the artifact kind upper cased (`dossier` becomes `DOSSIER`,
+`executive_summary` becomes `EXECUTIVE_SUMMARY`), except that an overwrite of the dossier is
+`CORRECTION`.
+
+**The OData filter encoding.** The filter is built as `fields/{column} eq '{value}'` with single
+quotes doubled inside the value and the whole expression passed through `encodeURIComponent`. The
+9a probe sent the expression raw. The encoded form is the HTTP layer's representation of the same
+query, and the first live filtered query of the 9c sitting checks it.
+
+**Open reports three outcomes.** `open_assessment` reports created, resumed or already open, and
+its text names what the call wrote. On a retry it reads the root and every subfolder live and runs
+the folder pass when any is absent, because the root is created first and a present root alone
+cannot show a finished workspace.
+
+**Journal keys before an id exists.** Entries written before an assessment id exists are keyed
+`(vendor)` and `(unassigned)`.
+
+**When a journal entry is appended.** An entry is appended once Graph's 2xx response confirms the
+write. The read back that follows is a second check; its mismatch is reported in the result and
+does not remove the entry.
+
+**An unchanged save.** A save whose content hashes equal to what is already stored writes nothing
+and reports `unchanged`. It still sets the assessment's State column when that column differs from
+the stage, so a State update that failed after a write landed is repaired by the retry. The
+consequence is accepted: an identical re-save, or a findings retry, after a later stage moves State
+back to that stage. State is informational and no precondition reads it, and a stage order that
+would prevent the rewind is not defined in this phase.
+
+**The client's mutating verbs.** `putBytes` is the client's second mutating verb beside `patch`
+and the third that can change the tenant beside `post`.
+
+**The site and drive are resolved on every call.** The module reads the site and the drive on each
+call, two reads, rather than caching a drive id, because nothing in the server caches a drive id
+across calls today and a stale one would be the ID navigation failure the project exists to avoid.

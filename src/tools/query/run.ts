@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { isLibraryProfile, type AnyProfile } from "../../domain/profile/library.js";
+import { isAssessmentProfile, isLibraryProfile, type AnyProfile } from "../../domain/profile/library.js";
 import {
   createFileParser,
   findEmptyFolders,
@@ -164,10 +164,10 @@ function emptyFolders(snapshot: RepositorySnapshot): Finding[] {
 }
 
 function namingViolations(profile: AnyProfile, snapshot: RepositorySnapshot): Finding[] {
-  if (isLibraryProfile(profile)) {
-    // Unreachable: runQueryRepository refuses naming_violations for a
-    // library-only profile before answer() is ever called for it.
-    throw new Error(`namingViolations was called with library-only profile "${profile.profileId}".`);
+  if (isLibraryProfile(profile) || isAssessmentProfile(profile)) {
+    // Unreachable: runQueryRepository refuses naming_violations for a profile
+    // with no compliance definition before answer() is ever called for it.
+    throw new Error(`namingViolations was called with profile "${profile.profileId}", which has no compliance definition.`);
   }
   const parse = createFileParser(profile);
   return snapshot.files
@@ -197,10 +197,10 @@ function isRecognizedEntry(entry: { file: RepositoryFile; parsed: ParsedFile }):
 }
 
 function recentReports(profile: AnyProfile, snapshot: RepositorySnapshot): Finding[] {
-  if (isLibraryProfile(profile)) {
-    // Unreachable: runQueryRepository refuses recent_reports for a
-    // library-only profile before answer() is ever called for it.
-    throw new Error(`recentReports was called with library-only profile "${profile.profileId}".`);
+  if (isLibraryProfile(profile) || isAssessmentProfile(profile)) {
+    // Unreachable: runQueryRepository refuses recent_reports for a profile
+    // with no compliance definition before answer() is ever called for it.
+    throw new Error(`recentReports was called with profile "${profile.profileId}", which has no compliance definition.`);
   }
   const parse = createFileParser(profile);
   // The full sorted set, uncapped. `shapeQuery` applies RECENT_REPORTS_LIMIT
@@ -247,6 +247,21 @@ export async function runQueryRepository(input: unknown, context: ToolContext): 
     const profile = context.profiles.getAny(args.profileId);
     subject.siteUrl = profile.identity.siteUrl;
     subject.library = profile.identity.library;
+
+    if (isAssessmentProfile(profile) && args.question !== "empty_folders") {
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text" as const,
+            text:
+              `Profile "${args.profileId}" is an assessment profile, so "${args.question}" cannot be answered: it needs the ` +
+              "filename standard of a compliance profile, which an assessment profile does not have. empty_folders works. " +
+              "Nothing was read.",
+          },
+        ],
+      };
+    }
 
     if (isLibraryProfile(profile) && args.question !== "empty_folders") {
       // Both need the naming standard: naming_violations compares names to it,

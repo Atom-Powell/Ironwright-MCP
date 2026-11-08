@@ -9,6 +9,7 @@ function throwingClient(error: unknown): GraphClient {
     get: async () => { throw error; },
     post: async () => { throw error; },
     patch: () => Promise.reject(new Error("this fake Graph client does not implement patch")),
+    putBytes: () => Promise.reject(new Error("this fake Graph client does not implement putBytes")),
     getBytes: async () => { throw error; },
   };
 }
@@ -37,6 +38,7 @@ describe("deltaPages failures", () => {
       get: async () => ({ value: [] }) as never,
       post: async () => { throw new Error("this fake does not implement post"); },
       patch: () => Promise.reject(new Error("this fake Graph client does not implement patch")),
+      putBytes: () => Promise.reject(new Error("this fake Graph client does not implement putBytes")),
       getBytes: async () => { throw new Error("this fake does not implement getBytes"); },
     };
     const iterator = deltaPages(client, "d1");
