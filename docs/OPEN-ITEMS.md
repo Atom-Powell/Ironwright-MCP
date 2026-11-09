@@ -39,7 +39,7 @@ sections below say what was proven and what was not. Last updated 2026-11-07.
 | 8 Evaluation suite | Not started; questions written in `docs/EVALUATION-QUESTIONS.md` | |
 | 9a Probes and the grant | Complete: probes L and F run live 2026-11-07, fifteen of seventeen steps as designed and the spec amended on the other two (`If-Match` on a content PUT does not guard an absent path; a filtered list query needs the non-indexed header); A3 and B1 stay unverified until 9d | `docs/superpowers/specs/evidence/2026-11-07-assessment-probe/`; sitting below; PR #24 |
 | 9b Core: modules, site sets, inbound authentication, lifecycle kind, journal | Complete against fakes, merged 2026-11-07; nothing in it has met a live tenant yet | PR #22, merged 2026-11-07 |
-| 9c Assessment module and the four Graph operations | Built against fakes and the 9a recordings; PR #25; live sitting pending (Task 9 of the 9c plan) | PR #25; `docs/superpowers/plans/2026-11-07-phase-9c-assessment-module.md` |
+| 9c Assessment module and the four Graph operations | Verified live 2026-11-08 on the main path: open, save, findings, verify, transition and both reads, 25 calls on the developer tenant. Three checks were not run and stay carried: the implicit parent folder, the publication name case, and an `executive_summary` save | PR #25; sitting below; `docs/superpowers/specs/evidence/2026-11-08-assessment-sitting/` |
 | 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9c and carries the unverified A3 and B1 probes, and is the item that slips first | same spec |
 | Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
 | CPA practice domain (multi-site scan and queries, grant issuer loop over a sites file, folder template taxonomy) | Not started; the phase after 9 | same spec |
@@ -276,11 +276,20 @@ names the lists and their columns, and nothing creates them; an operator prepare
 layer's representation of the same query, but it has not been called that way, so the first live
 filtered query of the Task 9 sitting is its check.
 
+**CLOSED 2026-11-08 by the 9c sitting, for the encoded form.** The second `open_assessment` and the
+second `record_findings` each found their existing rows through the encoded filter and wrote nothing.
+A value with an apostrophe, which exercises the quote doubling, was not sent.
+
 **Carried from phase 9c, 2026-11-07: multi-line columns have not been written live.** The module
 compares Graph's answer against the text it sent exactly, and the observation, recommendation and
 summary columns can hold several lines. If SharePoint normalizes line endings or wraps rich text,
 every such write would be reported as a mismatch and every retry as a rewrite. The Task 9 sitting
 sends a multi-line observation and a multi-line summary and reads them back as its check.
+
+**CLOSED 2026-11-08 by the 9c sitting.** `record_findings` sent a two paragraph observation and a
+two paragraph summary; Graph's answer matched the text sent, a repeat call reported both findings
+unchanged, and the operator read F-1's observation in the SharePoint item view with its blank line
+intact. The summary column was not opened in the browser.
 
 **Carried from phase 9c, 2026-11-07: whether a content PUT creates a missing parent folder.**
 `save_assessment_artifact` checks only that the workspace root is present before it writes to a
@@ -299,6 +308,13 @@ the publication under a name differing only by case before the correctly named o
 Graph confirms a write and the store then fails to append its journal entry, the call reports the
 store's error through `describeToolFailure`, which does not say that the Graph write happened, and
 the journal lacks the entry.
+
+**Carried from the 9c sitting, 2026-11-08: an identical re-save moves State from CORRECTION back
+to DOSSIER.** An overwrite records stage `CORRECTION`. A later `save_assessment_artifact` with the
+same content takes the unchanged path, which treats any State other than the kind's own stage as
+needing repair, and set State to `DOSSIER`. The file and its hash were never at risk; what a harmless
+retry loses is the marker that the dossier was corrected. Whether CORRECTION should survive a retry
+needs a ruling.
 
 ## Known minor issues
 
@@ -2370,6 +2386,44 @@ the library root holding `probe 20261107T203924Z`, which holds `dossier.md` and 
 probe deletes nothing because this server has never deleted anything and a probe is not where that
 starts. Remove them by hand before the 9c sitting if a clean library is wanted, or leave them as
 the 9c sitting's own fixtures. The grant issuer remains, on a seven-day secret.
+
+## The plan 9c live sitting, 2026-11-08: the assessment module run against the developer tenant
+
+Run from main at `42c8803` through `npm run dev` on 127.0.0.1 with writes enabled and inbound
+authentication off, against the IronwrightTest site and the three lists the 9a sitting left behind,
+under a profile written for the sitting (`assessment-sitting`, git-ignored with the rest of
+`profiles/`). The operator ran every call from a second window through a small helper that connects
+with the MCP SDK client; this record is built from the helper's saved results, redacted, in
+`docs/superpowers/specs/evidence/2026-11-08-assessment-sitting/report.md`. The grant was widened to
+`write` for the sitting and restored to `read` at the end.
+
+**What ran and what answered.** Nineteen tools listed. `open_assessment` created `ASM-2026-00003`
+as list item 3 in 18 Graph requests, the id minted from the item id, with the root and three
+subfolders read back; a second open answered that it was already open and wrote nothing, in 8
+requests. `save_assessment_artifact` created the dossier (85 bytes, read back and matching), an
+identical re-save wrote nothing, and changed content overwrote it under the ETag it had just read
+(`,1` became `,2`, 100 bytes), recording stage `CORRECTION`. `read_assessment_artifact` agreed on
+bytes, hash and ETag. `record_findings` created two findings and a summary, and a repeat reported
+both unchanged. `verify_publication` reported the publication absent with the exact canonical path,
+and `transition_assessment` refused with that as the observed state and wrote nothing. After the
+operator uploaded a placeholder `.docx` at that path by hand, verify reported it present and the
+transition moved the item from In Progress to Completed with disposition "Approved with conditions"
+and risk "Medium"; repeating it wrote nothing. `get_assessment` by id reported the workspace, the
+dossier and publication present and 16 journal entries, and by vendor found the one assessment.
+
+**Two operator slips, neither a server defect.** The helper wrote its result file under the tool
+name, and `tools/list` put a slash in the path; the helper now sanitizes the name. The grant
+command was first run in a window without the tenant variables and refused with `IW_TENANT_ID is
+required`, changing nothing.
+
+**Not run.** Deleting `Published` and saving the executive summary (the implicit parent folder),
+uploading the publication under a name differing only by case (the lookup's case handling), and the
+`executive_summary` save itself. All three stay carried above.
+
+**Residue left in the tenant.** Assessment item 3 and its vendor row, the two findings F-1 and F-2,
+the folder tree `IW-Assessments/Sitting Vendor/ASM-2026-00003` with the dossier and the placeholder
+publication, besides the 9a residue. Nothing was deleted, because this server has never deleted
+anything. The grant issuer's seven-day secret expires about 2026-11-14.
 
 ## The phase 6d live sitting, 2026-09-24: plans an operator describes
 
