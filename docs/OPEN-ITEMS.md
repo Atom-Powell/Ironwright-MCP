@@ -40,7 +40,7 @@ sections below say what was proven and what was not. Last updated 2026-11-07.
 | 9a Probes and the grant | Complete: probes L and F run live 2026-11-07, fifteen of seventeen steps as designed and the spec amended on the other two (`If-Match` on a content PUT does not guard an absent path; a filtered list query needs the non-indexed header); A3 and B1 stay unverified until 9d | `docs/superpowers/specs/evidence/2026-11-07-assessment-probe/`; sitting below; PR #24 |
 | 9b Core: modules, site sets, inbound authentication, lifecycle kind, journal | Complete against fakes, merged 2026-11-07; nothing in it has met a live tenant yet | PR #22, merged 2026-11-07 |
 | 9c Assessment module and the four Graph operations | Verified live 2026-11-08 on the main path: open, save, findings, verify, transition and both reads, 25 calls on the developer tenant. Three checks were not run and stay carried: the implicit parent folder, the publication name case, and an `executive_summary` save | PR #25; sitting below; `docs/superpowers/specs/evidence/2026-11-08-assessment-sitting/` |
-| Pre-EON test campaign | First run 2026-11-09: 8 scenarios on the developer tenant, 5 pass or measured, 2 defects found and fixed in this change (concurrent opens duplicated an assessment; a misnamed publication completed an assessment), rerun pending; plan `docs/superpowers/plans/2026-11-09-pre-eon-test-campaign.md` | `scripts/pre-eon/campaign.ts`; sitting below |
+| Pre-EON test campaign | First run 2026-11-09: 8 scenarios on the developer tenant, 2 defects found (concurrent opens duplicated an assessment; a misnamed publication completed an assessment), both fixed in PR #27. Rerun the same day on the fixed server: s2 and s4 pass, s3, s5, s7 and s8 pass, s1 and s6 measured as before. Still to run: interrupted open, throttling and token expiry, inbound auth over a public tunnel, Copilot Studio contact (plan 9d); plan `docs/superpowers/plans/2026-11-09-pre-eon-test-campaign.md` | `scripts/pre-eon/campaign.ts`; sitting below |
 | 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9c and carries the unverified A3 and B1 probes, and is the item that slips first | same spec |
 | Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
 | CPA practice domain (multi-site scan and queries, grant issuer loop over a sites file, folder template taxonomy) | Not started; the phase after 9 | same spec |
@@ -2468,8 +2468,17 @@ against Graph under the server application's own token, each scenario under a ve
 The two defects were in merged 9c code that eight task reviews, a whole branch review and a live
 sitting had all passed. Both are races or case handling that a sequential, correctly cased sitting
 cannot show, which is what the campaign is for. The fix adds `src/tools/assessment/keyed-lock.ts`,
-exact name presence in `readAssessmentState`, and seven tests; the suite is at 3003. A second run,
-with the fixed server, is the check that closes both; its result will be recorded here.
+exact name presence in `readAssessmentState`, and seven tests; the suite is at 3003. The rerun, on the same day
+with the fixed server (main at `12bc570`), closed both.
+
+| Scenario | Rerun | Detail |
+|---|---|---|
+| s2 publication name case | pass | Wrong case: verify present false, `get_assessment` publication present false, transition refused. After the rename: present true. |
+| s4 four concurrent opens | pass | One item, one id, one call reporting created, no errors. |
+| s1, s6 | measured | Same as the first run. |
+| s3, s5, s7, s8 | pass | Same as the first run. |
+
+The grant was restored to `read` afterwards (write to read confirmed by the grant probe) and the server stopped.
 
 ## The phase 6d live sitting, 2026-09-24: plans an operator describes
 
