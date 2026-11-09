@@ -56,6 +56,11 @@ export function stateScript(options: StateOptions = {}): ScriptEntry[] {
   ];
 }
 
+/** The publication as the lookup answers it, under the name the profile's template renders. */
+export function publicationItem(eTag: string, size: number): Record<string, unknown> {
+  return fileItem("Acme Corp_ASM-2026-00002_Risk_Assessment.docx", eTag, size);
+}
+
 export function dossierItem(eTag: string, size: number): Record<string, unknown> {
   return fileItem("Acme Corp_Research_Dossier.md", eTag, size);
 }

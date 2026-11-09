@@ -40,6 +40,7 @@ sections below say what was proven and what was not. Last updated 2026-11-07.
 | 9a Probes and the grant | Complete: probes L and F run live 2026-11-07, fifteen of seventeen steps as designed and the spec amended on the other two (`If-Match` on a content PUT does not guard an absent path; a filtered list query needs the non-indexed header); A3 and B1 stay unverified until 9d | `docs/superpowers/specs/evidence/2026-11-07-assessment-probe/`; sitting below; PR #24 |
 | 9b Core: modules, site sets, inbound authentication, lifecycle kind, journal | Complete against fakes, merged 2026-11-07; nothing in it has met a live tenant yet | PR #22, merged 2026-11-07 |
 | 9c Assessment module and the four Graph operations | Verified live 2026-11-08 on the main path: open, save, findings, verify, transition and both reads, 25 calls on the developer tenant. Three checks were not run and stay carried: the implicit parent folder, the publication name case, and an `executive_summary` save | PR #25; sitting below; `docs/superpowers/specs/evidence/2026-11-08-assessment-sitting/` |
+| Pre-EON test campaign | First run 2026-11-09: 8 scenarios on the developer tenant, 5 pass or measured, 2 defects found and fixed in this change (concurrent opens duplicated an assessment; a misnamed publication completed an assessment), rerun pending; plan `docs/superpowers/plans/2026-11-09-pre-eon-test-campaign.md` | `scripts/pre-eon/campaign.ts`; sitting below |
 | 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9c and carries the unverified A3 and B1 probes, and is the item that slips first | same spec |
 | Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
 | CPA practice domain (multi-site scan and queries, grant issuer loop over a sites file, folder template taxonomy) | Not started; the phase after 9 | same spec |
@@ -315,6 +316,27 @@ same content takes the unchanged path, which treats any State other than the kin
 needing repair, and set State to `DOSSIER`. The file and its hash were never at risk; what a harmless
 retry loses is the marker that the dossier was corrected. Whether CORRECTION should survive a retry
 needs a ruling.
+
+**CLOSED 2026-11-09 by the pre-EON campaign: whether SharePoint looks the publication name up without
+regard to case.** It does, and the carried item's worry held: with the publication uploaded in
+lowercase, `verify_publication` said absent while `get_assessment` read it present and
+`transition_assessment` completed the assessment. Artifact presence now requires the exact name the
+template renders, for every artifact kind.
+
+**Carried from the pre-EON campaign, 2026-11-09: a content PUT recreates a deleted parent folder
+silently.** With `Published` deleted, `save_assessment_artifact` for the executive summary answered
+`created` and `Published` existed again. The journal holds the file's entry and no `folder_created`
+entry for the folder, so the journal understates what the call wrote. Low risk, since the path is the
+server's own, but whether to refuse instead, or to journal the folder, needs a ruling.
+
+**Carried from the pre-EON campaign, 2026-11-09: a hand-edited State does not stop `record_findings`.**
+With State set to a value no stage writes, `record_findings` proceeded, because the precondition
+reads the dossier on the drive rather than trusting State. A hand-set Status of Completed did stop a
+save. Whether State should be validated needs a ruling; the drive is what the tools trust.
+
+**Carried from the pre-EON campaign, 2026-11-09: the open lock covers one process.** The per vendor
+lock that stops concurrent opens duplicating an assessment lives in the server process. It holds for
+the one replica the hosting decision requires and would not order two processes against one site.
 
 ## Known minor issues
 
@@ -2424,6 +2446,30 @@ uploading the publication under a name differing only by case (the lookup's case
 the folder tree `IW-Assessments/Sitting Vendor/ASM-2026-00003` with the dossier and the placeholder
 publication, besides the 9a residue. Nothing was deleted, because this server has never deleted
 anything. The grant issuer's seven-day secret expires about 2026-11-14.
+
+## The pre-EON test campaign, first run, 2026-11-09: eight scenarios against the developer tenant
+
+Run from main at `4658ff6` plus `scripts/pre-eon/campaign.ts`, with the server on 127.0.0.1, writes
+enabled and the grant at `write`, restored to `read` afterwards. The script drives the live server over
+MCP and does the steps the server never does (delete a folder, rename a file, edit a list item) directly
+against Graph under the server application's own token, each scenario under a vendor name of its own.
+
+| Scenario | First run | Meaning |
+|---|---|---|
+| s1 implicit parent folder | measured | A content PUT recreated the deleted `Published` folder silently; carried above. |
+| s2 publication name case | FAIL | A lowercase publication read present in `get_assessment` and let `transition_assessment` complete. Fixed. |
+| s3 executive summary | pass | Created, read back, overwritten, hashes matching, stage EXECUTIVE_SUMMARY. |
+| s4 four concurrent opens | FAIL | Four items and four ids for one vendor. Fixed with a per vendor lock. |
+| s5 six concurrent overwrites | pass | One overwrote, five were refused under the ETag, and the final content was exactly one writer's. |
+| s6 hand edited State and Status | measured | State is not validated; a hand set Completed stopped the save. Carried above. |
+| s7 grant boundary | pass | The tenant root answered 403 and a site search found nothing outside the granted site. |
+| s8 resume after a missing folder | pass | The folder was rebuilt, the same id returned, one item. |
+
+The two defects were in merged 9c code that eight task reviews, a whole branch review and a live
+sitting had all passed. Both are races or case handling that a sequential, correctly cased sitting
+cannot show, which is what the campaign is for. The fix adds `src/tools/assessment/keyed-lock.ts`,
+exact name presence in `readAssessmentState`, and seven tests; the suite is at 3003. A second run,
+with the fixed server, is the check that closes both; its result will be recorded here.
 
 ## The phase 6d live sitting, 2026-09-24: plans an operator describes
 

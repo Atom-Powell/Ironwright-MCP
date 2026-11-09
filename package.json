@@ -19,7 +19,8 @@
     "seed-library": "tsx scripts/seed-library.ts",
     "probe:assessment:seed": "tsx scripts/assessment-probe/seed.ts",
     "probe:assessment:grant": "tsx scripts/assessment-probe/grant.ts",
-    "probe:assessment": "tsx scripts/assessment-probe/main.ts"
+    "probe:assessment": "tsx scripts/assessment-probe/main.ts",
+    "campaign": "tsx scripts/pre-eon/campaign.ts"
   },
   "repository": {
     "type": "git",

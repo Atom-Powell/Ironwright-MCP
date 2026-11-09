@@ -52,6 +52,23 @@ describe("get_assessment", () => {
     expect(output.graphRequests).toBe(graph.requests());
   });
 
+  it("reports a publication whose name differs from the canonical one only by case as not present", async () => {
+    const { graph } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      { method: "get", pathIncludes: ["/lists/Assessments/items?", `AssessmentId eq '${ID}'`], headersInclude: NON_INDEXED_QUERY_HEADER, response: page([listItem("2", PROBE_FIELDS)]) },
+      { method: "get", pathIncludes: `/drives/drive-1/root:/${ROOT}:?`, response: folderItem(ID) },
+      { method: "get", pathIncludes: "_Research_Dossier.md", throws: { status: 404, code: "itemNotFound" } },
+      { method: "get", pathIncludes: "_Executive_Summary.md", throws: { status: 404, code: "itemNotFound" } },
+      // SharePoint answers the path case insensitively, so the item comes back under its own name.
+      { method: "get", pathIncludes: "_Risk_Assessment.docx", response: fileItem("acme corp_asm-2026-00002_risk_assessment.docx", '"p1"', 52) },
+    ]);
+
+    const result = await runGetAssessment({ profileId: PROFILE, assessmentId: ID }, assessmentToolContext(graph));
+
+    const artifacts = (result.structuredContent as { artifacts: Array<{ kind: string; present: boolean }> }).artifacts;
+    expect(artifacts.find((artifact) => artifact.kind === "publication")?.present).toBe(false);
+  });
+
   it("says why the root path could not be computed, and reads nothing from the drive, for an item with no Title", async () => {
     const { graph, calls } = createScriptedGraph([
       ...RESOLVE_DRIVE_SCRIPT,

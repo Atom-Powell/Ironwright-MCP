@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TRANSITION_INPUT_CONSTRAINTS, runTransitionAssessment } from "../../../src/tools/assessment/transition.js";
 import { assessmentToolContext, createScriptedGraph, listItem, resultText } from "./fake-graph.js";
-import { DOSSIER_PATH, ID, PROFILE, PUBLICATION_PATH, dossierItem, stateFields, stateScript } from "./state-script.js";
+import { DOSSIER_PATH, ID, PROFILE, PUBLICATION_PATH, dossierItem, publicationItem, stateFields, stateScript } from "./state-script.js";
 
 const INPUT = { profileId: PROFILE, assessmentId: ID, target: "completed", disposition: "Approved", risk: "Low" };
 const COMPLETED = { Status: "Completed", Disposition: "Approved", Risk: "Low", State: "LIFECYCLE" };
@@ -79,7 +79,7 @@ describe("transition_assessment failures", () => {
 
   it("reports a read back showing another status, keeping the journal entry for the update", async () => {
     const { graph } = createScriptedGraph([
-      ...stateScript({ dossier: dossierItem('"d1"', 120), publication: dossierItem('"p1"', 10) }),
+      ...stateScript({ dossier: dossierItem('"d1"', 120), publication: publicationItem('"p1"', 10) }),
       { method: "patch", pathIncludes: "/lists/Assessments/items/2/fields", response: stateFields(COMPLETED) },
       { method: "get", pathIncludes: "/lists/Assessments/items/2?", response: listItem("2", stateFields({ ...COMPLETED, Status: "In Progress" }), '"item-2,2"') },
     ]);
@@ -97,7 +97,7 @@ describe("transition_assessment failures", () => {
 
   it("reports a read back whose State is not LIFECYCLE, though status, disposition and risk match", async () => {
     const { graph } = createScriptedGraph([
-      ...stateScript({ dossier: dossierItem('"d1"', 120), publication: dossierItem('"p1"', 10) }),
+      ...stateScript({ dossier: dossierItem('"d1"', 120), publication: publicationItem('"p1"', 10) }),
       { method: "patch", pathIncludes: "/lists/Assessments/items/2/fields", response: stateFields(COMPLETED) },
       { method: "get", pathIncludes: "/lists/Assessments/items/2?", response: listItem("2", stateFields({ ...COMPLETED, State: "FINDINGS" }), '"item-2,2"') },
     ]);
@@ -113,7 +113,7 @@ describe("transition_assessment failures", () => {
 
   it("reports a read back that finds no item, keeping the journal entry for the update", async () => {
     const { graph } = createScriptedGraph([
-      ...stateScript({ dossier: dossierItem('"d1"', 120), publication: dossierItem('"p1"', 10) }),
+      ...stateScript({ dossier: dossierItem('"d1"', 120), publication: publicationItem('"p1"', 10) }),
       { method: "patch", pathIncludes: "/lists/Assessments/items/2/fields", response: stateFields(COMPLETED) },
       { method: "get", pathIncludes: "/lists/Assessments/items/2?", throws: { status: 404, code: "itemNotFound" } },
     ]);
@@ -131,7 +131,7 @@ describe("transition_assessment failures", () => {
 
   it("keeps the journal entry for the update when the read back itself fails", async () => {
     const { graph } = createScriptedGraph([
-      ...stateScript({ dossier: dossierItem('"d1"', 120), publication: dossierItem('"p1"', 10) }),
+      ...stateScript({ dossier: dossierItem('"d1"', 120), publication: publicationItem('"p1"', 10) }),
       { method: "patch", pathIncludes: "/lists/Assessments/items/2/fields", response: stateFields(COMPLETED) },
       { method: "get", pathIncludes: "/lists/Assessments/items/2?", throws: { status: 503, code: "serviceNotAvailable" } },
     ]);
