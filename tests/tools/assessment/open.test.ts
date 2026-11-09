@@ -92,6 +92,28 @@ describe("open_assessment", () => {
     );
   });
 
+  it("serializes two concurrent opens for one vendor, so the second finds what the first created", async () => {
+    // One scripted sequence: the first open's full create, then the already-open read. Run
+    // unlocked, the two calls would interleave their reads and both would see no assessment.
+    const { graph, calls } = createScriptedGraph([
+      ...firstOpenScript(),
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" })]),
+      assessmentsQuery("Acme Corp", [listItem("2", { ...assessmentFields("Acme Corp"), AssessmentId: "ASM-2026-00002" })]),
+      ...workspaceReads("Acme Corp", "ASM-2026-00002"),
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const [first, second] = await Promise.all([runOpenAssessment(INPUT, context), runOpenAssessment(INPUT, context)]);
+
+    expect(first.isError).toBeUndefined();
+    expect(second.isError).toBeUndefined();
+    expect((first.structuredContent as Record<string, unknown>).created).toBe(true);
+    expect((second.structuredContent as Record<string, unknown>).created).toBe(false);
+    expect((second.structuredContent as Record<string, unknown>).assessmentId).toBe("ASM-2026-00002");
+    expect(calls.filter((call) => call.method === "post" && call.path.includes("/lists/Assessments/items"))).toHaveLength(1);
+  });
+
   it("resumes an open that died before the id was written", async () => {
     const { graph, calls } = createScriptedGraph([
       ...RESOLVE_DRIVE_SCRIPT,

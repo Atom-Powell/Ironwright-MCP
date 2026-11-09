@@ -96,10 +96,14 @@ export async function readAssessmentState(graph: Pick<GraphClient, "get">, ac: A
   const artifacts = [];
   for (const [kind, path] of Object.entries(paths.artifacts)) {
     const lookup = await readDriveItem(graph, { driveId: ac.driveId, path });
+    // SharePoint answers a path case insensitively, so a file named differently only by case comes
+    // back from the lookup. It is not the file the template names, and the 9c-era campaign showed a
+    // misnamed publication completing an assessment on that reading. The name must match exactly.
+    const expectedName = path.slice(path.lastIndexOf("/") + 1);
     artifacts.push({
       kind,
       path,
-      present: lookup.kind === "found" && !lookup.item.isFolder,
+      present: lookup.kind === "found" && !lookup.item.isFolder && lookup.item.name === expectedName,
       eTag: lookup.kind === "found" ? lookup.item.eTag : undefined,
       size: lookup.kind === "found" ? lookup.item.size : undefined,
     });

@@ -10,6 +10,7 @@ import { resolveAssessmentContext } from "./context.js";
 import { findInProgressAssessment, findVendor, workspacePaths } from "./read-state.js";
 import { appendJournal } from "./journal.js";
 import { ASSESSMENT_SUMMARY_SHAPE } from "./output.js";
+import { withKeyedLock } from "./keyed-lock.js";
 
 export const OPEN_INPUT_SCHEMA = {
   profileId: z.string().min(1).describe('The assessment profile to open under, for example "vendor-assessments".'),
@@ -34,6 +35,12 @@ const STAGE = "ID";
 
 export async function runOpenAssessment(input: unknown, context: ToolContext): Promise<CallToolResult> {
   const args = InputObject.parse(input);
+  // Keyed on the vendor, not the scope: the vendor record is created here too, and two scopes for one
+  // new vendor would otherwise race to create it twice. See keyed-lock.ts for why a lock is the fix.
+  return withKeyedLock(`${args.profileId}|${sanitizeFolderName(args.vendor)}`, () => openAssessment(args, context));
+}
+
+async function openAssessment(args: z.infer<typeof InputObject>, context: ToolContext): Promise<CallToolResult> {
   const subject: FailureSubject = { tool: "open_assessment", profileId: args.profileId };
   const before = context.graph.requests();
 

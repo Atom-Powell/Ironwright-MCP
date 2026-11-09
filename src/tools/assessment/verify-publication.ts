@@ -64,7 +64,7 @@ export async function runVerifyPublication(input: unknown, context: ToolContext)
 
     const item = lookup.item;
     // SharePoint names are case insensitive, so the lookup above may answer a file whose name differs
-    // from the canonical one only by case; the 9c sitting measures whether it does. That file is not
+    // from the canonical one only by case, which the 2026-11-09 campaign measured it does. That file is not
     // the publication the template names, and reporting it present would let a misnamed upload pass.
     if (item.name !== expectedName) {
       const output = { present: false, path, expectedName, name: item.name, graphRequests: context.graph.requests() - before };
