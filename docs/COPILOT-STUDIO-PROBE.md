@@ -41,6 +41,38 @@ Also record whether the dialog can send more than one custom header with a fixed
 **A4. Limits on the connector.** Record any text on those screens about transport, tool or resource
 support, tool count limits, or data loss prevention.
 
+## Findings so far, 2026-11-09 (blocked on a license; most of this is documentation, not observation)
+
+The live probe stopped early. On the Ironwright Dev environment, with Dataverse present, creating
+a standard agent was refused: "Creating a standard agent requires a Copilot Studio license."
+Environment creation had first failed for lack of Dataverse, which the new environment fixed. The
+only trial offered in the Microsoft 365 admin flow was Microsoft 365 Business Premium with
+Copilot, which needs a credit card, converts to a paid plan on 12/9/2026 and names no Copilot
+Studio capability, so it was declined. The Copilot Studio product page offered only a free Azure
+account, which the no-Azure rule excludes. Parts A1 and A2 are therefore answered as "no
+license without a card or Azure", and Parts A3, A4 and B stay open for a live run.
+
+What Microsoft's page "Connect your agent to an existing MCP server" (updated 2026-11-02) says,
+labeled as documentation and not observed on a screen:
+
+- **A3, the add-tool dialog.** Tools, Add a tool, New tool, Model Context Protocol. Fields are
+  Server name, Server description and Server URL. Authentication choices are None, API key and
+  OAuth 2.0. API key takes a Type of Header or Query and the name of that header or parameter.
+  OAuth 2.0 takes a type of Dynamic discovery, Dynamic or Manual; Manual asks for client ID,
+  client secret, authorization URL, token URL template, refresh URL and optional scopes.
+- **Headers.** No plain bearer choice is listed. Sending two fixed custom headers is not
+  described, so a Cloudflare Access service token (two headers) probably cannot be used through
+  the wizard. A Power Apps custom connector might allow it; unconfirmed.
+- **A4, limits.** Only the Streamable transport is supported; SSE has not been since August 2025.
+  MCP access rides on Power Platform connectors, so a data policy that governs connectors also
+  governs the MCP server and its tools. No tool count limit or credit figure appears on the page.
+  A secondary source says generative orchestration must be on.
+- **Other path.** A server can also be registered through Agents 365 and the Microsoft 365 admin
+  center, then approved for use in Copilot Studio. Worth reading before an approval request.
+
+Planning consequence for plan 9d: assume an API key in a single header, assume no Cloudflare
+Access layer, and treat the data policy question as a likely approval item.
+
 ## Running the probe server
 
 The probe server is `scripts/copilot-probe/`. It exposes two dummy tools (`get_fruit_stock` and
