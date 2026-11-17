@@ -32,3 +32,21 @@ export async function withKeyedLock<T>(key: string, fn: () => Promise<T>): Promi
     if (tails.get(key) === tail) tails.delete(key);
   }
 }
+
+/**
+ * One assessment's lifecycle writes, one at a time. Every lifecycle tool reads
+ * the item and the drive, decides, and then writes in separate Graph requests,
+ * and the list item update carries no precondition (whether Graph honors
+ * `If-Match` on a fields update has not been probed). Two calls for one
+ * assessment that overlap therefore decide on a state the other is about to
+ * change: a save that started before a transition wrote its stage over the
+ * transition's, and the second of two first saves failed on the file the
+ * first had just created. Ordering them closes that window for this process,
+ * which is every caller there is under the one replica the hosting decision
+ * names. It does nothing about a person editing the item in the browser.
+ *
+ * The id is lowercased because the lookup matches it in either case.
+ */
+export function withAssessmentLock<T>(profileId: string, assessmentId: string, fn: () => Promise<T>): Promise<T> {
+  return withKeyedLock(`${profileId}|assessment|${assessmentId.toLowerCase()}`, fn);
+}

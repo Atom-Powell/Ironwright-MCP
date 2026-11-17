@@ -145,17 +145,23 @@ export async function readAssessmentState(graph: Pick<GraphClient, "get">, ac: A
     return { record, rootPath: undefined, rootPathUnavailable: unavailable, rootPresent: false, artifacts: [] };
   }
   const paths = workspacePaths(ac, { vendorTitle: record.vendorTitle, vendorFolder: record.vendorFolder, assessmentId: record.assessmentId });
-  const root = await readDriveItem(graph, { driveId: ac.driveId, path: paths.root });
-  const artifacts = [];
-  for (const [kind, path] of Object.entries(paths.artifacts)) {
-    const lookup = await readDriveItem(graph, { driveId: ac.driveId, path });
+  // The root and every artifact path are read together. They are independent reads of one moment,
+  // every lifecycle call pays for all of them, and one after another they were most of each call's
+  // wait. Each read is issued in the profile's order and the answers are kept in that order.
+  const entries = Object.entries(paths.artifacts);
+  const [root, ...lookups] = await Promise.all([
+    readDriveItem(graph, { driveId: ac.driveId, path: paths.root }),
+    ...entries.map(([, path]) => readDriveItem(graph, { driveId: ac.driveId, path })),
+  ]);
+  const artifacts = entries.map(([kind, path], index) => {
+    const lookup = lookups[index]!;
     // SharePoint answers a path case insensitively, so a file named differently only by case comes
     // back from the lookup. It is not the file the template names, and the 9c-era campaign showed a
     // misnamed publication completing an assessment on that reading. The name must match exactly.
     const expectedName = fileNameOf(path);
     const found = lookup.kind === "found" ? lookup.item : undefined;
     const present = found !== undefined && !found.isFolder && found.name === expectedName;
-    artifacts.push({
+    return {
       kind,
       path,
       present,
@@ -164,7 +170,7 @@ export async function readAssessmentState(graph: Pick<GraphClient, "get">, ac: A
       eTag: present ? found?.eTag : undefined,
       size: present ? found?.size : undefined,
       ...(found !== undefined && !present ? { occupant: { name: found.name, isFolder: found.isFolder } } : {}),
-    });
-  }
+    };
+  });
   return { record, rootPath: paths.root, rootPresent: root.kind === "found" && root.item.isFolder, artifacts };
 }

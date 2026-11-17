@@ -12,6 +12,7 @@ import { findAssessmentById, readAssessmentState } from "./read-state.js";
 import { sha256Hex } from "./hash.js";
 import { appendJournal } from "./journal.js";
 import { refusalResult } from "./refusal.js";
+import { withAssessmentLock } from "./keyed-lock.js";
 
 export const SAVE_INPUT_SCHEMA = {
   profileId: z.string().min(1).describe('The assessment profile, for example "vendor-assessments".'),
@@ -58,6 +59,11 @@ function failure(text: string): CallToolResult {
 
 export async function runSaveAssessmentArtifact(input: unknown, context: ToolContext): Promise<CallToolResult> {
   const args = InputObject.parse(input);
+  // Ordered with every other lifecycle write to this assessment; keyed-lock.ts says why.
+  return withAssessmentLock(args.profileId, args.assessmentId, () => saveAssessmentArtifact(args, context));
+}
+
+async function saveAssessmentArtifact(args: z.infer<typeof InputObject>, context: ToolContext): Promise<CallToolResult> {
   const subject: FailureSubject = { tool: TOOL, profileId: args.profileId };
   const before = context.graph.requests();
 

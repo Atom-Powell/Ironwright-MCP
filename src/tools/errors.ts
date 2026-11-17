@@ -3,6 +3,7 @@ import { LibraryNotFoundError } from "../graph/drive.js";
 import { TokenRequestError, UnexpectedTokenRolesError } from "../graph/token.js";
 import { WorkbookFileError, WorkbookMappingError, WorkbookUnreadableError } from "../workbook/errors.js";
 import { AssessmentProfileError, LibraryProfileError, UnknownProfileError } from "../profiles/registry.js";
+import { JournalAppendError } from "./assessment/journal.js";
 
 /**
  * What the failing call was about, for the messages that can name it. The site
@@ -43,6 +44,13 @@ export function describeToolFailure(error: unknown, subject: FailureSubject): st
   if (error instanceof UnknownProfileError) {
     // Already names the configured ids, which is the whole remedy.
     return error.message;
+  }
+
+  if (error instanceof JournalAppendError) {
+    // The error says what Graph confirmed and that the journal lacks it. What this mapper adds is
+    // the one thing only the failing call's own catch knows: the tool stopped there. Every
+    // lifecycle tool lets this error end the call, so nothing was written after it.
+    return `${subject.tool} stopped after a write it could not record: ${error.message} Nothing further was written by this call.`;
   }
 
   if (error instanceof LibraryProfileError) {

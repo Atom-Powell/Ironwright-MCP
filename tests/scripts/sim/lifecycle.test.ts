@@ -181,3 +181,54 @@ describe("the assessment lifecycle against the simulated tenant", () => {
     expect(structured(await runGetAssessment({ profileId: PROFILE, assessmentId: id.toLowerCase() }, d.context)).found).toBe(false);
   });
 });
+
+describe("overlapping lifecycle calls on one assessment", () => {
+  async function opened(d: SimDeployment): Promise<string> {
+    return structured(await runOpenAssessment({ profileId: PROFILE, vendor: "Acme Corp", scope: "Security" }, d.context)).assessmentId as string;
+  }
+
+  it("lets the second of two saves arriving together overwrite the first, instead of failing on the file the first created", async () => {
+    const d = deployment();
+    const id = await opened(d);
+    const save = (content: string): Promise<CallToolResult> => runSaveAssessmentArtifact({ profileId: PROFILE, assessmentId: id, kind: "dossier", content }, d.context);
+
+    const results = (await Promise.all([save("first draft"), save("second draft")])).map(structured);
+
+    expect(results.map((result) => result.operation)).toEqual(["created", "overwritten"]);
+    const read = structured(await runReadAssessmentArtifact({ profileId: PROFILE, assessmentId: id, kind: "dossier" }, d.context));
+    expect(read.content).toBe("second draft");
+  });
+
+  it("does not let a save that started before a transition write its stage over the transition's", async () => {
+    const d = deployment();
+    const id = await opened(d);
+    structured(await runSaveAssessmentArtifact({ profileId: PROFILE, assessmentId: id, kind: "dossier", content: "first draft" }, d.context));
+
+    const [saved, moved] = await Promise.all([
+      runSaveAssessmentArtifact({ profileId: PROFILE, assessmentId: id, kind: "dossier", content: "corrected draft" }, d.context),
+      runTransitionAssessment({ profileId: PROFILE, assessmentId: id, target: "provisional", disposition: "Approved", risk: "Low" }, d.context),
+    ]);
+
+    expect(structured(saved).operation).toBe("overwritten");
+    expect(structured(moved).transitioned).toBe(true);
+    // The transition ran after the save, so its stage is the last one written.
+    expect(d.sim.listItems("Assessments")[0]!.fields).toMatchObject({ Status: "Provisional", State: "LIFECYCLE" });
+  });
+
+  it("orders a save and a record_findings call for one assessment typed in two cases", async () => {
+    const d = deployment();
+    const id = await opened(d);
+    structured(await runSaveAssessmentArtifact({ profileId: PROFILE, assessmentId: id, kind: "dossier", content: "first draft" }, d.context));
+
+    const [recorded, saved] = await Promise.all([
+      runRecordFindings({ profileId: PROFILE, assessmentId: id.toLowerCase(), findings: FINDINGS, summary: "Two findings." }, d.context),
+      runSaveAssessmentArtifact({ profileId: PROFILE, assessmentId: id, kind: "executive_summary", content: "Summary." }, d.context),
+    ]);
+
+    structured(recorded);
+    structured(saved);
+    // The save ran second, so the stage it stands for is the one the item holds.
+    expect(d.sim.listItems("Assessments")[0]!.fields.State).toBe("EXECUTIVE_SUMMARY");
+  });
+});
+

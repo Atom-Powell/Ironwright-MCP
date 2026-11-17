@@ -9,7 +9,7 @@ import { resolveAssessmentContext } from "./context.js";
 import { findAssessmentById, readAssessmentState } from "./read-state.js";
 import { appendJournal } from "./journal.js";
 import { refusalResult } from "./refusal.js";
-import { withKeyedLock } from "./keyed-lock.js";
+import { withAssessmentLock } from "./keyed-lock.js";
 
 export const RECORD_INPUT_CONSTRAINTS = "Every finding's risk is one of the profile's risk labels, and no two findings share a key.";
 
@@ -93,8 +93,8 @@ export async function runRecordFindings(input: unknown, context: ToolContext): P
   // The read of the existing keys and the creates are separate Graph requests, the window
   // keyed-lock.ts describes for open_assessment. Two overlapping calls, and a retry of a slow one
   // is enough, would each create a key, and nothing deletes a finding, so every later call would
-  // refuse on the duplicate. The key is lowercased because the id lookup matches either case.
-  return withKeyedLock(`${args.profileId}|findings|${args.assessmentId.toLowerCase()}`, () => recordFindings(args, context));
+  // refuse on the duplicate. The lock is the assessment's, shared with the other lifecycle tools.
+  return withAssessmentLock(args.profileId, args.assessmentId, () => recordFindings(args, context));
 }
 
 async function recordFindings(args: z.infer<typeof InputObject>, context: ToolContext): Promise<CallToolResult> {
