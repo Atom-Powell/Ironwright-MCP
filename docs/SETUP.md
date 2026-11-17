@@ -268,8 +268,8 @@ SharePoint and cannot be mapped: the module writes the vendor's display name the
 assessments, and the finding key on findings.
 
 The module filters list items on the assessment id, vendor folder, scope and status columns of the
-assessments list, the assessment id column of the findings list, and `Title` of the vendors list.
-Index each of those in the list settings. Every filtered query sends `Prefer:
+assessments list, the assessment id column of the findings list, and `Title` and the folder name
+column of the vendors list. Index each of those in the list settings. Every filtered query sends `Prefer:
 HonorNonIndexedQueriesWarningMayFailRandomly`, which lets a query on a non-indexed column succeed,
 but SharePoint may refuse such a query once the list passes its view threshold (measured
 2026-11-07). A refused filtered query surfaces as the Graph error, whose own message names the

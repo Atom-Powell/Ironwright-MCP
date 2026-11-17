@@ -72,7 +72,10 @@ export const AssessmentProfileSchema = z
         ctx.addIssue({ code: z.ZodIssueCode.custom, path, message: `"{${token}}" is not a workspace placeholder; the placeholders are {vendor}, {vendorFolder} and {assessmentId}` });
       }
       if (template.startsWith("/")) ctx.addIssue({ code: z.ZodIssueCode.custom, path, message: "a workspace template is library-relative and does not start with /" });
-      if (template.split("/").some((segment) => segment === "..")) ctx.addIssue({ code: z.ZodIssueCode.custom, path, message: "a workspace template cannot contain a .. segment" });
+      // Trimmed as joinWorkspacePath trims a segment, and "." refused with "..": the join throws on
+      // either, so a template holding one would load and then fail every call that renders it.
+      const dots = template.split("/").map((segment) => segment.trim()).find((segment) => segment === "." || segment === "..");
+      if (dots !== undefined) ctx.addIssue({ code: z.ZodIssueCode.custom, path, message: `a workspace template cannot contain a "${dots}" segment` });
     };
 
     checkPath(profile.workspace.root, ["workspace", "root"]);

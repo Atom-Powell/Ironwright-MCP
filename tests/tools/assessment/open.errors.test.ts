@@ -146,4 +146,37 @@ describe("open_assessment failures", () => {
     expect(calls.filter((call) => call.method !== "get")).toEqual([]);
     expect(await context.store.listJournal(PROFILE, "(vendor)")).toEqual([]);
   });
+
+  it("refuses a new vendor name when a record with no stored folder already files under the same sanitized name", async () => {
+    // Vendors item 7 has no FolderName, so it files under its own Title, "Acme Corp". The folder
+    // column query cannot see it, which is why the Title is asked for as well.
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([], "Acme Corp."),
+      vendorFolderQuery("Acme Corp", []),
+      vendorsQuery([listItem("7", { Title: "Acme Corp" })], "Acme Corp"),
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runOpenAssessment({ ...INPUT, vendor: "Acme Corp." }, context);
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toBe(
+      'The vendor name "Acme Corp." files under the folder "Acme Corp", which the vendor record "Acme Corp" (Vendors item 7) already uses. ' +
+        'If they are the same vendor, open under "Acme Corp". Nothing was written.',
+    );
+    expect(calls.filter((call) => call.method !== "get")).toEqual([]);
+  });
+
+  it("refuses before any write when the vendor's stored folder cannot be rendered into a path", async () => {
+    const { graph, calls } = createScriptedGraph([...RESOLVE_DRIVE_SCRIPT, vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: ".." })])]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runOpenAssessment(INPUT, context);
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toContain('has a ".." segment');
+    expect(resultText(result)).toContain("Nothing was written.");
+    expect(calls.filter((call) => call.method !== "get")).toEqual([]);
+  });
 });

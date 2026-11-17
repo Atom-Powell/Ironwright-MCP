@@ -70,4 +70,13 @@ describe("verify_publication", () => {
     expect(result.isError).toBe(true);
     expect(resultText(result)).toContain(`No item in list "Assessments" carries the assessment id "${ID}"`);
   });
+
+  it("names the stored assessment id in its prose when the caller's spelling differs by case", async () => {
+    const typed = ID.toLowerCase();
+    const { graph } = createScriptedGraph([...RESOLVE_DRIVE_SCRIPT, assessmentByIdQuery([listItem("2", stateFields())], typed), itemRead(PUBLICATION_PATH, folderItem("x"))]);
+
+    const result = await runVerifyPublication({ ...INPUT, assessmentId: typed }, assessmentToolContext(graph));
+
+    expect(resultText(result)).toBe(`The publication for ${ID} is not present: a folder, not a file, is at ${PUBLICATION_PATH}.`);
+  });
 });

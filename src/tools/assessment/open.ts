@@ -64,146 +64,166 @@ async function openAssessment(args: z.infer<typeof InputObject>, context: ToolCo
 
     const vendor = await findVendor(context.graph, ac, args.vendor);
     const folder = vendor.folder;
-    // What this call wrote, so the text says only what happened: created, resumed, or already open with nothing written.
-    let vendorCreated = false;
-    let wroteId = false;
-    let foldersCreated = 0;
-    if (!vendor.found) {
-      // No record has this Title, but one may already file under the folder this name sanitizes
-      // to, "Acme Inc" for "Acme Inc.". Assessments are found by folder, so a second record there
-      // would share the first one's assessments. Which vendor the caller means is not the server's
-      // to decide, so it refuses and names the record.
-      const holder = await findVendorByFolder(context.graph, ac, vendorFolder);
-      if (holder !== undefined) {
-        const held = holder.title === undefined ? "a vendor record with no Title" : `the vendor record "${holder.title}"`;
-        const advice = holder.title === undefined ? "" : ` If they are the same vendor, open under "${holder.title}".`;
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: `The vendor name "${args.vendor}" files under the folder "${vendorFolder}", which ${held} (${lists.vendors.name} item ${holder.itemId}) already uses.${advice} Nothing was written.`,
-            },
-          ],
-        };
-      }
-      const created = await createListItem(context.graph, { siteId: ac.siteId, listName: lists.vendors.name, fields: { Title: args.vendor, [lists.vendors.columns.folderName]: vendorFolder } });
-      await appendJournal(context, ac, "(vendor)", { stage: STAGE, operation: "list_item_created", target: `${lists.vendors.name}/${created.id}`, etagAfter: created.eTag });
-      vendorCreated = true;
-    }
-
     // The stored Title when the vendor was found: the lookup can match another spelling of the name,
     // and the assessment's Title feeds {vendor} in every artifact path.
     const vendorTitle = vendor.title ?? args.vendor;
 
-    // Retry rule: an assessment already in progress for this vendor and scope is returned, not duplicated.
-    let record = await findInProgressAssessment(context.graph, ac, folder, args.scope);
-    let created = false;
-    if (record === undefined) {
-      const item = await createListItem(context.graph, {
-        siteId: ac.siteId,
-        listName: lists.assessments.name,
-        fields: { Title: vendorTitle, ...fieldsFor(columns, { vendorFolder: folder, scope: args.scope, status: labels.inProgress, state: STAGE }) },
-      });
-      await appendJournal(context, ac, "(unassigned)", { stage: STAGE, operation: "list_item_created", target: `${lists.assessments.name}/${item.id}`, etagAfter: item.eTag });
-      record = recordFromFields(item.fields, item.id, item.eTag, columns);
-      created = true;
+    // Every path is rendered once before anything is written, with a stand-in for the id. A stored
+    // folder name the paths cannot hold would otherwise throw after the vendor record, the item and
+    // the id existed, and every retry would find that item and throw at the same place.
+    try {
+      const standIn = renderAssessmentId(ac.profile.assessmentId.template, { prefix: ac.profile.assessmentId.prefix, itemId: 0, now: ac.now });
+      workspacePaths(ac, { vendorTitle, vendorFolder: folder, assessmentId: standIn });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return {
+        isError: true,
+        content: [{ type: "text" as const, text: `The workspace paths for vendor "${vendorTitle}", filed under "${folder}", cannot be rendered: ${detail} Nothing was written.` }],
+      };
     }
 
-    // The id is rendered from the item id and written back before any folder exists.
-    if (record.assessmentId === undefined) {
-      const rendered = renderAssessmentId(ac.profile.assessmentId.template, { prefix: ac.profile.assessmentId.prefix, itemId: Number(record.itemId), now: ac.now });
-      await updateListItemFields(context.graph, { siteId: ac.siteId, listName: lists.assessments.name, itemId: record.itemId, fields: fieldsFor(columns, { assessmentId: rendered }) });
-      await appendJournal(context, ac, rendered, { stage: STAGE, operation: "list_item_updated", target: `${lists.assessments.name}/${record.itemId}`, etagBefore: record.etag });
-      const back = await getListItem(context.graph, { siteId: ac.siteId, listName: lists.assessments.name, itemId: record.itemId });
-      const readBack = back === undefined ? undefined : recordFromFields(back.fields, back.id, back.eTag, columns);
-      if (readBack?.assessmentId !== rendered) {
-        return {
-          isError: true,
-          content: [{ type: "text" as const, text: `The assessment id "${rendered}" was written to ${lists.assessments.name} item ${record.itemId} but read back as ${JSON.stringify(readBack?.assessmentId)}. No folder was created. The item and the journal record what did happen.` }],
-        };
-      }
-      record = readBack;
-      wroteId = true;
-    }
-
-    const paths = workspacePaths(ac, { vendorTitle: record.vendorTitle ?? vendorTitle, vendorFolder: record.vendorFolder ?? folder, assessmentId: record.assessmentId! });
-    // An item this call created or completed needs its workspace. On a retry of an item that was
-    // already complete, the root and every subfolder are read live, and the pass runs when any is
-    // absent: the root is created first, so a crash part way through the pass leaves a present root
-    // over missing subfolders, and the root alone cannot tell a finished workspace from that one.
-    // The pass answers a present folder as satisfied, so a folder wrongly read absent costs one 409.
-    let needsFolders = created || wroteId;
-    if (!needsFolders) {
-      for (const path of [paths.root, ...paths.subfolders]) {
-        const lookup = await readDriveItem(context.graph, { driveId: ac.driveId, path });
-        if (lookup.kind !== "found" || !lookup.item.isFolder) {
-          needsFolders = true;
-          break;
-        }
-      }
-    }
-
-    if (needsFolders) {
-      const toCreate = [paths.root, ...paths.subfolders];
-      const ensured = new Set<string>();
-      for (const target of toCreate) {
-        const segments = target.split("/");
-        for (let depth = 1; depth <= segments.length; depth += 1) {
-          const path = segments.slice(0, depth).join("/");
-          if (ensured.has(path)) continue;
-          const outcome = await createFolder(context.graph, { driveId: ac.driveId, parentPath: segments.slice(0, depth - 1).join("/"), name: segments[depth - 1]! });
-          if (outcome.kind === "created") {
-            await appendJournal(context, ac, record.assessmentId!, { stage: STAGE, operation: "folder_created", target: path, etagAfter: outcome.item.eTag });
-            foldersCreated += 1;
-          }
-          ensured.add(path);
-        }
-      }
-
-      // The pass takes a 409 as satisfied without reading what holds the name, which may be a file,
-      // so every folder is read back before the call claims the workspace exists.
-      for (const path of [paths.root, ...paths.subfolders]) {
-        const back = await readDriveItem(context.graph, { driveId: ac.driveId, path });
-        if (back.kind !== "found" || !back.item.isFolder) {
+    // The in progress lookup below is by folder, and two vendor records can store one folder name, so
+    // the name's lock alone would let their opens overlap. Taken second and never the other way
+    // round, so the two locks cannot wait on each other.
+    return await withKeyedLock(`${args.profileId}|folder|${folder.toLowerCase()}`, async () => {
+      // What this call wrote, so the text says only what happened: created, resumed, or already open with nothing written.
+      let vendorCreated = false;
+      let wroteId = false;
+      let foldersCreated = 0;
+      if (!vendor.found) {
+        // No record has this Title, but one may already file under the folder this name sanitizes
+        // to, "Acme Inc" for "Acme Inc.". Assessments are found by folder, so a second record there
+        // would share the first one's assessments. Which vendor the caller means is not the server's
+        // to decide, so it refuses and names the record.
+        // The Title query is skipped when the folder name is the name given: findVendor just asked it.
+        const holder = await findVendorByFolder(context.graph, ac, vendorFolder, vendorFolder !== args.vendor);
+        if (holder !== undefined) {
+          const held = holder.title === undefined ? "a vendor record with no Title" : `the vendor record "${holder.title}"`;
+          const advice = holder.title === undefined ? "" : ` If they are the same vendor, open under "${holder.title}".`;
           return {
             isError: true,
-            content: [{ type: "text" as const, text: `${path} was expected to be a folder; reading it back answered ${back.kind === "found" ? "a file" : "404"}. The journal records what this call created.` }],
+            content: [
+              {
+                type: "text" as const,
+                text: `The vendor name "${args.vendor}" files under the folder "${vendorFolder}", which ${held} (${lists.vendors.name} item ${holder.itemId}) already uses.${advice} Nothing was written.`,
+              },
+            ],
           };
         }
+        const created = await createListItem(context.graph, { siteId: ac.siteId, listName: lists.vendors.name, fields: { Title: args.vendor, [lists.vendors.columns.folderName]: vendorFolder } });
+        await appendJournal(context, ac, "(vendor)", { stage: STAGE, operation: "list_item_created", target: `${lists.vendors.name}/${created.id}`, etagAfter: created.eTag });
+        vendorCreated = true;
       }
-    }
 
-    const writes: string[] = [];
-    if (vendorCreated) writes.push(`created the vendor record in ${lists.vendors.name}`);
-    if (wroteId) writes.push(`wrote the assessment id to item ${record.itemId}`);
-    if (foldersCreated > 0) writes.push(`created ${foldersCreated} ${foldersCreated === 1 ? "folder" : "folders"}`);
-    const resumed = !created && writes.length > 0;
+      // Retry rule: an assessment already in progress for this vendor and scope is returned, not duplicated.
+      let record = await findInProgressAssessment(context.graph, ac, folder, args.scope);
+      let created = false;
+      if (record === undefined) {
+        const item = await createListItem(context.graph, {
+          siteId: ac.siteId,
+          listName: lists.assessments.name,
+          fields: { Title: vendorTitle, ...fieldsFor(columns, { vendorFolder: folder, scope: args.scope, status: labels.inProgress, state: STAGE }) },
+        });
+        await appendJournal(context, ac, "(unassigned)", { stage: STAGE, operation: "list_item_created", target: `${lists.assessments.name}/${item.id}`, etagAfter: item.eTag });
+        record = recordFromFields(item.fields, item.id, item.eTag, columns);
+        created = true;
+      }
 
-    const output = {
-      assessmentId: record.assessmentId!,
-      itemId: record.itemId,
-      vendor: record.vendorTitle ?? vendorTitle,
-      vendorFolder: record.vendorFolder ?? folder,
-      scope: record.scope ?? args.scope,
-      status: record.status ?? labels.inProgress,
-      state: record.state,
-      disposition: record.disposition,
-      risk: record.risk,
-      workspaceRoot: paths.root,
-      subfolders: paths.subfolders,
-      created,
-      resumed,
-      correlationId: ac.correlationId,
-      graphRequests: context.graph.requests() - before,
-    };
-    const subfolderCount = `${paths.subfolders.length} ${paths.subfolders.length === 1 ? "subfolder" : "subfolders"}`;
-    const text = created
-      ? `Opened ${output.assessmentId} for ${output.vendor} (${output.scope}): item ${output.itemId} in ${lists.assessments.name}, workspace ${paths.root}, root and ${subfolderCount} read back.`
-      : resumed
-        ? `Resumed ${output.assessmentId} for ${output.vendor} (${output.scope}), which was already in progress: this call ${writes.join(" and ")}. Workspace ${paths.root}: root and ${subfolderCount} read back.`
-        : `${output.assessmentId} for ${output.vendor} (${output.scope}) is already open; nothing was written. Workspace ${paths.root}: root and ${subfolderCount} read as folders.`;
-    return { structuredContent: output, content: [{ type: "text" as const, text }] };
+      // The id is rendered from the item id and written back before any folder exists.
+      if (record.assessmentId === undefined) {
+        const rendered = renderAssessmentId(ac.profile.assessmentId.template, { prefix: ac.profile.assessmentId.prefix, itemId: Number(record.itemId), now: ac.now });
+        await updateListItemFields(context.graph, { siteId: ac.siteId, listName: lists.assessments.name, itemId: record.itemId, fields: fieldsFor(columns, { assessmentId: rendered }) });
+        await appendJournal(context, ac, rendered, { stage: STAGE, operation: "list_item_updated", target: `${lists.assessments.name}/${record.itemId}`, etagBefore: record.etag });
+        const back = await getListItem(context.graph, { siteId: ac.siteId, listName: lists.assessments.name, itemId: record.itemId });
+        const readBack = back === undefined ? undefined : recordFromFields(back.fields, back.id, back.eTag, columns);
+        if (readBack?.assessmentId !== rendered) {
+          return {
+            isError: true,
+            content: [{ type: "text" as const, text: `The assessment id "${rendered}" was written to ${lists.assessments.name} item ${record.itemId} but read back as ${JSON.stringify(readBack?.assessmentId)}. No folder was created. The item and the journal record what did happen.` }],
+          };
+        }
+        record = readBack;
+        wroteId = true;
+      }
+
+      const paths = workspacePaths(ac, { vendorTitle: record.vendorTitle ?? vendorTitle, vendorFolder: record.vendorFolder ?? folder, assessmentId: record.assessmentId! });
+      // An item this call created or completed needs its workspace. On a retry of an item that was
+      // already complete, the root and every subfolder are read live, and the pass runs when any is
+      // absent: the root is created first, so a crash part way through the pass leaves a present root
+      // over missing subfolders, and the root alone cannot tell a finished workspace from that one.
+      // The pass answers a present folder as satisfied, so a folder wrongly read absent costs one 409.
+      let needsFolders = created || wroteId;
+      if (!needsFolders) {
+        for (const path of [paths.root, ...paths.subfolders]) {
+          const lookup = await readDriveItem(context.graph, { driveId: ac.driveId, path });
+          if (lookup.kind !== "found" || !lookup.item.isFolder) {
+            needsFolders = true;
+            break;
+          }
+        }
+      }
+
+      if (needsFolders) {
+        const toCreate = [paths.root, ...paths.subfolders];
+        const ensured = new Set<string>();
+        for (const target of toCreate) {
+          const segments = target.split("/");
+          for (let depth = 1; depth <= segments.length; depth += 1) {
+            const path = segments.slice(0, depth).join("/");
+            if (ensured.has(path)) continue;
+            const outcome = await createFolder(context.graph, { driveId: ac.driveId, parentPath: segments.slice(0, depth - 1).join("/"), name: segments[depth - 1]! });
+            if (outcome.kind === "created") {
+              await appendJournal(context, ac, record.assessmentId!, { stage: STAGE, operation: "folder_created", target: path, etagAfter: outcome.item.eTag });
+              foldersCreated += 1;
+            }
+            ensured.add(path);
+          }
+        }
+
+        // The pass takes a 409 as satisfied without reading what holds the name, which may be a file,
+        // so every folder is read back before the call claims the workspace exists.
+        for (const path of [paths.root, ...paths.subfolders]) {
+          const back = await readDriveItem(context.graph, { driveId: ac.driveId, path });
+          if (back.kind !== "found" || !back.item.isFolder) {
+            return {
+              isError: true,
+              content: [{ type: "text" as const, text: `${path} was expected to be a folder; reading it back answered ${back.kind === "found" ? "a file" : "404"}. The journal records what this call created.` }],
+            };
+          }
+        }
+      }
+
+      const writes: string[] = [];
+      if (vendorCreated) writes.push(`created the vendor record in ${lists.vendors.name}`);
+      if (wroteId) writes.push(`wrote the assessment id to item ${record.itemId}`);
+      if (foldersCreated > 0) writes.push(`created ${foldersCreated} ${foldersCreated === 1 ? "folder" : "folders"}`);
+      const resumed = !created && writes.length > 0;
+
+      const output = {
+        assessmentId: record.assessmentId!,
+        itemId: record.itemId,
+        vendor: record.vendorTitle ?? vendorTitle,
+        vendorFolder: record.vendorFolder ?? folder,
+        scope: record.scope ?? args.scope,
+        status: record.status ?? labels.inProgress,
+        state: record.state,
+        disposition: record.disposition,
+        risk: record.risk,
+        workspaceRoot: paths.root,
+        subfolders: paths.subfolders,
+        created,
+        resumed,
+        correlationId: ac.correlationId,
+        graphRequests: context.graph.requests() - before,
+      };
+      const subfolderCount = `${paths.subfolders.length} ${paths.subfolders.length === 1 ? "subfolder" : "subfolders"}`;
+      const text = created
+        ? `Opened ${output.assessmentId} for ${output.vendor} (${output.scope}): item ${output.itemId} in ${lists.assessments.name}, workspace ${paths.root}, root and ${subfolderCount} read back.`
+        : resumed
+          ? `Resumed ${output.assessmentId} for ${output.vendor} (${output.scope}), which was already in progress: this call ${writes.join(" and ")}. Workspace ${paths.root}: root and ${subfolderCount} read back.`
+          : `${output.assessmentId} for ${output.vendor} (${output.scope}) is already open; nothing was written. Workspace ${paths.root}: root and ${subfolderCount} read as folders.`;
+      return { structuredContent: output, content: [{ type: "text" as const, text }] };
+    });
   } catch (error) {
     console.error(`open_assessment failed for profile "${args.profileId}"`, error);
     return { isError: true, content: [{ type: "text" as const, text: describeToolFailure(error, subject) }] };

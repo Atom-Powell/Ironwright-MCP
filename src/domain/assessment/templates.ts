@@ -63,9 +63,11 @@ export function renderWorkspaceTemplate(template: string, values: WorkspaceValue
     template,
     (token) => {
       switch (token) {
-        // The display name is the caller's text, so it is rendered as a name SharePoint accepts: left
-        // raw, a colon made every save fail after the open had succeeded, and a slash added a folder.
-        case "vendor": return sanitizeFolderName(values.vendor);
+        // The display name is the caller's text, so the characters SharePoint refuses anywhere in a
+        // name are removed: left raw, a colon made every save fail after the open had succeeded, and a
+        // slash added a folder. Nothing else is touched. A dot or a run of spaces inside a file name
+        // is legal, and removing one would move the artifact paths of an assessment already open.
+        case "vendor": return stripRefusedNameCharacters(values.vendor);
         case "vendorFolder": return values.vendorFolder;
         case "assessmentId": return values.assessmentId;
         default: return undefined;
@@ -98,20 +100,30 @@ export function renderAssessmentId(template: string, values: IdValues): string {
   );
 }
 
+/** The characters SharePoint refuses anywhere in a file or folder name, removed and nothing else. */
+export function stripRefusedNameCharacters(name: string): string {
+  return name.replace(/["*:<>?/\\|]/g, "");
+}
+
 /**
  * The characters SharePoint refuses in a file or folder name, removed rather
  * than replaced so two vendors differing only in punctuation still differ in
  * their folder names less often than they would collapse onto one. Trailing
- * dots are stripped because SharePoint refuses them on a folder. The empty
- * string is a possible result and the caller refuses it with a message.
+ * dots are stripped because SharePoint refuses them on a folder, together with
+ * the spaces between them: stripped in one pass, ". ." came out as ".", a
+ * segment no path can hold. The empty string is a possible result and the
+ * caller refuses it with a message.
  */
 export function sanitizeFolderName(name: string): string {
-  return name
-    .replace(/["*:<>?/\\|]/g, "")
+  return stripRefusedNameCharacters(name)
     .replace(/\s+/g, " ")
     .trim()
-    .replace(/\.+$/, "")
-    .trim();
+    .replace(/[.\s]+$/, "");
+}
+
+/** The file name a library-relative path ends in, which is the name an artifact must carry exactly. */
+export function fileNameOf(path: string): string {
+  return path.slice(path.lastIndexOf("/") + 1);
 }
 
 /**

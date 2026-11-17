@@ -521,20 +521,29 @@ across calls today and a stale one would be the ID navigation failure the projec
 ## Amendments, 2026-11-16, from a code review of the phase 9 source
 
 A review of every source change from plan 9b through the campaign fixes read ten defects out of the
-code. Seven are fixed on `fix/assessment-review-findings` and amend this spec as follows. Three wait
-on a ruling or a probe and are recorded in `docs/OPEN-ITEMS.md`. Nothing in this section was run
-against a tenant; each fix is pinned by a test that failed first.
+code, and a review of the fixes on 2026-11-17 read ten more out of those. The amendments below are
+the design changes the two led to. Which findings are fixed and which wait is recorded in
+`docs/OPEN-ITEMS.md`, not here.
 
-**`{vendor}` renders as a name SharePoint accepts.** The workspace placeholder `{vendor}` is rendered
-through the same sanitizing as the vendor folder name. Rendered raw, a vendor named `Acme: Cloud`
-opened, because the root uses `{vendorFolder}`, and then failed every save with a name Graph
-refuses, with no tool to remove the assessment; a name holding `/` added a folder the journal never
-recorded. A consumer's publisher that builds the publication name itself must build it from the
-path `verify_publication` reports, not from the display name.
+**`{vendor}` renders without the characters SharePoint refuses.** The workspace placeholder
+`{vendor}` is rendered with the characters SharePoint refuses anywhere in a name removed, and
+nothing else changed. Rendered raw, a vendor named `Acme: Cloud` opened, because the root uses
+`{vendorFolder}`, and then failed every save with a name Graph refuses, with no tool to remove the
+assessment; a name holding `/` added a folder the journal never recorded. A dot or a run of spaces
+inside the name is left alone: the first fix ran `{vendor}` through the folder name sanitizing,
+which strips a trailing dot, and that would have moved the dossier of an assessment already open
+for `Acme Inc.` to a path holding no file. A consumer's publisher that builds the publication name
+itself must build it from the path `verify_publication` reports, not from the display name.
 
-**A `.` or `..` path segment is refused.** `joinWorkspacePath` throws on one. The request URL is
-normalized before it is sent, so such a path addresses a different folder from the one the journal
-would record.
+**A `.` or `..` path segment is refused, at load and before the first write.** `joinWorkspacePath`
+throws on one. The request URL is normalized before it is sent, so such a path addresses a
+different folder from the one the journal would record. The profile schema refuses a template
+holding either segment, trimmed as the join trims it, so the refusal is a startup message rather
+than a failure on every call. The folder name sanitizing strips trailing dots and the spaces
+between them together, so `. .` leaves nothing rather than `.`. `open_assessment` renders every
+path once before its first write, with a stand-in for the id, so a stored folder name the paths
+cannot hold is refused with nothing written, where it would have thrown after the vendor record,
+the item and the id existed.
 
 **Artifact presence names what else is at the path.** `ArtifactPresence` carries `eTag` and `size`
 only for the artifact itself, and an `occupant` (name, folder or file) when the lookup answered
@@ -548,20 +557,33 @@ It used to throw a message about the profile's artifact kinds, which `record_fin
 `transition_assessment` surfaced for a mistyped id.
 
 **The stored assessment id keys everything.** After the item is found, the journal, the Findings
-rows, the output and the prose all use the id as the list stores it. The journal's partition key is
-case sensitive, and a caller's id in another case would have split one assessment's journal in two.
+rows, the output, the prose and a refusal all use the id as the list stores it, in every tool that
+takes an id. The journal's partition key is case sensitive, and a caller's id in another case would
+have split one assessment's journal in two. `findAssessmentById` returns a record that carries the
+id, so no caller holds a fallback to the typed one.
+
+**`read_assessment_artifact` applies the exact name rule.** It refuses a file whose name differs
+from the one the template renders, as artifact presence does, and does not download it. It did its
+own lookup, so it handed the auditor a file the lifecycle tools refused to recognize.
 
 **`record_findings` is serialized per assessment**, with the lock `open_assessment` uses, for the
 same reason: the read of existing finding keys and the creates are separate requests, and nothing
 deletes a duplicate finding. The open lock's key is lowercased, so two spellings of one vendor queue
-behind each other.
+behind each other. `open_assessment` then takes a second lock keyed on the folder it resolved,
+because the in progress lookup is by folder and two vendor records can store one folder name. The
+folder's lock is always taken inside the name's, so the two cannot wait on each other.
 
 **A vendor is one folder name.** `open_assessment` titles a new assessment with the vendor record's
 stored Title, not the caller's spelling. When no record has the Title given, it looks for a record
 already filing under the folder name that Title sanitizes to and refuses if there is one, naming
 it, where it used to create a second vendor record and then resume the first vendor's assessment.
 It refuses rather than merges because whether `Acme Inc.` and `Acme Inc` are one vendor is not the
-server's to decide. The lookup costs one more list query, only on the path that creates a vendor.
+server's to decide. A record files under its stored folder name, or under its sanitized Title when
+that column is empty, so the lookup is two queries: the folder column, then a Title equal to the
+folder name whose column is empty. A Title that only sanitizes to the folder name, with an empty
+column, is found by neither; no filter expresses it. A vendor found by Title with no stored folder
+is filed under its stored Title sanitized, not the caller's spelling. The lookup runs only on the
+path that creates a vendor, and `docs/SETUP.md` names the folder name column among those to index.
 
 **What these rest on.** That a list `eq` filter matches text without regard to case is not probed;
 the campaign measured it for drive paths only. Every fix above is correct whichever way a list

@@ -3,6 +3,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { ToolContext } from "../context.js";
 import { describeToolFailure, type FailureSubject } from "../errors.js";
 import { readDriveItem } from "../../graph/items.js";
+import { fileNameOf } from "../../domain/assessment/templates.js";
 import { resolveAssessmentContext } from "./context.js";
 import { findAssessmentById, recordWorkspacePaths } from "./read-state.js";
 
@@ -50,14 +51,16 @@ export async function runVerifyPublication(input: unknown, context: ToolContext)
     }
     // The profile schema requires a publication kind, so its path is always rendered.
     const path = paths.artifacts.publication!;
-    const expectedName = path.split("/").at(-1)!;
+    const expectedName = fileNameOf(path);
+    // The id as the list stores it, which the lookup can match in another case than the caller's.
+    const assessmentId = record.assessmentId;
 
     const lookup = await readDriveItem(context.graph, { driveId: ac.driveId, path });
     if (lookup.kind !== "found" || lookup.item.isFolder) {
       const output = { present: false, path, expectedName, graphRequests: context.graph.requests() - before };
       const text =
         lookup.kind === "found"
-          ? `The publication for ${args.assessmentId} is not present: a folder, not a file, is at ${path}.`
+          ? `The publication for ${assessmentId} is not present: a folder, not a file, is at ${path}.`
           : `The publication is not at ${path}; Graph answered 404 for that path.`;
       return { structuredContent: output, content: [{ type: "text" as const, text }] };
     }
@@ -69,7 +72,7 @@ export async function runVerifyPublication(input: unknown, context: ToolContext)
     if (item.name !== expectedName) {
       const output = { present: false, path, expectedName, name: item.name, graphRequests: context.graph.requests() - before };
       const text =
-        `The publication for ${args.assessmentId} is not present under its expected name: a file named "${item.name}" is at ${path}, ` +
+        `The publication for ${assessmentId} is not present under its expected name: a file named "${item.name}" is at ${path}, ` +
         `and the expected name is "${expectedName}".`;
       return { structuredContent: output, content: [{ type: "text" as const, text }] };
     }
@@ -85,7 +88,7 @@ export async function runVerifyPublication(input: unknown, context: ToolContext)
       graphRequests: context.graph.requests() - before,
     };
     const text =
-      `The publication for ${args.assessmentId} is at ${path}: ${item.name}, ` +
+      `The publication for ${assessmentId} is at ${path}: ${item.name}, ` +
       `${item.size === undefined ? "size not returned" : `${item.size} bytes`}, last modified ${item.lastModifiedDateTime ?? "(not returned)"}.`;
     return { structuredContent: output, content: [{ type: "text" as const, text }] };
   } catch (error) {

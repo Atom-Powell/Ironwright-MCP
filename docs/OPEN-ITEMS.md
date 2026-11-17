@@ -13,7 +13,7 @@ ordered by when they will matter, not by when they were written.
 This table is the one place status lives. `CLAUDE.md`, the README and the PAI vault note point
 here and restate none of it, so a change of state is one edit in one file, made in the same commit
 as the sitting, merge, or decision that caused it. The table says where each phase is; the dated
-sections below say what was proven and what was not. Last updated 2026-11-16.
+sections below say what was proven and what was not. Last updated 2026-11-17.
 
 | Phase | State | Evidence |
 |---|---|---|
@@ -41,7 +41,7 @@ sections below say what was proven and what was not. Last updated 2026-11-16.
 | 9b Core: modules, site sets, inbound authentication, lifecycle kind, journal | Complete against fakes, merged 2026-11-07; nothing in it has met a live tenant yet | PR #22, merged 2026-11-07 |
 | 9c Assessment module and the four Graph operations | Verified live 2026-11-08 on the main path: open, save, findings, verify, transition and both reads, 25 calls on the developer tenant. Three checks were not run and stay carried: the implicit parent folder, the publication name case, and an `executive_summary` save | PR #25; sitting below; `docs/superpowers/specs/evidence/2026-11-08-assessment-sitting/` |
 | Pre-EON test campaign | First run 2026-11-09: 8 scenarios on the developer tenant, 2 defects found (concurrent opens duplicated an assessment; a misnamed publication completed an assessment), both fixed in PR #27. Rerun the same day on the fixed server: s2 and s4 pass, s3, s5, s7 and s8 pass, s1 and s6 measured as before. Still to run: interrupted open, throttling and token expiry, inbound auth over a public tunnel, Copilot Studio contact (plan 9d); plan `docs/superpowers/plans/2026-11-09-pre-eon-test-campaign.md` | `scripts/pre-eon/campaign.ts`; sitting below |
-| Phase 9 code review | 2026-11-16: ten defects read out of the 9b, 9c and campaign source. Seven fixed against fakes on `fix/assessment-review-findings`, none run live; three wait on a ruling or a probe (see the carried items below) | section below; spec amendments of 2026-11-16 |
+| Phase 9 code review | 2026-11-16: ten defects read out of the 9b, 9c and campaign source; seven fixed against fakes, three wait on a ruling or a probe (see the carried items below). 2026-11-17: a review of those fixes read ten more findings, all fixed against fakes. None of it run live | section below; spec amendments of 2026-11-16 |
 | 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9c and carries the unverified A3 and B1 probes, and is the item that slips first | same spec |
 | Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
 | CPA practice domain (multi-site scan and queries, grant issuer loop over a sites file, folder template taxonomy) | Not started; the phase after 9 | same spec |
@@ -2530,6 +2530,23 @@ has met a tenant.
 The suite is at 3032 tests across 219 files. Each of the seven would have been reachable by the EON pilot's agent
 without any operator error: a vendor name with punctuation, a client retry, an id typed in another
 case.
+
+**The fixes reviewed, 2026-11-17.** A second review read the seven fixes before they were committed
+and found ten things wrong with them, each confirmed by a test that failed first, except the two
+that are prose. It ran nothing against a tenant either.
+
+| Finding | State |
+|---|---|
+| `{vendor}` run through the folder name sanitizing also lost a trailing dot and collapsed spaces, moving the artifact paths of an assessment already open for a name like `Acme Inc.` | Fixed: only the characters SharePoint refuses are removed |
+| The new `.` and `..` refusal threw in `open_assessment` after the vendor record, the item and the id were written; the profile schema still accepted a `.` segment; `. .` sanitized to `.` | Fixed: refused at load, the sanitizing leaves nothing of such a name, and open renders every path before its first write |
+| The folder lookup missed a vendor record with an empty folder column, which files under its sanitized Title | Fixed for a Title equal to the folder name; a Title that only sanitizes to it is still not found, and no filter expresses it |
+| `docs/SETUP.md` did not name the vendors folder name column among those to index | Fixed |
+| A vendor found by Title with no stored folder was filed under the caller's spelling | Fixed: filed under the stored Title, sanitized |
+| `read_assessment_artifact` returned a file whose name differs by case as the artifact | Fixed: refused, not downloaded |
+| Refusals, `read_assessment_artifact` and `verify_publication` still echoed the id as typed | Fixed: the stored id everywhere once the item is found |
+| The open lock was keyed on the name, and two vendor records storing one folder name raced past it | Fixed: a second lock on the resolved folder |
+| The expected file name was derived in four places and a dead fallback repeated in four tools | Fixed: one helper, and the id lookup returns a record that carries the id |
+| The spec amendment restated build status | Fixed: it points here |
 
 ## The phase 6d live sitting, 2026-09-24: plans an operator describes
 

@@ -119,10 +119,10 @@ async function recordFindings(args: z.infer<typeof InputObject>, context: ToolCo
       requireInProgress(state, ac.profile.lifecycle.status),
       requireArtifact(state, "dossier"),
     );
-    if (!check.ok) return refusalResult(TOOL, STAGE, args.assessmentId, check);
+    if (!check.ok) return refusalResult(TOOL, STAGE, record?.assessmentId ?? args.assessmentId, check);
     const item = record!;
     // The id as the list stores it, which is what findings are filed under and the journal is keyed by.
-    const assessmentId = item.assessmentId ?? args.assessmentId;
+    const assessmentId = item.assessmentId;
 
     const existing = await queryListItems(context.graph, {
       siteId: ac.siteId,

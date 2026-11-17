@@ -1,8 +1,8 @@
 import type { GraphClient } from "../../graph/client.js";
 import { readDriveItem } from "../../graph/items.js";
 import { odataString, queryListItems } from "../../graph/lists.js";
-import { joinWorkspacePath, renderWorkspaceTemplate, sanitizeFolderName } from "../../domain/assessment/templates.js";
-import { recordFromFields, rootPathUnavailable, type AssessmentRecord, type AssessmentState } from "../../domain/assessment/state.js";
+import { fileNameOf, joinWorkspacePath, renderWorkspaceTemplate, sanitizeFolderName } from "../../domain/assessment/templates.js";
+import { recordFromFields, rootPathUnavailable, type AssessmentRecord, type AssessmentState, type IdentifiedAssessmentRecord } from "../../domain/assessment/state.js";
 import type { AssessmentContext } from "./context.js";
 
 export interface WorkspacePaths {
@@ -41,7 +41,7 @@ export interface VendorLookup {
    * every path and every later lookup is built from.
    */
   title: string | undefined;
-  /** The folder name the vendor's items are filed under: the stored one when set, otherwise the sanitized name. */
+  /** The folder name the vendor's items are filed under: the stored one when set, otherwise the sanitized stored Title, or the sanitized name when no record was found. */
   folder: string;
 }
 
@@ -55,11 +55,14 @@ export async function findVendor(graph: Pick<GraphClient, "get">, ac: Assessment
   const vendors = ac.profile.lists.vendors;
   const items = await queryListItems(graph, { siteId: ac.siteId, listName: vendors.name, filter: `fields/Title eq ${odataString(vendor)}` });
   const stored = items[0]?.fields[vendors.columns.folderName];
-  const title = items[0]?.fields.Title;
+  const raw = items[0]?.fields.Title;
+  const title = typeof raw === "string" && raw.length > 0 ? raw : undefined;
   return {
     found: items.length > 0,
-    title: typeof title === "string" && title.length > 0 ? title : undefined,
-    folder: typeof stored === "string" && stored.length > 0 ? stored : sanitizeFolderName(vendor),
+    title,
+    // From the stored Title when there is one: the lookup can match another spelling, and the
+    // folder on the drive was named from the stored one.
+    folder: typeof stored === "string" && stored.length > 0 ? stored : sanitizeFolderName(title ?? vendor),
   };
 }
 
@@ -67,28 +70,53 @@ export async function findVendor(graph: Pick<GraphClient, "get">, ac: Assessment
  * The vendor record already filing under a folder name, if any. Assessments
  * are found by folder name, so two records sharing one would share their
  * assessments; open_assessment asks this before it creates a record.
+ *
+ * A record files under its stored folder name, or under its sanitized Title
+ * when that column is empty, and a filter on the column cannot see the second
+ * kind. `titleToo` asks for a record whose Title is the folder name itself and
+ * whose column is empty, the likeliest of them: "Acme Inc", entered by hand,
+ * when the caller says "Acme Inc.". A Title that only sanitizes to the folder
+ * name, "Acme Inc?", is not found by either query; no filter can express it.
  */
-export async function findVendorByFolder(graph: Pick<GraphClient, "get">, ac: AssessmentContext, folder: string): Promise<{ itemId: string; title: string | undefined } | undefined> {
+export async function findVendorByFolder(
+  graph: Pick<GraphClient, "get">,
+  ac: AssessmentContext,
+  folder: string,
+  titleToo: boolean,
+): Promise<{ itemId: string; title: string | undefined } | undefined> {
   const vendors = ac.profile.lists.vendors;
-  const items = await queryListItems(graph, { siteId: ac.siteId, listName: vendors.name, filter: `fields/${vendors.columns.folderName} eq ${odataString(folder)}` });
-  const item = items[0];
-  if (item === undefined) return undefined;
-  const title = item.fields.Title;
-  return { itemId: item.id, title: typeof title === "string" && title.length > 0 ? title : undefined };
+  const titleOf = (fields: Record<string, unknown>): string | undefined => (typeof fields.Title === "string" && fields.Title.length > 0 ? fields.Title : undefined);
+  const byColumn = await queryListItems(graph, { siteId: ac.siteId, listName: vendors.name, filter: `fields/${vendors.columns.folderName} eq ${odataString(folder)}` });
+  if (byColumn[0] !== undefined) return { itemId: byColumn[0].id, title: titleOf(byColumn[0].fields) };
+  if (!titleToo) return undefined;
+  const byTitle = await queryListItems(graph, { siteId: ac.siteId, listName: vendors.name, filter: `fields/Title eq ${odataString(folder)}` });
+  const unfiled = byTitle.find((item) => {
+    const stored = item.fields[vendors.columns.folderName];
+    return !(typeof stored === "string" && stored.length > 0);
+  });
+  return unfiled === undefined ? undefined : { itemId: unfiled.id, title: titleOf(unfiled.fields) };
 }
 
 function assessmentsList(ac: AssessmentContext): { siteId: string; listName: string } {
   return { siteId: ac.siteId, listName: ac.profile.lists.assessments.name };
 }
 
-export async function findAssessmentById(graph: Pick<GraphClient, "get">, ac: AssessmentContext, assessmentId: string): Promise<AssessmentRecord | undefined> {
+/**
+ * The record carries the id as the list stores it, which the lookup can match
+ * in another case than the caller's. Every journal key, output and sentence
+ * after this uses the stored one.
+ */
+export async function findAssessmentById(graph: Pick<GraphClient, "get">, ac: AssessmentContext, assessmentId: string): Promise<IdentifiedAssessmentRecord | undefined> {
   const columns = ac.profile.lists.assessments.columns;
   const items = await queryListItems(graph, { ...assessmentsList(ac), filter: `fields/${columns.assessmentId} eq ${odataString(assessmentId)}` });
   if (items.length > 1) {
     throw new Error(`${items.length} items in list "${ac.profile.lists.assessments.name}" carry the assessment id "${assessmentId}"; the server will not choose between them.`);
   }
   const item = items[0];
-  return item === undefined ? undefined : recordFromFields(item.fields, item.id, item.eTag, columns);
+  if (item === undefined) return undefined;
+  const record = recordFromFields(item.fields, item.id, item.eTag, columns);
+  // The filter matched on the id column, so the item holds one; the fallback only satisfies the type.
+  return { ...record, assessmentId: record.assessmentId ?? assessmentId };
 }
 
 export async function findInProgressAssessment(
@@ -124,7 +152,7 @@ export async function readAssessmentState(graph: Pick<GraphClient, "get">, ac: A
     // SharePoint answers a path case insensitively, so a file named differently only by case comes
     // back from the lookup. It is not the file the template names, and the 9c-era campaign showed a
     // misnamed publication completing an assessment on that reading. The name must match exactly.
-    const expectedName = path.slice(path.lastIndexOf("/") + 1);
+    const expectedName = fileNameOf(path);
     const found = lookup.kind === "found" ? lookup.item : undefined;
     const present = found !== undefined && !found.isFolder && found.name === expectedName;
     artifacts.push({

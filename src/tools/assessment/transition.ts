@@ -105,7 +105,7 @@ export async function runTransitionAssessment(input: unknown, context: ToolConte
       requireArtifact(state, "dossier"),
       ...(args.target === "completed" ? [requireArtifact(state, "publication")] : []),
     );
-    if (!check.ok) return refusalResult(TOOL, STAGE, args.assessmentId, check);
+    if (!check.ok) return refusalResult(TOOL, STAGE, assessmentId, check);
     const item = record!;
 
     await updateListItemFields(context.graph, {

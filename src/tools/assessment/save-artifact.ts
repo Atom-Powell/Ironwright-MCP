@@ -6,6 +6,7 @@ import { MAX_SMALL_UPLOAD_BYTES, UploadTooLargeError, createFile, overwriteFile,
 import { downloadDriveItem } from "../../graph/content.js";
 import { updateListItemFields } from "../../graph/lists.js";
 import { allOf, fieldsFor, requireInProgress, requireRecord, requireRoot } from "../../domain/assessment/state.js";
+import { fileNameOf } from "../../domain/assessment/templates.js";
 import { profileArtifactKinds, resolveAssessmentContext, unknownKindText } from "./context.js";
 import { findAssessmentById, readAssessmentState } from "./read-state.js";
 import { sha256Hex } from "./hash.js";
@@ -82,11 +83,12 @@ export async function runSaveAssessmentArtifact(input: unknown, context: ToolCon
       requireInProgress(state, ac.profile.lifecycle.status),
       requireRoot(state),
     );
-    if (!check.ok) return refusalResult(TOOL, stageFor(args.kind, false), args.assessmentId, check);
+    // The id as the list stores it once the item is found. The lookup can match a spelling that
+    // differs by case, and the journal is keyed by the exact string, so keying it by what the caller
+    // typed would split it.
+    if (!check.ok) return refusalResult(TOOL, stageFor(args.kind, false), record?.assessmentId ?? args.assessmentId, check);
     const item = record!;
-    // The id as the list stores it. The lookup can match a spelling that differs by case, and the
-    // journal is keyed by the exact string, so keying it by what the caller typed would split it.
-    const assessmentId = item.assessmentId ?? args.assessmentId;
+    const assessmentId = item.assessmentId;
 
     const artifact = state.artifacts.find((entry) => entry.kind === args.kind);
     if (artifact === undefined) throw new Error(`The state read carries no artifact kind "${args.kind}" although the profile names it.`);
@@ -95,7 +97,7 @@ export async function runSaveAssessmentArtifact(input: unknown, context: ToolCon
     // and be misreported as a file that appeared between the read and the write.
     if (artifact.occupant !== undefined) {
       if (artifact.occupant.isFolder) return failure(`A folder, not a file, is at ${path}, where the profile puts the ${args.kind}. Nothing was written.`);
-      const expectedName = path.slice(path.lastIndexOf("/") + 1);
+      const expectedName = fileNameOf(path);
       return failure(
         `The lookup of ${path} answered a file named "${artifact.occupant.name}", not "${expectedName}", the name the profile gives the ${args.kind}. ` +
           "The server writes only under that exact name. Nothing was written.",

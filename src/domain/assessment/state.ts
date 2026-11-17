@@ -8,6 +8,8 @@
  * what it said. The agent and the operator see the same facts, which is what
  * the spec asks of a refusal.
  */
+import { fileNameOf } from "./templates.js";
+
 export interface AssessmentColumns {
   assessmentId: string; vendorFolder: string; scope: string; status: string;
   state: string; disposition: string; risk: string; summary: string;
@@ -27,6 +29,9 @@ export interface AssessmentRecord {
   risk: string | undefined;
   summary: string | undefined;
 }
+
+/** A record found by its assessment id, which it therefore carries. */
+export type IdentifiedAssessmentRecord = AssessmentRecord & { assessmentId: string };
 
 export interface ArtifactPresence {
   kind: string;
@@ -156,7 +161,7 @@ export function requireArtifact(state: AssessmentState, kind: string): Precondit
   }
   if (artifact.present) return { ok: true };
   if (artifact.occupant !== undefined) {
-    const expectedName = artifact.path.slice(artifact.path.lastIndexOf("/") + 1);
+    const expectedName = fileNameOf(artifact.path);
     const { name, isFolder } = artifact.occupant;
     return {
       ok: false,

@@ -92,7 +92,7 @@ export async function runGetAssessment(input: unknown, context: ToolContext): Pr
       const state = await readAssessmentState(context.graph, ac, record);
       // The journal is keyed by the assessment id as the list stores it, which the lookup can match in
       // another case; entries written under a placeholder before the id existed are not read here.
-      const assessmentId = record.assessmentId ?? args.assessmentId;
+      const assessmentId = record.assessmentId;
       const journal = journalSummary(await context.store.listJournal(ac.profile.profileId, assessmentId));
       const artifacts = state.artifacts.map((artifact) => ({ kind: artifact.kind, path: artifact.path, present: artifact.present, eTag: artifact.eTag, size: artifact.size }));
       const output = { found: true, assessment: assessmentSummary(record), artifacts, journal, graphRequests: context.graph.requests() - before };

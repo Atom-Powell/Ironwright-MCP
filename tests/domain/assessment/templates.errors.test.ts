@@ -19,7 +19,7 @@ describe("rendering refuses what validation would have refused", () => {
     expect(() => renderWorkspaceTemplate("Assessments/{vendorFolder}/{assessmentId}", { ...VALUES, vendorFolder: "" })).toThrow(/vendorFolder/);
   });
   it("throws when a vendor name holds no character a name allows, rather than rendering {vendor} empty", () => {
-    expect(() => renderWorkspaceTemplate("Research/{vendor}_Dossier.md", { ...VALUES, vendor: '/:"..' })).toThrow(/vendor/);
+    expect(() => renderWorkspaceTemplate("Research/{vendor}_Dossier.md", { ...VALUES, vendor: '/:"*' })).toThrow(/vendor/);
   });
   it.each(["..", "."])('refuses to join a "%s" segment, which would address a folder other than the one the path names', (segment) => {
     expect(() => joinWorkspacePath("Assessments/V/A-1", `Research/${segment}/x.md`)).toThrow(/Assessments\/V\/A-1\/Research/);

@@ -95,4 +95,32 @@ describe("read_assessment_artifact failures", () => {
     expect(resultText(result)).toContain("dossier, executive_summary, publication");
     expect(graph.requests()).toBe(0);
   });
+
+  it("does not return a file whose name differs from the artifact's by case, and names both", async () => {
+    const { graph, calls } = createScriptedGraph([...FOUND, itemRead(DOSSIER_PATH, fileItem("acme corp_research_dossier.md", '"e1"', 16))]);
+
+    const result = await runReadAssessmentArtifact(INPUT, assessmentToolContext(graph));
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toBe(
+      `The lookup of ${DOSSIER_PATH} answered a file named "acme corp_research_dossier.md", not "Acme Corp_Research_Dossier.md", the name the profile gives the dossier for ${ID}. Its content was not read.`,
+    );
+    expect(calls.filter((call) => call.method === "getBytes")).toEqual([]);
+  });
+
+  it("answers under the stored assessment id when the caller's spelling differs by case", async () => {
+    const typed = ID.toLowerCase();
+    const bytes = new TextEncoder().encode("# probe v2\n");
+    const { graph } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      assessmentByIdQuery([listItem("2", stateFields())], typed),
+      itemRead(DOSSIER_PATH, dossierItem('"e1"', 16)),
+      contentRead(DOSSIER_PATH, bytes),
+    ]);
+
+    const result = await runReadAssessmentArtifact({ ...INPUT, assessmentId: typed }, assessmentToolContext(graph));
+
+    expect(result.isError).toBeUndefined();
+    expect((result.structuredContent as Record<string, unknown>).assessmentId).toBe(ID);
+  });
 });

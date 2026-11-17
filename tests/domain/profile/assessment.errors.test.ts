@@ -65,6 +65,14 @@ describe("assessment profile refusals", () => {
     expectIssue(broken((p) => { p.workspace.artifacts.dossier = "../escape/{vendor}.md"; }), "workspace.artifacts.dossier", /\.\./);
   });
 
+  it("refuses a workspace root with a . segment, which the tools would refuse to join on every call", () => {
+    expectIssue(broken((p) => { p.workspace.root = "./Assessments/{vendorFolder}/{assessmentId}"; }), "workspace.root", /"\." segment/);
+  });
+
+  it("refuses a .. segment padded with spaces, since a path segment is trimmed before it is joined", () => {
+    expectIssue(broken((p) => { p.workspace.subfolders = ["Research/ .. /Other"]; }), "workspace.subfolders.0", /"\.\." segment/);
+  });
+
   it("refuses two equal status labels", () => {
     expectIssue(broken((p) => { p.lifecycle.status.completed = "In Progress"; }), "lifecycle.status", /must differ/);
   });

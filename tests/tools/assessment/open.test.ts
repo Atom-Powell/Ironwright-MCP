@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { runOpenAssessment } from "../../../src/tools/assessment/open.js";
 import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, listItem, resultText } from "./fake-graph.js";
-import { assessmentFields, assessmentsQuery, firstOpenScript, folderCreates, idWriteBack, readBacks, workspaceReads, vendorsQuery } from "./open-script.js";
+import { assessmentFields, assessmentsQuery, firstOpenScript, folderCreates, idWriteBack, readBacks, workspaceReads, vendorFolderQuery, vendorsQuery } from "./open-script.js";
 
 const PROFILE = "vendor-assessments";
 const INPUT = { profileId: PROFILE, vendor: "Acme Corp", scope: "Security" };
@@ -264,5 +264,76 @@ describe("open_assessment", () => {
     const created = calls.find((call) => call.method === "post" && call.path.includes("/lists/Assessments/items"))!;
     expect((created.body as { fields: Record<string, unknown> }).fields.Title).toBe("Acme Corp");
     expect((result.structuredContent as Record<string, unknown>).vendor).toBe("Acme Corp");
+  });
+
+  it("files a vendor with no stored folder under its stored name, not under the caller's spelling of it", async () => {
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([listItem("7", { Title: "Acme Corp" })], "ACME CORP"),
+      assessmentsQuery("Acme Corp", []),
+      { method: "post", pathIncludes: "/lists/Assessments/items", response: listItem("2", assessmentFields("Acme Corp")) },
+      ...idWriteBack("Acme Corp", "2", "ASM-2026-00002"),
+      ...folderCreates("Acme Corp", "ASM-2026-00002"),
+      ...readBacks("Acme Corp", "ASM-2026-00002"),
+    ]);
+
+    const result = await runOpenAssessment({ ...INPUT, vendor: "ACME CORP" }, assessmentToolContext(graph));
+
+    expect(result.isError).toBeUndefined();
+    const created = calls.find((call) => call.method === "post" && call.path.includes("/lists/Assessments/items"))!;
+    expect((created.body as { fields: Record<string, unknown> }).fields.VendorFolder).toBe("Acme Corp");
+    expect((result.structuredContent as Record<string, unknown>).workspaceRoot).toBe("Assessments/Acme Corp/ASM-2026-00002");
+  });
+
+  it("creates the vendor when the record holding the sanitized name as its Title files under another folder", async () => {
+    // "Acme Corp" is taken as a Title, but that record files under "ACME", so nothing files under
+    // "Acme Corp" yet and "Acme Corp." may take it.
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([], "Acme Corp."),
+      vendorFolderQuery("Acme Corp", []),
+      vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: "ACME" })], "Acme Corp"),
+      { method: "post", pathIncludes: "/lists/Vendors/items", response: listItem("8", { Title: "Acme Corp.", FolderName: "Acme Corp" }) },
+      assessmentsQuery("Acme Corp", []),
+      { method: "post", pathIncludes: "/lists/Assessments/items", response: listItem("2", assessmentFields("Acme Corp")) },
+      ...idWriteBack("Acme Corp", "2", "ASM-2026-00002"),
+      ...folderCreates("Acme Corp", "ASM-2026-00002"),
+      ...readBacks("Acme Corp", "ASM-2026-00002"),
+    ]);
+
+    const result = await runOpenAssessment({ ...INPUT, vendor: "Acme Corp." }, assessmentToolContext(graph));
+
+    expect(result.isError).toBeUndefined();
+    const vendor = calls.find((call) => call.method === "post" && call.path.includes("/lists/Vendors/items"))!;
+    expect((vendor.body as { fields: Record<string, unknown> }).fields).toEqual({ Title: "Acme Corp.", FolderName: "Acme Corp" });
+    expect(calls.filter((call) => call.method === "get" && call.path.includes("/lists/Vendors/items?"))).toHaveLength(3);
+  });
+
+  it("serializes concurrent opens for two vendor records that share one stored folder", async () => {
+    // The in progress lookup is by folder, so the two names race for one assessment although
+    // their names differ. The second call's lookup must come after the first call's create.
+    const stored = (title: string): unknown => listItem(title === "Acme Corp" ? "7" : "8", { Title: title, FolderName: "ACME" });
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([stored("Acme Corp")], "Acme Corp"),
+      vendorsQuery([stored("Acme Holdings")], "Acme Holdings"),
+      assessmentsQuery("ACME", []),
+      { method: "post", pathIncludes: "/lists/Assessments/items", response: listItem("2", assessmentFields("ACME")) },
+      ...idWriteBack("ACME", "2", "ASM-2026-00002"),
+      ...folderCreates("ACME", "ASM-2026-00002"),
+      ...readBacks("ACME", "ASM-2026-00002"),
+      assessmentsQuery("ACME", [listItem("2", { ...assessmentFields("ACME"), AssessmentId: "ASM-2026-00002" })]),
+      ...workspaceReads("ACME", "ASM-2026-00002"),
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const results = await Promise.all([runOpenAssessment(INPUT, context), runOpenAssessment({ ...INPUT, vendor: "Acme Holdings" }, context)]);
+
+    expect(results.map((result) => result.isError)).toEqual([undefined, undefined]);
+    const lookups = calls.flatMap((call, index) => (call.method === "get" && call.path.includes("/lists/Assessments/items?") ? [index] : []));
+    const create = calls.findIndex((call) => call.method === "post" && call.path.includes("/lists/Assessments/items"));
+    expect(lookups).toHaveLength(2);
+    expect(lookups[1]).toBeGreaterThan(create);
   });
 });

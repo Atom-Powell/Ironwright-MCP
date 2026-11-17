@@ -222,4 +222,15 @@ describe("save_assessment_artifact failures", () => {
     expect(calls.filter((call) => call.method !== "get")).toEqual([]);
     expect(await context.store.listJournal(PROFILE, ID)).toEqual([]);
   });
+
+  it("refuses under the stored assessment id when the caller's spelling differs by case", async () => {
+    const typed = ID.toLowerCase();
+    const { graph } = createScriptedGraph(stateScript({ typedId: typed, fields: { Status: "Completed" } }));
+
+    const result = await runSaveAssessmentArtifact({ ...INPUT, assessmentId: typed }, assessmentToolContext(graph));
+
+    expect(result.isError).toBe(true);
+    expect((result.structuredContent as { assessmentId: string }).assessmentId).toBe(ID);
+    expect(resultText(result)).toContain(`for ${ID}:`);
+  });
 });
