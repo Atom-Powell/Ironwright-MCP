@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TRANSITION_INPUT_CONSTRAINTS, runTransitionAssessment } from "../../../src/tools/assessment/transition.js";
-import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, listItem, resultText } from "./fake-graph.js";
+import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, listItem, refusalOf, resultText } from "./fake-graph.js";
 import { DOSSIER_PATH, ID, PROFILE, PUBLICATION_PATH, assessmentByIdQuery, dossierItem, publicationItem, stateFields, stateScript } from "./state-script.js";
 
 const INPUT = { profileId: PROFILE, assessmentId: ID, target: "completed", disposition: "Approved", risk: "Low" };
@@ -45,7 +45,7 @@ describe("transition_assessment failures", () => {
     const result = await runTransitionAssessment(INPUT, assessmentToolContext(graph));
 
     expect(result.isError).toBe(true);
-    expect(result.structuredContent).toMatchObject({
+    expect(refusalOf(result)).toMatchObject({
       refused: true,
       tool: "transition_assessment",
       stage: "LIFECYCLE",
@@ -61,7 +61,7 @@ describe("transition_assessment failures", () => {
     const result = await runTransitionAssessment({ ...INPUT, target: "provisional" }, assessmentToolContext(graph));
 
     expect(result.isError).toBe(true);
-    expect(result.structuredContent).toMatchObject({ refused: true, stage: "LIFECYCLE", evidence: [{ source: "drive", target: DOSSIER_PATH, found: "not found" }] });
+    expect(refusalOf(result)).toMatchObject({ refused: true, stage: "LIFECYCLE", evidence: [{ source: "drive", target: DOSSIER_PATH, found: "not found" }] });
     expect(calls.filter((call) => call.method !== "get")).toEqual([]);
   });
 
@@ -71,7 +71,7 @@ describe("transition_assessment failures", () => {
     const result = await runTransitionAssessment({ ...INPUT, target: "provisional" }, assessmentToolContext(graph));
 
     expect(result.isError).toBe(true);
-    const refusal = result.structuredContent as { expected: string; observed: string };
+    const refusal = refusalOf(result) as { expected: string; observed: string };
     expect(refusal.expected).toContain("In Progress");
     expect(refusal.observed).toContain("Completed");
     expect(calls.filter((call) => call.method !== "get")).toEqual([]);
@@ -150,7 +150,7 @@ describe("transition_assessment failures", () => {
     const result = await runTransitionAssessment(INPUT, assessmentToolContext(graph));
 
     expect(result.isError).toBe(true);
-    expect(result.structuredContent).toMatchObject({ refused: true, tool: "transition_assessment", stage: "LIFECYCLE", assessmentId: ID, observed: "no item matched" });
+    expect(refusalOf(result)).toMatchObject({ refused: true, tool: "transition_assessment", stage: "LIFECYCLE", assessmentId: ID, observed: "no item matched" });
     expect(resultText(result)).not.toContain("artifact kind");
     expect(calls.filter((call) => call.method !== "get")).toEqual([]);
   });

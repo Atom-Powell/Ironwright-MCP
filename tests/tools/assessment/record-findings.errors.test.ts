@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RECORD_INPUT_CONSTRAINTS, runRecordFindings } from "../../../src/tools/assessment/record-findings.js";
-import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, fileItem, listItem, resultText } from "./fake-graph.js";
+import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, fileItem, listItem, refusalOf, resultText } from "./fake-graph.js";
 import { DOSSIER_PATH, ID, PROFILE, assessmentByIdQuery, dossierItem, findingFields, findingsQuery, stateFields, stateScript } from "./state-script.js";
 
 const F1 = { key: "F-1", observation: "SOC 2 Type II report covers only the hosting subsidiary.", risk: "High", recommendation: "Request the parent company report." };
@@ -48,8 +48,8 @@ describe("record_findings failures", () => {
     const result = await runRecordFindings(INPUT, assessmentToolContext(graph));
 
     expect(result.isError).toBe(true);
-    expect(result.structuredContent).toMatchObject({ refused: true, tool: "record_findings", stage: "FINDINGS", assessmentId: ID });
-    expect((result.structuredContent as { observed: string }).observed).toContain("Completed");
+    expect(refusalOf(result)).toMatchObject({ refused: true, tool: "record_findings", stage: "FINDINGS", assessmentId: ID });
+    expect((refusalOf(result) as { observed: string }).observed).toContain("Completed");
     expect(calls.filter((call) => call.method !== "get")).toEqual([]);
   });
 
@@ -59,7 +59,7 @@ describe("record_findings failures", () => {
     const result = await runRecordFindings(INPUT, assessmentToolContext(graph));
 
     expect(result.isError).toBe(true);
-    expect(result.structuredContent).toMatchObject({ refused: true, stage: "FINDINGS", evidence: [{ source: "drive", target: DOSSIER_PATH, found: "not found" }] });
+    expect(refusalOf(result)).toMatchObject({ refused: true, stage: "FINDINGS", evidence: [{ source: "drive", target: DOSSIER_PATH, found: "not found" }] });
     expect(calls.filter((call) => call.method !== "get")).toEqual([]);
   });
 
@@ -143,7 +143,7 @@ describe("record_findings failures", () => {
     const result = await runRecordFindings(INPUT, context);
 
     expect(result.isError).toBe(true);
-    expect(result.structuredContent).toMatchObject({ refused: true, tool: "record_findings", stage: "FINDINGS", assessmentId: ID, observed: "no item matched" });
+    expect(refusalOf(result)).toMatchObject({ refused: true, tool: "record_findings", stage: "FINDINGS", assessmentId: ID, observed: "no item matched" });
     expect(resultText(result)).not.toContain("artifact kind");
     expect(calls.filter((call) => call.method !== "get")).toEqual([]);
   });
@@ -154,7 +154,7 @@ describe("record_findings failures", () => {
     const result = await runRecordFindings(INPUT, assessmentToolContext(graph));
 
     expect(result.isError).toBe(true);
-    expect(result.structuredContent).toMatchObject({
+    expect(refusalOf(result)).toMatchObject({
       refused: true,
       evidence: [{ source: "drive", target: DOSSIER_PATH, found: 'a file named "acme corp_research_dossier.md"' }],
     });

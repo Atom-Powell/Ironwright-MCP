@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runSaveAssessmentArtifact } from "../../../src/tools/assessment/save-artifact.js";
 import { sha256Hex } from "../../../src/tools/assessment/hash.js";
 import { MAX_SMALL_UPLOAD_BYTES } from "../../../src/graph/items.js";
-import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, fileItem, folderItem, resultText, type ScriptEntry } from "./fake-graph.js";
+import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, fileItem, folderItem, refusalOf, resultText, type ScriptEntry } from "./fake-graph.js";
 import { DOSSIER_PATH, ID, PROFILE, ROOT, assessmentByIdQuery, contentRead, dossierItem, itemRead, stateFields, stateScript } from "./state-script.js";
 
 const CONTENT = "# Acme Corp research dossier\n";
@@ -58,8 +58,8 @@ describe("save_assessment_artifact failures", () => {
     const result = await runSaveAssessmentArtifact(INPUT, context);
 
     expect(result.isError).toBe(true);
-    expect(result.structuredContent).toMatchObject({ refused: true, tool: "save_assessment_artifact", stage: "DOSSIER", assessmentId: ID });
-    expect((result.structuredContent as { expected: string }).expected).toContain("assessment item");
+    expect(refusalOf(result)).toMatchObject({ refused: true, tool: "save_assessment_artifact", stage: "DOSSIER", assessmentId: ID });
+    expect((refusalOf(result) as { expected: string }).expected).toContain("assessment item");
     expect(await context.store.listJournal(PROFILE, ID)).toEqual([]);
   });
 
@@ -69,8 +69,8 @@ describe("save_assessment_artifact failures", () => {
     const result = await runSaveAssessmentArtifact(INPUT, assessmentToolContext(graph));
 
     expect(result.isError).toBe(true);
-    expect(result.structuredContent).toMatchObject({ refused: true, stage: "DOSSIER" });
-    expect((result.structuredContent as { observed: string }).observed).toContain("Completed");
+    expect(refusalOf(result)).toMatchObject({ refused: true, stage: "DOSSIER" });
+    expect((refusalOf(result) as { observed: string }).observed).toContain("Completed");
     expect(calls.filter((call) => call.method !== "get")).toEqual([]);
   });
 
@@ -80,7 +80,7 @@ describe("save_assessment_artifact failures", () => {
     const result = await runSaveAssessmentArtifact(INPUT, assessmentToolContext(graph));
 
     expect(result.isError).toBe(true);
-    expect(result.structuredContent).toMatchObject({ refused: true, evidence: [{ source: "drive", target: ROOT, found: "not found" }] });
+    expect(refusalOf(result)).toMatchObject({ refused: true, evidence: [{ source: "drive", target: ROOT, found: "not found" }] });
     expect(calls.filter((call) => call.method !== "get")).toEqual([]);
   });
 
@@ -230,7 +230,7 @@ describe("save_assessment_artifact failures", () => {
     const result = await runSaveAssessmentArtifact({ ...INPUT, assessmentId: typed }, assessmentToolContext(graph));
 
     expect(result.isError).toBe(true);
-    expect((result.structuredContent as { assessmentId: string }).assessmentId).toBe(ID);
+    expect((refusalOf(result) as { assessmentId: string }).assessmentId).toBe(ID);
     expect(resultText(result)).toContain(`for ${ID}:`);
   });
 });
