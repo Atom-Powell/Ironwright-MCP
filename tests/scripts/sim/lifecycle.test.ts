@@ -232,3 +232,47 @@ describe("overlapping lifecycle calls on one assessment", () => {
   });
 });
 
+describe("the readiness get_assessment reports", () => {
+  type Readiness = { tool: string; target?: string; ready: boolean };
+  const scenarios: Record<string, (d: SimDeployment, id: string) => Promise<void>> = {
+    "just opened": async () => undefined,
+    "the dossier saved": async (d, id) => {
+      structured(await runSaveAssessmentArtifact({ profileId: PROFILE, assessmentId: id, kind: "dossier", content: "x" }, d.context));
+    },
+    "the dossier saved and the publication written": async (d, id) => {
+      structured(await runSaveAssessmentArtifact({ profileId: PROFILE, assessmentId: id, kind: "dossier", content: "x" }, d.context));
+      d.sim.putFile(`Assessments/Acme Corp/${id}/Published/Acme Corp_${id}_Risk_Assessment.docx`, bytes("docx"));
+    },
+    "the workspace root deleted": async (d, id) => {
+      d.sim.removeItem(`Assessments/Acme Corp/${id}`);
+    },
+    "moved to provisional": async (d, id) => {
+      structured(await runSaveAssessmentArtifact({ profileId: PROFILE, assessmentId: id, kind: "dossier", content: "x" }, d.context));
+      structured(await runTransitionAssessment({ profileId: PROFILE, assessmentId: id, target: "provisional", disposition: "Approved", risk: "Low" }, d.context));
+    },
+  };
+  const actions: Record<string, (d: SimDeployment, id: string) => Promise<CallToolResult>> = {
+    "save_assessment_artifact": (d, id) => runSaveAssessmentArtifact({ profileId: PROFILE, assessmentId: id, kind: "executive_summary", content: "s" }, d.context),
+    "record_findings": (d, id) => runRecordFindings({ profileId: PROFILE, assessmentId: id, findings: FINDINGS, summary: "Two findings." }, d.context),
+    "transition_assessment provisional": (d, id) => runTransitionAssessment({ profileId: PROFILE, assessmentId: id, target: "provisional", disposition: "Approved with conditions", risk: "High" }, d.context),
+    "transition_assessment completed": (d, id) => runTransitionAssessment({ profileId: PROFILE, assessmentId: id, target: "completed", disposition: "Approved with conditions", risk: "High" }, d.context),
+  };
+
+  // Each scenario is built afresh for each tool, the report is read, and the tool is then called.
+  // The report is the tool's own precondition, so the two must agree in every cell.
+  it.each(Object.keys(scenarios).flatMap((scenario) => Object.keys(actions).map((action) => [scenario, action] as const)))(
+    "with %s, agrees with what %s then does",
+    async (scenario, action) => {
+      const d = deployment();
+      const id = structured(await runOpenAssessment({ profileId: PROFILE, vendor: "Acme Corp", scope: "Security" }, d.context)).assessmentId as string;
+      await scenarios[scenario]!(d, id);
+
+      const readiness = structured(await runGetAssessment({ profileId: PROFILE, assessmentId: id }, d.context)).readiness as Readiness[];
+      const reported = readiness.find((entry) => [entry.tool, entry.target].filter((part) => part !== undefined).join(" ") === action)!;
+      const result = await actions[action]!(d, id);
+
+      expect(reported.ready).toBe(result.isError !== true);
+    },
+  );
+});
+

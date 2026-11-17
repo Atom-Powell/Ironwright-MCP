@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { L1B_ITEM_READ } from "../../graph/fixtures/assessment-probe.js";
 import {
-  allOf, fieldsFor, recordFromFields, requireArtifact, requireInProgress, requireRoot,
+  allOf, fieldsFor, findingsPrecondition, lifecycleReadiness, recordFromFields, requireArtifact, requireInProgress, requireRoot,
+  savePrecondition, transitionPrecondition,
   type AssessmentColumns, type AssessmentState,
 } from "../../../src/domain/assessment/state.js";
 
@@ -62,5 +63,57 @@ describe("preconditions", () => {
     const first = { ok: false as const, expected: "a", observed: "b", evidence: [] };
     const second = { ok: false as const, expected: "c", observed: "d", evidence: [] };
     expect(allOf({ ok: true }, first, second)).toBe(first);
+  });
+});
+
+describe("the lifecycle preconditions, one definition per tool", () => {
+  const LABELS = { inProgress: "In Progress" };
+  const DOSSIER = "Assessments/ProbeVendor/PRB-1/Research/d.md";
+  const PUBLICATION = "Assessments/ProbeVendor/PRB-1/Published/p.docx";
+  const artifact = (kind: string, path: string, present: boolean): AssessmentState["artifacts"][number] => ({ kind, path, present, eTag: present ? "e" : undefined, size: present ? 3 : undefined });
+  const withArtifacts = (dossier: boolean, publication: boolean): AssessmentState =>
+    stateWith({ artifacts: [artifact("dossier", DOSSIER, dossier), artifact("publication", PUBLICATION, publication)] });
+
+  it("a save needs the item in progress and the workspace root, and no artifact", () => {
+    expect(savePrecondition(withArtifacts(false, false), LABELS, "the list").ok).toBe(true);
+    expect(savePrecondition(stateWith({ rootPresent: false }), LABELS, "the list").ok).toBe(false);
+  });
+
+  it("recording findings needs the dossier", () => {
+    expect(findingsPrecondition(withArtifacts(true, false), LABELS, "the list").ok).toBe(true);
+    expect(findingsPrecondition(withArtifacts(false, false), LABELS, "the list")).toMatchObject({ ok: false, observed: "not present" });
+  });
+
+  it("completing needs the dossier and the publication, and a provisional move only the dossier", () => {
+    expect(transitionPrecondition(withArtifacts(true, false), LABELS, "provisional", "the list").ok).toBe(true);
+    expect(transitionPrecondition(withArtifacts(true, false), LABELS, "completed", "the list")).toMatchObject({
+      ok: false,
+      expected: "the publication present at its canonical path",
+      evidence: [{ source: "drive", target: PUBLICATION, found: "not found" }],
+    });
+    expect(transitionPrecondition(withArtifacts(true, true), LABELS, "completed", "the list").ok).toBe(true);
+  });
+
+  it("lifecycleReadiness reports each tool from those same preconditions, with the evidence of a refusal", () => {
+    const readiness = lifecycleReadiness(withArtifacts(true, false), LABELS, "the list");
+
+    expect(readiness.map((entry) => [entry.tool, entry.target, entry.ready])).toEqual([
+      ["save_assessment_artifact", undefined, true],
+      ["record_findings", undefined, true],
+      ["transition_assessment", "provisional", true],
+      ["transition_assessment", "completed", false],
+    ]);
+    expect(readiness[3]).toMatchObject({ expected: "the publication present at its canonical path", observed: "not present", evidence: [{ source: "drive", target: PUBLICATION }] });
+    expect(readiness[0]).toEqual({ tool: "save_assessment_artifact", ready: true });
+  });
+
+  it("reports nothing ready for an assessment that is no longer in progress", () => {
+    const completed = withArtifacts(true, true);
+    completed.record!.status = "Completed";
+
+    const readiness = lifecycleReadiness(completed, LABELS, "the list");
+
+    expect(readiness.every((entry) => !entry.ready)).toBe(true);
+    expect(readiness[0]).toMatchObject({ expected: 'status "In Progress"', observed: 'status "Completed"' });
   });
 });

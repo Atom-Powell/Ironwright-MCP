@@ -4,7 +4,7 @@ import type { ToolContext } from "../context.js";
 import { describeToolFailure, type FailureSubject } from "../errors.js";
 import { createListItem, odataString, queryListItems, updateListItemFields, type ListItemRecord } from "../../graph/lists.js";
 import { isAssessmentProfile } from "../../domain/profile/library.js";
-import { allOf, fieldsFor, requireArtifact, requireInProgress, requireRecord } from "../../domain/assessment/state.js";
+import { fieldsFor, findingsPrecondition } from "../../domain/assessment/state.js";
 import { resolveAssessmentContext } from "./context.js";
 import { findAssessmentById, readAssessmentState } from "./read-state.js";
 import { appendJournal } from "./journal.js";
@@ -114,11 +114,7 @@ async function recordFindings(args: z.infer<typeof InputObject>, context: ToolCo
 
     const record = await findAssessmentById(context.graph, ac, args.assessmentId);
     const state = await readAssessmentState(context.graph, ac, record);
-    const check = allOf(
-      requireRecord(state, `${assessments.name} where ${assessments.columns.assessmentId} is "${args.assessmentId}"`),
-      requireInProgress(state, ac.profile.lifecycle.status),
-      requireArtifact(state, "dossier"),
-    );
+    const check = findingsPrecondition(state, ac.profile.lifecycle.status, `${assessments.name} where ${assessments.columns.assessmentId} is "${args.assessmentId}"`);
     if (!check.ok) return refusalResult(TOOL, STAGE, record?.assessmentId ?? args.assessmentId, check);
     const item = record!;
     // The id as the list stores it, which is what findings are filed under and the journal is keyed by.

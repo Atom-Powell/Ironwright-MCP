@@ -5,7 +5,7 @@ import { describeToolFailure, type FailureSubject } from "../errors.js";
 import { MAX_SMALL_UPLOAD_BYTES, UploadTooLargeError, createFile, overwriteFile, readDriveItem, type DriveItemFacts } from "../../graph/items.js";
 import { downloadDriveItem } from "../../graph/content.js";
 import { updateListItemFields } from "../../graph/lists.js";
-import { allOf, fieldsFor, requireInProgress, requireRecord, requireRoot } from "../../domain/assessment/state.js";
+import { fieldsFor, savePrecondition } from "../../domain/assessment/state.js";
 import { fileNameOf } from "../../domain/assessment/templates.js";
 import { profileArtifactKinds, resolveAssessmentContext, unknownKindText } from "./context.js";
 import { findAssessmentById, readAssessmentState } from "./read-state.js";
@@ -84,11 +84,7 @@ async function saveAssessmentArtifact(args: z.infer<typeof InputObject>, context
 
     const record = await findAssessmentById(context.graph, ac, args.assessmentId);
     const state = await readAssessmentState(context.graph, ac, record);
-    const check = allOf(
-      requireRecord(state, `${listName} where ${columns.assessmentId} is "${args.assessmentId}"`),
-      requireInProgress(state, ac.profile.lifecycle.status),
-      requireRoot(state),
-    );
+    const check = savePrecondition(state, ac.profile.lifecycle.status, `${listName} where ${columns.assessmentId} is "${args.assessmentId}"`);
     // The id as the list stores it once the item is found. The lookup can match a spelling that
     // differs by case, and the journal is keyed by the exact string, so keying it by what the caller
     // typed would split it.

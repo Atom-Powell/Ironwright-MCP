@@ -4,7 +4,7 @@ import type { ToolContext } from "../context.js";
 import { describeToolFailure, type FailureSubject } from "../errors.js";
 import { getListItem, updateListItemFields, type ListItemRecord } from "../../graph/lists.js";
 import { isAssessmentProfile } from "../../domain/profile/library.js";
-import { allOf, fieldsFor, recordFromFields, requireArtifact, requireInProgress, requireRecord } from "../../domain/assessment/state.js";
+import { fieldsFor, recordFromFields, transitionPrecondition } from "../../domain/assessment/state.js";
 import { resolveAssessmentContext } from "./context.js";
 import { findAssessmentById, readAssessmentState } from "./read-state.js";
 import { appendJournal } from "./journal.js";
@@ -105,12 +105,7 @@ async function transitionAssessment(args: z.infer<typeof InputObject>, context: 
       return { structuredContent: output, content: [{ type: "text" as const, text }] };
     }
 
-    const check = allOf(
-      requireRecord(state, `${listName} where ${columns.assessmentId} is "${args.assessmentId}"`),
-      requireInProgress(state, ac.profile.lifecycle.status),
-      requireArtifact(state, "dossier"),
-      ...(args.target === "completed" ? [requireArtifact(state, "publication")] : []),
-    );
+    const check = transitionPrecondition(state, ac.profile.lifecycle.status, args.target, `${listName} where ${columns.assessmentId} is "${args.assessmentId}"`);
     if (!check.ok) return refusalResult(TOOL, STAGE, assessmentId, check);
     const item = record!;
 

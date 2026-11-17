@@ -8,7 +8,7 @@ export const getAssessment: ToolDefinition = {
   kind: "read",
   title: "Get an assessment",
   description: [
-    "Read one assessment by its id, with its list fields, whether each artifact is present at its canonical path, and a summary of its journal; or list every assessment for a vendor from the Assessments list alone, without reading the drive.",
+    "Read one assessment by its id: its list fields, whether each artifact is present at its canonical path, what each lifecycle tool's precondition finds on that state, and a summary of its journal, with the recorded findings and every journal entry when include asks for them. Or list every assessment for a vendor, or every assessment holding a status across all vendors, from the Assessments list alone, without reading the drive.",
     GET_INPUT_CONSTRAINTS,
     "An id no item carries is reported as not found, not as an error.",
     SAFETY_SENTENCES.read,

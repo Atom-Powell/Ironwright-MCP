@@ -183,6 +183,64 @@ export function allOf(...checks: Precondition[]): Precondition {
 }
 
 /**
+ * What each lifecycle tool requires before it writes, stated once. The tool
+ * evaluates its own function here and get_assessment reports all of them, so
+ * the report of what a tool would do is the tool's own decision over the same
+ * state and cannot drift from it. `lookedUp` names where the item was looked
+ * for, for the evidence of an item that was not found.
+ */
+export function savePrecondition(state: AssessmentState, labels: { inProgress: string }, lookedUp: string): Precondition {
+  return allOf(requireRecord(state, lookedUp), requireInProgress(state, labels), requireRoot(state));
+}
+
+export function findingsPrecondition(state: AssessmentState, labels: { inProgress: string }, lookedUp: string): Precondition {
+  return allOf(requireRecord(state, lookedUp), requireInProgress(state, labels), requireArtifact(state, "dossier"));
+}
+
+export type TransitionTarget = "completed" | "provisional";
+
+export function transitionPrecondition(state: AssessmentState, labels: { inProgress: string }, target: TransitionTarget, lookedUp: string): Precondition {
+  return allOf(
+    requireRecord(state, lookedUp),
+    requireInProgress(state, labels),
+    requireArtifact(state, "dossier"),
+    ...(target === "completed" ? [requireArtifact(state, "publication")] : []),
+  );
+}
+
+export interface ActionReadiness {
+  tool: "save_assessment_artifact" | "record_findings" | "transition_assessment";
+  /** The status a transition would move to; absent for the other tools. */
+  target?: TransitionTarget;
+  ready: boolean;
+  expected?: string;
+  observed?: string;
+  evidence?: Evidence[];
+}
+
+/**
+ * Each lifecycle tool's precondition over one state, in the order a workflow
+ * calls them. It says what the precondition found, which is not the whole of
+ * what a call does: a save still refuses a kind the profile does not name and
+ * a path something else occupies, and every tool reads the state again when it
+ * is called.
+ */
+export function lifecycleReadiness(state: AssessmentState, labels: { inProgress: string }, lookedUp: string): ActionReadiness[] {
+  const entry = (tool: ActionReadiness["tool"], check: Precondition, target?: TransitionTarget): ActionReadiness => ({
+    tool,
+    ...(target === undefined ? {} : { target }),
+    ready: check.ok,
+    ...(check.ok ? {} : { expected: check.expected, observed: check.observed, evidence: check.evidence }),
+  });
+  return [
+    entry("save_assessment_artifact", savePrecondition(state, labels, lookedUp)),
+    entry("record_findings", findingsPrecondition(state, labels, lookedUp)),
+    entry("transition_assessment", transitionPrecondition(state, labels, "provisional", lookedUp), "provisional"),
+    entry("transition_assessment", transitionPrecondition(state, labels, "completed", lookedUp), "completed"),
+  ];
+}
+
+/**
  * Why the workspace paths cannot be rendered for this record, or undefined
  * when they can. Checked in the order the templates need the values, so the
  * reason names the first field missing.

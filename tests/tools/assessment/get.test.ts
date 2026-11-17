@@ -3,7 +3,7 @@ import { NON_INDEXED_QUERY_HEADER } from "../../../src/graph/lists.js";
 import { GET_INPUT_CONSTRAINTS, runGetAssessment } from "../../../src/tools/assessment/get.js";
 import { L1_ITEMS_PAGE } from "../../graph/fixtures/assessment-probe.js";
 import { vendorsQuery } from "./open-script.js";
-import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, fileItem, folderItem, listItem, page, resultText } from "./fake-graph.js";
+import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, fileItem, folderItem, listItem, page, resultText, type ScriptEntry } from "./fake-graph.js";
 
 const PROFILE = "vendor-assessments";
 const ID = "ASM-2026-00002";
@@ -168,9 +168,13 @@ describe("get_assessment", () => {
   });
 
   it.each([
-    ["neither", { profileId: PROFILE }],
-    ["both", { profileId: PROFILE, assessmentId: ID, vendor: "Acme Corp" }],
-  ])("refuses %s of assessmentId and vendor before any Graph request", async (_label, input) => {
+    ["none of the three selectors", { profileId: PROFILE }],
+    ["an id beside a vendor", { profileId: PROFILE, assessmentId: ID, vendor: "Acme Corp" }],
+    ["an id beside a status", { profileId: PROFILE, assessmentId: ID, status: "in_progress" }],
+    ["a vendor beside a status", { profileId: PROFILE, vendor: "Acme Corp", status: "completed" }],
+    ["include on a vendor listing", { profileId: PROFILE, vendor: "Acme Corp", include: ["findings"] }],
+    ["include on a status listing", { profileId: PROFILE, status: "in_progress", include: ["journal"] }],
+  ])("refuses %s before any Graph request", async (_label, input) => {
     const { graph } = createScriptedGraph([]);
 
     const result = await runGetAssessment(input, assessmentToolContext(graph));
@@ -216,5 +220,144 @@ describe("get_assessment", () => {
 
     expect((result.structuredContent as { journal: { entries: number } }).journal.entries).toBe(1);
     expect(resultText(result)).toContain(`${ID}: item 2`);
+  });
+
+  /** The id lookup and the drive reads for an assessment whose dossier is saved and nothing else. */
+  function dossierOnly(): ScriptEntry[] {
+    return [
+      ...RESOLVE_DRIVE_SCRIPT,
+      { method: "get", pathIncludes: ["/lists/Assessments/items?", `AssessmentId eq '${ID}'`], headersInclude: NON_INDEXED_QUERY_HEADER, response: page([listItem("2", { ...PROBE_FIELDS, Summary: "Two findings, one high." })]) },
+      { method: "get", pathIncludes: `/drives/drive-1/root:/${ROOT}:?`, response: folderItem(ID) },
+      { method: "get", pathIncludes: `${ROOT}/Research/Acme Corp_Research_Dossier.md:?`, response: fileItem("Acme Corp_Research_Dossier.md", '"dossier-1"', 16) },
+      { method: "get", pathIncludes: "_Executive_Summary.md", throws: { status: 404, code: "itemNotFound" } },
+      { method: "get", pathIncludes: "_Risk_Assessment.docx", throws: { status: 404, code: "itemNotFound" } },
+    ];
+  }
+
+  it("reports what each lifecycle tool would find on the state it read, with the evidence of each refusal", async () => {
+    const { graph } = createScriptedGraph(dossierOnly());
+
+    const result = await runGetAssessment({ profileId: PROFILE, assessmentId: ID }, assessmentToolContext(graph));
+
+    const output = result.structuredContent as { readiness: Array<Record<string, unknown>> };
+    expect(output.readiness).toEqual([
+      { tool: "save_assessment_artifact", ready: true },
+      { tool: "record_findings", ready: true },
+      { tool: "transition_assessment", target: "provisional", ready: true },
+      {
+        tool: "transition_assessment",
+        target: "completed",
+        ready: false,
+        expected: "the publication present at its canonical path",
+        observed: "not present",
+        evidence: [{ source: "drive", target: `${ROOT}/Published/Acme Corp_${ID}_Risk_Assessment.docx`, found: "not found" }],
+      },
+    ]);
+    expect(resultText(result)).toContain(
+      "On what this call read: save_assessment_artifact, record_findings and transition_assessment to provisional would proceed; " +
+        "transition_assessment to completed would be refused (expected the publication present at its canonical path, observed not present).",
+    );
+  });
+
+  it("says once why nothing would proceed for an assessment that is completed", async () => {
+    const script = dossierOnly();
+    script[2] = { method: "get", pathIncludes: ["/lists/Assessments/items?", `AssessmentId eq '${ID}'`], headersInclude: NON_INDEXED_QUERY_HEADER, response: page([listItem("2", { ...PROBE_FIELDS, Status: "Completed" })]) };
+    const { graph } = createScriptedGraph(script);
+
+    const result = await runGetAssessment({ profileId: PROFILE, assessmentId: ID }, assessmentToolContext(graph));
+
+    expect((result.structuredContent as { readiness: Array<{ ready: boolean }> }).readiness.every((entry) => !entry.ready)).toBe(true);
+    expect(resultText(result)).toContain('On what this call read: no lifecycle tool would proceed (expected status "In Progress", observed status "Completed").');
+  });
+
+  it("names what holds an artifact's path when it is not the artifact", async () => {
+    const script = dossierOnly();
+    script[6] = { method: "get", pathIncludes: "_Risk_Assessment.docx", response: fileItem("acme corp_asm-2026-00002_risk_assessment.docx", '"p1"', 52) };
+    const { graph } = createScriptedGraph(script);
+
+    const result = await runGetAssessment({ profileId: PROFILE, assessmentId: ID }, assessmentToolContext(graph));
+
+    const artifacts = (result.structuredContent as { artifacts: Array<Record<string, unknown>> }).artifacts;
+    expect(artifacts.find((artifact) => artifact.kind === "publication")).toMatchObject({ present: false, occupant: { name: "acme corp_asm-2026-00002_risk_assessment.docx", isFolder: false } });
+    expect(artifacts.find((artifact) => artifact.kind === "dossier")).not.toHaveProperty("occupant");
+    expect(resultText(result)).toContain('the path answered a file named "acme corp_asm-2026-00002_risk_assessment.docx"');
+  });
+
+  it("reads the findings and the summary back when asked, and sends no Findings request when not", async () => {
+    const findings = { method: "get" as const, pathIncludes: ["/lists/Findings/items?", `AssessmentId eq '${ID}'`], headersInclude: NON_INDEXED_QUERY_HEADER, response: page([
+      listItem("11", { Title: "F-1", AssessmentId: ID, FindingKey: "F-1", Observation: "SOC 2 covers the subsidiary only.", Risk: "High", Recommendation: "Request the parent report." }),
+      listItem("12", { Title: "F-2", AssessmentId: ID, FindingKey: "F-2", Observation: "No penetration test.", Risk: "Medium", Recommendation: "Request a summary." }),
+    ]) };
+    const asked = createScriptedGraph([...dossierOnly(), findings]);
+
+    const result = await runGetAssessment({ profileId: PROFILE, assessmentId: ID, include: ["findings"] }, assessmentToolContext(asked.graph));
+
+    const output = result.structuredContent as { summary?: string; findings?: Array<Record<string, unknown>>; graphRequests: number };
+    expect(output.summary).toBe("Two findings, one high.");
+    expect(output.findings).toEqual([
+      { key: "F-1", itemId: "11", risk: "High", observation: "SOC 2 covers the subsidiary only.", recommendation: "Request the parent report." },
+      { key: "F-2", itemId: "12", risk: "Medium", observation: "No penetration test.", recommendation: "Request a summary." },
+    ]);
+    expect(output.graphRequests).toBe(asked.graph.requests());
+    expect(resultText(result)).toContain('Summary: "Two findings, one high." Findings recorded: 2. F-1 (High): SOC 2 covers the subsidiary only. Recommendation: Request the parent report. F-2 (Medium): No penetration test. Recommendation: Request a summary.');
+
+    const plain = createScriptedGraph(dossierOnly());
+    const without = await runGetAssessment({ profileId: PROFILE, assessmentId: ID }, assessmentToolContext(plain.graph));
+    expect(without.structuredContent).not.toHaveProperty("findings");
+    expect(without.structuredContent).not.toHaveProperty("summary");
+    expect(plain.calls.filter((call) => call.path.includes("/lists/Findings/"))).toEqual([]);
+  });
+
+  it("returns the journal's entries in order when asked, and only its summary when not", async () => {
+    const { graph } = createScriptedGraph(dossierOnly());
+    const context = assessmentToolContext(graph);
+    const first = { at: "2026-11-07T10:00:00.000Z", correlationId: "c-1", stage: "ID", operation: "folder_created" as const, target: ROOT, etagAfter: '"f1"' };
+    const second = { at: "2026-11-07T10:00:05.000Z", correlationId: "c-2", stage: "DOSSIER", operation: "file_created" as const, target: `${ROOT}/Research/Acme Corp_Research_Dossier.md`, contentHash: "abc123" };
+    await context.store.appendJournalEntry(PROFILE, ID, second);
+    await context.store.appendJournalEntry(PROFILE, ID, first);
+
+    const result = await runGetAssessment({ profileId: PROFILE, assessmentId: ID, include: ["journal"] }, context);
+
+    const output = result.structuredContent as { journal: { entries: number }; journalEntries?: unknown[] };
+    expect(output.journal.entries).toBe(2);
+    expect(output.journalEntries).toEqual([first, second]);
+    expect(resultText(result)).toContain(`Journal, oldest first: 2026-11-07T10:00:00.000Z ID folder_created ${ROOT}; 2026-11-07T10:00:05.000Z DOSSIER file_created ${ROOT}/Research/Acme Corp_Research_Dossier.md.`);
+  });
+
+  it("lists every assessment holding a status, across vendors, without reading the drive", async () => {
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      {
+        method: "get",
+        pathIncludes: ["/lists/Assessments/items?", "Status eq 'In Progress'"],
+        headersInclude: NON_INDEXED_QUERY_HEADER,
+        response: page([listItem("2", PROBE_FIELDS), listItem("9", { ...PROBE_FIELDS, Title: "Globex", VendorFolder: "Globex", AssessmentId: "ASM-2026-00009" })]),
+      },
+    ]);
+
+    const result = await runGetAssessment({ profileId: PROFILE, status: "in_progress" }, assessmentToolContext(graph));
+
+    expect(result.isError).toBeUndefined();
+    const output = result.structuredContent as { found: boolean; assessments: Array<Record<string, unknown>>; graphRequests: number };
+    expect(output.found).toBe(true);
+    expect(output.assessments.map((summary) => [summary.assessmentId, summary.vendor])).toEqual([
+      ["ASM-2026-00002", "Acme Corp"],
+      ["ASM-2026-00009", "Globex"],
+    ]);
+    expect(resultText(result)).toBe('2 assessments in Assessments with Status "In Progress": ASM-2026-00002 for Acme Corp (Security), ASM-2026-00009 for Globex (Security).');
+    expect(calls.filter((call) => call.path.includes("/drives/drive-1/"))).toEqual([]);
+    expect(calls.filter((call) => call.path.includes("/lists/Vendors/"))).toEqual([]);
+  });
+
+  it("reports a status no assessment holds as not found, naming the label it asked for", async () => {
+    const { graph } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      { method: "get", pathIncludes: ["/lists/Assessments/items?", "Status eq 'Provisional'"], headersInclude: NON_INDEXED_QUERY_HEADER, response: page([]) },
+    ]);
+
+    const result = await runGetAssessment({ profileId: PROFILE, status: "provisional" }, assessmentToolContext(graph));
+
+    expect((result.structuredContent as { found: boolean }).found).toBe(false);
+    expect(resultText(result)).toBe('No item in list "Assessments" has Status "Provisional".');
   });
 });

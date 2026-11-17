@@ -78,7 +78,10 @@ export async function runWalkthrough(write: (line: string) => void): Promise<voi
 
     write("\n   A retry of the same transition must write nothing.");
     await call("transition_assessment", { ...id, target: "completed", disposition: "Approved with conditions", risk: "Medium" });
-    await call("get_assessment", id);
+
+    write("\n   The auditor's read: the assessment with its findings and every write the server journaled.");
+    await call("get_assessment", { ...id, include: ["findings", "journal"] });
+    await call("get_assessment", { profileId, status: "completed" });
 
     const state = (await (await fetch(`${base}/sim/state`)).json()) as { library: { path: string; kind: string }[]; lists: Record<string, unknown[]>; journal: Record<string, unknown[]> };
     write("\nWhat the simulated site holds now:");
