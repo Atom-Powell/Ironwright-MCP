@@ -1,4 +1,5 @@
 import { createSimApp, SIM_NOTICE } from "./app.js";
+import { formatToolCallRecord } from "../../src/mcp/build-server.js";
 import { createSimDeployment, SIM_PROFILE_PATH } from "./deployment.js";
 
 /**
@@ -21,7 +22,8 @@ function main(): void {
   }
   const profilePath = process.env.SIM_PROFILE?.trim() || SIM_PROFILE_PATH;
   const deployment = createSimDeployment({ profilePath });
-  const app = createSimApp(deployment);
+  // The same line per tool call the real server writes, so a session here reads like its log.
+  const app = createSimApp(deployment, (record) => console.log(formatToolCallRecord(record)));
 
   const server = app.listen(port, "127.0.0.1", () => {
     if (!server.listening) return;

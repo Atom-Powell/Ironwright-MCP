@@ -1,7 +1,8 @@
 import express from "express";
 import { createApp } from "../../src/server/app.js";
-import { buildServer } from "../../src/mcp/build-server.js";
+import { buildServer, type ToolCallRecord } from "../../src/mcp/build-server.js";
 import { assessmentModule } from "../../src/modules/assessment/index.js";
+import { SERVER_VERSION } from "../../src/version.js";
 import type { JournalEntry } from "../../src/store/types.js";
 import type { SimDeployment } from "./deployment.js";
 
@@ -35,7 +36,7 @@ export async function simState(deployment: SimDeployment): Promise<Record<string
  * answers nothing the compliance tools send, and offering a tool that can
  * only fail would be a tool list that does not describe the server.
  */
-export function createSimApp(deployment: SimDeployment): express.Express {
+export function createSimApp(deployment: SimDeployment, onToolCall?: (record: ToolCallRecord) => void): express.Express {
   const { sim, context } = deployment;
   const outer = express();
 
@@ -76,7 +77,8 @@ export function createSimApp(deployment: SimDeployment): express.Express {
   outer.use(
     createApp({
       auth: { mode: "none", header: "x-api-key" },
-      serverFactory: () => buildServer({ allowWrites: true, context, tools: assessmentModule.tools }),
+      version: SERVER_VERSION,
+      serverFactory: () => buildServer({ allowWrites: true, context, tools: assessmentModule.tools, ...(onToolCall === undefined ? {} : { onToolCall }) }),
     }),
   );
   return outer;
