@@ -39,6 +39,8 @@ used for development.
   items, decisions needing a human, and an honest record of what is verified against a live
   tenant versus only against fakes.
 - `docs/SETUP.md` is the per-tenant operational procedure.
+- `docs/SIMULATOR.md` describes the simulated tenant: the assessment tools run end to end with no
+  tenant, and the table of which simulated behaviors were measured and which are modeled.
 - `docs/superpowers/plans/` holds executed implementation plans, kept as history.
 - `competitive-landscape-refresh-2026-09-24.md` is the current competitive picture: MCP
   marketplaces, adjacent products and user feedback, citation-audited. It corrects parts of the
@@ -213,7 +215,7 @@ held, because it would be this server's first delete.
 | `record_findings` | lifecycle | One item per finding, keyed so a retry updates; writes the summary |
 | `transition_assessment` | lifecycle | Completed needs dossier and publication present; provisional needs the dossier |
 | `verify_publication` | read | What is at the publication's canonical path |
-| `get_assessment` | read | Status, artifact presence and the journal summary, by id or by vendor |
+| `get_assessment` | read | By id: status, artifact presence, what each lifecycle tool's precondition finds and the journal summary, with the findings and journal entries on request. Or a listing by vendor or by status |
 
 A profile is `compliance` (the default: workbook, taxonomy, naming, deliverables), `library`
 (site and library only) or `assessment` (a site, a library, a workspace, three lists and the

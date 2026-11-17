@@ -37,4 +37,22 @@ describe("clientCredentialsTokenProvider failures", () => {
 
     await expect(provider.getToken()).rejects.toThrow(/no access_token/i);
   });
+
+  it("stops waiting for a token endpoint that never answers, and asks afresh on the next call", async () => {
+    let calls = 0;
+    // Answers nothing until its signal aborts, as a connection that was accepted and then went quiet does.
+    const hung = ((_url: string, init?: RequestInit) => {
+      calls += 1;
+      if (calls > 1) return Promise.resolve(new Response(JSON.stringify({ access_token: "later", expires_in: 3600 }), { status: 200 }));
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason as Error));
+      });
+    }) as typeof fetch;
+    const provider = clientCredentialsTokenProvider(CREDENTIALS, { fetchImpl: hung, requestTimeoutMs: 20 });
+
+    await expect(provider.getToken()).rejects.toThrow("The token endpoint did not answer within 20 ms.");
+    // The request that ran out is gone, so a later caller does not queue behind it.
+    expect(await provider.getToken()).toBe("later");
+    expect(calls).toBe(2);
+  });
 });

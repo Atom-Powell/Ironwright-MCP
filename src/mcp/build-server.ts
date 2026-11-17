@@ -4,7 +4,7 @@ import { selectTools } from "../tools/registry.js";
 import type { ToolContext, ToolHandler } from "../tools/context.js";
 import type { ToolKind } from "../tools/kinds.js";
 import type { ToolDefinition } from "../tools/types.js";
-import { REFUSAL_META_KEY } from "../tools/assessment/refusal.js";
+import { REFUSAL_META_KEY } from "../tools/refusal.js";
 import { SERVER_VERSION } from "../version.js";
 
 export interface BuildServerOptions {
@@ -30,9 +30,14 @@ export interface BuildServerOptions {
  * profile and assessment, how it ended and what it cost. It is deliberately
  * not what the caller sent or what the tool answered. An artifact's content,
  * a vendor's name and a finding's text are the customer's, and a log is read
- * by people the customer's site permissions never admitted. The profile id is
- * a deployment name and the assessment id is rendered by this server, so
- * both identify the call without carrying any of that.
+ * by people the customer's site permissions never admitted.
+ *
+ * Two identifiers are carried, and each only in the form the server itself
+ * knows. The profile id is recorded when it names a configured profile, and
+ * the assessment id when the tool's answer carries it, which is the id as the
+ * list stores it. Neither is repeated from the input otherwise: both input
+ * fields accept any text, and an agent that put a vendor's name in one would
+ * have it written to the log.
  */
 export interface ToolCallRecord {
   /** When the call settled. */
@@ -41,8 +46,10 @@ export interface ToolCallRecord {
   kind: ToolKind;
   /**
    * "refused" is a lifecycle precondition that did not hold, which is the
-   * tool working. "error" is any other error result. "threw" is a handler
-   * that raised, which no handler is meant to do.
+   * tool working. "error" is any other error result: one the tool composed,
+   * whose words went to the caller and are not logged, or a failure it caught,
+   * which it also wrote to stderr. "threw" is a handler that raised, which no
+   * handler is meant to do.
    */
   outcome: "ok" | "refused" | "error" | "threw";
   ms: number;
@@ -62,12 +69,14 @@ function textField(source: unknown, key: string): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-function recordOf(tool: ToolDefinition, input: unknown, result: CallToolResult | undefined, startedAt: number): ToolCallRecord {
+function recordOf(tool: ToolDefinition, input: unknown, result: CallToolResult | undefined, startedAt: number, context: ToolContext): ToolCallRecord {
   const requests = (result?.structuredContent as Record<string, unknown> | undefined)?.graphRequests;
   const refused = (result?._meta as Record<string, unknown> | undefined)?.[REFUSAL_META_KEY] !== undefined;
-  const profileId = textField(input, "profileId");
-  // The id the tool answered with when there is one: the stored spelling, not the caller's.
-  const assessmentId = textField(result?.structuredContent, "assessmentId") ?? textField(input, "assessmentId");
+  const sentProfileId = textField(input, "profileId");
+  const profileId = sentProfileId !== undefined && context.profiles.ids().includes(sentProfileId) ? sentProfileId : undefined;
+  // Only the id the tool answered with, which is the one the list stores. A refusal for an id no
+  // item carries has nothing to record here, and the caller's text is not a substitute.
+  const assessmentId = textField(result?.structuredContent, "assessmentId");
   const correlationId = textField(result?.structuredContent, "correlationId");
   return {
     at: new Date().toISOString(),
@@ -92,7 +101,7 @@ function recorded(tool: ToolDefinition, handler: ToolHandler, context: ToolConte
       return result;
     } finally {
       try {
-        onToolCall(recordOf(tool, input, result, startedAt));
+        onToolCall(recordOf(tool, input, result, startedAt, context));
       } catch {
         // A log that cannot be written must not turn a call that worked into one that failed.
       }

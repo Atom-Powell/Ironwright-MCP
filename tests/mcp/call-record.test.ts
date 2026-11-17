@@ -21,6 +21,7 @@ function tool(handler: ToolHandler): ToolDefinition {
       content: z.string().optional().describe('For example "text".'),
     }),
     outputSchema: {
+      assessmentId: z.string().optional().describe('For example "ASM-2026-00002".'),
       correlationId: z.string().optional().describe('For example "6f1c".'),
       graphRequests: z.number().int().optional().describe("For example 4."),
     },
@@ -29,6 +30,7 @@ function tool(handler: ToolHandler): ToolDefinition {
 }
 
 async function call(handler: ToolHandler, args: Record<string, unknown>, onToolCall: (record: ToolCallRecord) => void) {
+  // The fake context's registry holds one profile, "example".
   const server = buildServer({ allowWrites: true, context: createFakeToolContext(), tools: [tool(handler)], onToolCall });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "test-client", version: "0.0.0" });
@@ -41,19 +43,21 @@ async function call(handler: ToolHandler, args: Record<string, unknown>, onToolC
   }
 }
 
-const ok: ToolHandler = async () => ({ structuredContent: { correlationId: "c-1", graphRequests: 4 }, content: [{ type: "text" as const, text: "done" }] });
+const KNOWN_PROFILE = "example";
+const ok: ToolHandler = async () => ({ structuredContent: { assessmentId: "ASM-2026-00002", correlationId: "c-1", graphRequests: 4 }, content: [{ type: "text" as const, text: "done" }] });
 
 describe("the record of a tool call", () => {
   it("names the tool, its kind, the profile, the assessment, the outcome and what the call cost", async () => {
     const records: ToolCallRecord[] = [];
-    await call(ok, { profileId: "vendor-assessments", assessmentId: "ASM-2026-00002" }, (record) => records.push(record));
+    await call(ok, { profileId: KNOWN_PROFILE, assessmentId: "asm-2026-00002" }, (record) => records.push(record));
 
     expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({
       tool: "recorded_tool",
       kind: "lifecycle",
       outcome: "ok",
-      profileId: "vendor-assessments",
+      profileId: KNOWN_PROFILE,
+      // The id the tool answered with, not the caller's spelling of it.
       assessmentId: "ASM-2026-00002",
       correlationId: "c-1",
       graphRequests: 4,
@@ -64,11 +68,22 @@ describe("the record of a tool call", () => {
 
   it("carries nothing else the caller sent or the tool answered", async () => {
     const records: ToolCallRecord[] = [];
-    await call(ok, { profileId: "vendor-assessments", content: "the dossier text, which is the customer's" }, (record) => records.push(record));
+    await call(ok, { profileId: KNOWN_PROFILE, content: "the dossier text, which is the customer's" }, (record) => records.push(record));
 
     expect(JSON.stringify(records)).not.toContain("dossier text");
     expect(JSON.stringify(records)).not.toContain("done");
-    expect(Object.keys(records[0]!).sort()).toEqual(["at", "correlationId", "graphRequests", "kind", "ms", "outcome", "profileId", "tool"]);
+    expect(Object.keys(records[0]!).sort()).toEqual(["assessmentId", "at", "correlationId", "graphRequests", "kind", "ms", "outcome", "profileId", "tool"]);
+  });
+
+  it("does not repeat a profile id or an assessment id the server does not know, since either field can hold any text", async () => {
+    const records: ToolCallRecord[] = [];
+    const notFound: ToolHandler = async () => ({ isError: true, content: [{ type: "text" as const, text: "no such assessment" }] });
+
+    await call(notFound, { profileId: "Acme Corp, the vendor", assessmentId: "Acme Corp security review" }, (record) => records.push(record));
+
+    expect(JSON.stringify(records)).not.toContain("Acme");
+    expect(records[0]).not.toHaveProperty("profileId");
+    expect(records[0]).not.toHaveProperty("assessmentId");
   });
 
   it("tells a refusal from a failure, and both from a handler that threw", async () => {
@@ -94,7 +109,7 @@ describe("the record of a tool call", () => {
       throw new Error("the log pipe is closed");
     });
     expect(result.isError).toBeUndefined();
-    expect(result.structuredContent).toEqual({ correlationId: "c-1", graphRequests: 4 });
+    expect(result.structuredContent).toEqual({ assessmentId: "ASM-2026-00002", correlationId: "c-1", graphRequests: 4 });
   });
 
   it("formats as one line of JSON an operator can filter on", () => {

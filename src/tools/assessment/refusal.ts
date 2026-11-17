@@ -1,8 +1,9 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Precondition } from "../../domain/assessment/state.js";
 
-/** Where a refusal's structured form rides on the result. */
-export const REFUSAL_META_KEY = "ironwright-mcp/refusal";
+import { REFUSAL_META_KEY } from "../refusal.js";
+
+export { REFUSAL_META_KEY };
 
 /**
  * A structured refusal: isError, with the evidence as prose and, for a caller

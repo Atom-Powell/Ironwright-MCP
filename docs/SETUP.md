@@ -579,6 +579,36 @@ Until phase 4a wired the first tool, none of this was read by the server itself:
 will not come up without them. See `src/server/config.ts` and `src/config.ts` for what is
 actually checked.
 
+### What the server logs and reports
+
+The startup line names the server and its version, read from `package.json`, beside the port, the
+site, the write setting, the profile count, the store and the inbound authentication mode.
+`GET /health` reports the same version, so which build is answering can be asked without a shell
+on the host. `/health` still reaches nothing: the version is a string the process already holds.
+
+Every tool call writes one line of JSON to stdout once it settles:
+
+```
+{"event":"tool_call","at":"2026-11-17T09:00:00.000Z","tool":"open_assessment","kind":"lifecycle","outcome":"ok","ms":412,"profileId":"vendor-assessments","assessmentId":"ASM-2026-00002","correlationId":"6f1c...","graphRequests":14}
+```
+
+`outcome` is `ok`, `refused` (a lifecycle precondition did not hold, which is the tool working),
+`error` (any other error result) or `threw`. An `error` is either a failure the tool caught, which
+it also wrote to stderr with its detail, or a result the tool composed itself, whose words went to
+the caller and are not logged. `correlationId` is the one on every journal entry the call wrote, so
+a log line leads to its journal entries.
+
+The line never carries what the caller sent or what the tool answered: an artifact's content, a
+vendor's name and a finding's text are the customer's, and a log is read by people the site's
+permissions never admitted. It carries two identifiers, each only as the server knows it: the
+profile id when it names a configured profile, and the assessment id when the tool's answer
+carries it. Neither is repeated from the request otherwise, because both fields accept any text.
+
+At startup the server asks Entra for one token so that a wrong permission stops it before the
+port is bound. A token request is abandoned after 15 seconds, at startup and on every later call.
+When that happens at startup, or the token cannot be obtained for any other reason, the server
+logs a warning and starts, and the check runs on the first Graph request.
+
 ### Ingress
 
 Three ways to put the server in front of a caller such as Copilot Studio are designed. Dev tunnels

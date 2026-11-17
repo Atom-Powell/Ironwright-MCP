@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ProfileIdSchema, SiteEntrySchema, refineIdentityAgreesWithSites } from "./base.js";
-import { unknownIdPlaceholders, unknownWorkspacePlaceholders } from "../assessment/templates.js";
+import { firstRefusedNameCharacter, unknownIdPlaceholders, unknownWorkspacePlaceholders } from "../assessment/templates.js";
 import { extractPlaceholders } from "./placeholders.js";
 
 const AssessmentSiteEntrySchema = SiteEntrySchema.omit({ workbookPath: true }).strict();
@@ -8,10 +8,12 @@ const ColumnName = z.string().min(1).regex(/^[A-Za-z0-9_]+$/, "an internal colum
 const Template = z.string().min(1);
 const Label = z.string().min(1);
 
-/** What SharePoint refuses anywhere in a file or folder name; the slash is the template's own separator. */
-const REFUSED_IN_A_NAME = /["*:<>?\\|]/;
-/** The same, with the slash, and with what an Azure Table key refuses: the id is also the journal's partition. */
-const REFUSED_IN_AN_ID = /["*:<>?/\\|#\u0000-\u001F\u007F-\u009F]/;
+/**
+ * What an Azure Table key refuses beyond what a SharePoint name already does. The assessment id is
+ * also the journal's partition, so an id must clear both. The store's own rule is FORBIDDEN in
+ * src/store/keys.ts, which this layer cannot import; a test holds the two together.
+ */
+const REFUSED_IN_A_KEY = /[#\u0000-\u001F\u007F-\u009F]/;
 
 /** Artifact kinds the module itself refers to; a profile may add more. */
 export const REQUIRED_ARTIFACT_KINDS = ["dossier", "publication"] as const;
@@ -28,7 +30,7 @@ export const AssessmentProfileSchema = z
         subfolders: z.array(Template).default([]).describe('Folders created under the root at open, for example ["Research", "Evidence"].'),
         artifacts: z
           .record(z.string().regex(/^[a-z][a-z0-9_]*$/, "an artifact kind: lowercase letters, digits and underscores"), Template)
-          .describe('Named artifact kinds to path templates under the root, for example {"dossier": "Research/{vendor}_Research_Dossier.md"}. "dossier" and "publication" are required. {vendor} renders the vendor name without the characters SharePoint refuses in a file or folder name, as {vendorFolder} does.'),
+          .describe('Named artifact kinds to path templates under the root, for example {"dossier": "Research/{vendor}_Research_Dossier.md"}. "dossier" and "publication" are required. {vendor} renders the vendor display name with the characters SharePoint refuses in a name removed and nothing else changed, so it cannot end a path segment. {vendorFolder} is the folder name, which also loses a trailing dot.'),
       })
       .strict(),
     assessmentId: z
@@ -85,12 +87,22 @@ export const AssessmentProfileSchema = z
       if (dots !== undefined) ctx.addIssue({ code: z.ZodIssueCode.custom, path, message: `a workspace template cannot contain a "${dots}" segment` });
       // The template's own text, placeholders set aside, becomes part of a file or folder name on
       // every call. A character SharePoint refuses there would load and then fail each write at Graph.
-      const refused = REFUSED_IN_A_NAME.exec(template.replace(/\{[^}]*\}/g, ""));
-      if (refused !== null) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path, message: `a workspace template cannot contain "${refused[0]}", which SharePoint refuses in a file or folder name` });
+      // Segment by segment, since the slash between them is the template's own separator.
+      const refused = segments.map((segment) => firstRefusedNameCharacter(segment.replace(/\{[^}]*\}/g, ""))).find((character) => character !== undefined);
+      if (refused !== undefined) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path, message: `a workspace template cannot contain "${refused}", which SharePoint refuses in a file or folder name` });
       }
-      if (segments.some((segment) => segment.length > 2 && segment.endsWith("."))) {
+      if (segments.some((segment) => segment !== "." && segment !== ".." && segment.endsWith("."))) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path, message: "a workspace template has a segment that ends in a dot, which SharePoint refuses in a name" });
+      }
+      // {vendor} keeps a dot the display name ends in, because inside a file name it is legal. At
+      // the end of a segment it would end the name, which SharePoint refuses.
+      if (segments.some((segment) => segment.endsWith("{vendor}"))) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path,
+          message: "{vendor} ends a path segment, and a display name can end in a dot, which SharePoint refuses at the end of a name; put text after it or use {vendorFolder}",
+        });
       }
     };
 
@@ -123,9 +135,9 @@ export const AssessmentProfileSchema = z
     // it must hold nothing any of the three refuses. Checked here because the alternative is an
     // open that creates the list item and then cannot create its folder or journal its writes.
     const idIssue = (path: string, text: string, what: string): void => {
-      const refused = REFUSED_IN_AN_ID.exec(text);
-      if (refused !== null) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["assessmentId", path], message: `${what} cannot contain "${refused[0]}": the id names a folder and keys the journal, and one of them refuses that character` });
+      const refused = firstRefusedNameCharacter(text) ?? REFUSED_IN_A_KEY.exec(text)?.[0];
+      if (refused !== undefined) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["assessmentId", path], message: `${what} cannot contain "${refused}": the id names a folder and keys the journal, and one of them refuses that character` });
       }
     };
     idIssue("prefix", profile.assessmentId.prefix, "the prefix");

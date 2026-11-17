@@ -25,6 +25,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { REFUSAL_META_KEY } from "../../src/tools/refusal.js";
 import { GRAPH_BASE } from "../../src/graph/client.js";
 import { siteLookupPath } from "../../src/graph/drive.js";
 import { clientCredentialsTokenProvider, requireExactRoles, SERVER_TOKEN_ROLES } from "../../src/graph/token.js";
@@ -117,6 +118,10 @@ async function main(): Promise<void> {
 
   const mcp = new Client({ name: "iw-campaign", version: "0.0.0" });
   await mcp.connect(new StreamableHTTPClientTransport(new URL(SERVER_URL)));
+  // Listed first, as every agent host does. The SDK client validates a result against a tool's
+  // output schema only for tools it has listed, and the first two runs of this campaign never
+  // listed them, so a refusal that failed that validation went unseen until 2026-11-17.
+  await mcp.listTools();
 
   async function call(name: string, args: Record<string, unknown>): Promise<ToolResult> {
     const result = await mcp.callTool({ name, arguments: { profileId: PROFILE, ...args } });
@@ -124,7 +129,9 @@ async function main(): Promise<void> {
       .filter((c) => c.type === "text")
       .map((c) => c.text ?? "")
       .join("\n");
-    return { isError: result.isError === true, text, sc: ((result as { structuredContent?: Record<string, unknown> }).structuredContent ?? {}) };
+    // A refusal carries its structure under _meta, not as structured content; the evidence picks from either.
+    const refusal = (result._meta as Record<string, unknown> | undefined)?.[REFUSAL_META_KEY] as Record<string, unknown> | undefined;
+    return { isError: result.isError === true, text, sc: (result as { structuredContent?: Record<string, unknown> }).structuredContent ?? refusal ?? {} };
   }
 
   const open = (vendor: string) => call("open_assessment", { vendor, scope: "Security" });

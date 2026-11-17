@@ -5,7 +5,7 @@ import { describeToolFailure, type FailureSubject } from "../errors.js";
 import { readDriveItem } from "../../graph/items.js";
 import { fileNameOf } from "../../domain/assessment/templates.js";
 import { resolveAssessmentContext } from "./context.js";
-import { findAssessmentById, recordWorkspacePaths } from "./read-state.js";
+import { artifactAt, findAssessmentById, recordWorkspacePaths } from "./read-state.js";
 
 export const VERIFY_INPUT_SCHEMA = {
   profileId: z.string().min(1).describe('The assessment profile, for example "vendor-assessments".'),
@@ -55,27 +55,26 @@ export async function runVerifyPublication(input: unknown, context: ToolContext)
     // The id as the list stores it, which the lookup can match in another case than the caller's.
     const assessmentId = record.assessmentId;
 
-    const lookup = await readDriveItem(context.graph, { driveId: ac.driveId, path });
-    if (lookup.kind !== "found" || lookup.item.isFolder) {
+    // The answer transition_assessment acts on: present only under the exact name the template
+    // renders, which the 2026-11-09 campaign showed a case insensitive lookup does not guarantee.
+    const at = artifactAt(await readDriveItem(context.graph, { driveId: ac.driveId, path }), path);
+    if (!at.present && (at.occupant === undefined || at.occupant.isFolder)) {
       const output = { present: false, path, expectedName, graphRequests: context.graph.requests() - before };
       const text =
-        lookup.kind === "found"
+        at.occupant !== undefined
           ? `The publication for ${assessmentId} is not present: a folder, not a file, is at ${path}.`
           : `The publication is not at ${path}; Graph answered 404 for that path.`;
       return { structuredContent: output, content: [{ type: "text" as const, text }] };
     }
-
-    const item = lookup.item;
-    // SharePoint names are case insensitive, so the lookup above may answer a file whose name differs
-    // from the canonical one only by case, which the 2026-11-09 campaign measured it does. That file is not
-    // the publication the template names, and reporting it present would let a misnamed upload pass.
-    if (item.name !== expectedName) {
-      const output = { present: false, path, expectedName, name: item.name, graphRequests: context.graph.requests() - before };
+    if (!at.present) {
+      const name = at.occupant!.name;
+      const output = { present: false, path, expectedName, name, graphRequests: context.graph.requests() - before };
       const text =
-        `The publication for ${assessmentId} is not present under its expected name: a file named "${item.name}" is at ${path}, ` +
+        `The publication for ${assessmentId} is not present under its expected name: a file named "${name}" is at ${path}, ` +
         `and the expected name is "${expectedName}".`;
       return { structuredContent: output, content: [{ type: "text" as const, text }] };
     }
+    const item = at.item;
     const output = {
       present: true,
       path,

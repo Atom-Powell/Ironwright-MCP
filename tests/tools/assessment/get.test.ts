@@ -360,4 +360,35 @@ describe("get_assessment", () => {
     expect((result.structuredContent as { found: boolean }).found).toBe(false);
     expect(resultText(result)).toBe('No item in list "Assessments" has Status "Provisional".');
   });
+
+  it("stops a status listing at 200 assessments and says more exist, rather than paging until it fails", async () => {
+    const items = (from: number): unknown[] =>
+      Array.from({ length: 50 }, (_unused, index) => listItem(String(from + index), { ...PROBE_FIELDS, Status: "Completed", AssessmentId: `ASM-2026-${String(from + index).padStart(5, "0")}` }));
+    const pageOf = (from: number, next: boolean): ScriptEntry => ({
+      method: "get",
+      pathIncludes: from === 1 ? ["/lists/Assessments/items?", "Status eq 'Completed'"] : `next-${from}`,
+      headersInclude: NON_INDEXED_QUERY_HEADER,
+      response: { value: items(from), ...(next ? { "@odata.nextLink": `https://graph.microsoft.com/v1.0/next-${from + 50}` } : {}) },
+    });
+    const { graph, calls } = createScriptedGraph([...RESOLVE_DRIVE_SCRIPT, pageOf(1, true), pageOf(51, true), pageOf(101, true), pageOf(151, true), pageOf(201, true)]);
+
+    const result = await runGetAssessment({ profileId: PROFILE, status: "completed" }, assessmentToolContext(graph));
+
+    const output = result.structuredContent as { assessments: unknown[]; truncated?: boolean };
+    expect(output.assessments).toHaveLength(200);
+    expect(output.truncated).toBe(true);
+    expect(calls.filter((call) => call.path.includes("next-201"))).toEqual([]);
+    expect(resultText(result)).toContain("The first 200 assessments in Assessments with Status \"Completed\", and more exist that were not read:");
+  });
+
+  it("does not call a listing that fit truncated", async () => {
+    const { graph } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      { method: "get", pathIncludes: ["/lists/Assessments/items?", "Status eq 'Completed'"], headersInclude: NON_INDEXED_QUERY_HEADER, response: page([listItem("2", { ...PROBE_FIELDS, Status: "Completed" })]) },
+    ]);
+
+    const result = await runGetAssessment({ profileId: PROFILE, status: "completed" }, assessmentToolContext(graph));
+
+    expect(result.structuredContent).not.toHaveProperty("truncated");
+  });
 });

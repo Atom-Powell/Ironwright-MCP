@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { ToolContext } from "../context.js";
 import { describeToolFailure, type FailureSubject } from "../errors.js";
-import { odataString, queryListItems } from "../../graph/lists.js";
+import { odataString, queryListItems, queryListItemsUpTo } from "../../graph/lists.js";
 import { sanitizeFolderName } from "../../domain/assessment/templates.js";
 import { lifecycleReadiness, recordFromFields, type ActionReadiness, type AssessmentRecord } from "../../domain/assessment/state.js";
 import type { JournalEntry } from "../../store/types.js";
@@ -11,6 +11,12 @@ import { findAssessmentById, findVendor, readAssessmentState } from "./read-stat
 import { ARTIFACT_PRESENCE_SHAPE, ASSESSMENT_SUMMARY_SHAPE, FINDING_READ_SHAPE, JOURNAL_ENTRY_SHAPE, JOURNAL_SUMMARY_SHAPE, READINESS_SHAPE } from "./output.js";
 
 export const GET_INPUT_CONSTRAINTS = "Exactly one of assessmentId, vendor or status is given, and include is given only with assessmentId.";
+
+/**
+ * A status listing has no natural bound: completed assessments accumulate for as long as the list
+ * lives. It stops here and says so, where an unbounded query would page until it threw.
+ */
+export const STATUS_LISTING_LIMIT = 200;
 
 /** The three statuses by the names the tool takes; the profile holds the labels the list stores. */
 const STATUS_KEYS = { in_progress: "inProgress", completed: "completed", provisional: "provisional" } as const;
@@ -27,7 +33,7 @@ export const GET_INPUT_SCHEMA = {
   status: z
     .enum(["in_progress", "completed", "provisional"])
     .optional()
-    .describe('A status whose assessments to list across every vendor, for example "in_progress" for everything still open. The server maps it to the profile\'s own label.'),
+    .describe('A status whose assessments to list across every vendor, for example "in_progress" for everything still open. The server maps it to the profile\'s own label, and returns at most 200, saying so when more exist.'),
   include: z
     .array(z.enum(["findings", "journal"]))
     .max(2)
@@ -62,6 +68,7 @@ export const GET_OUTPUT_SCHEMA = {
     .array(z.object(ASSESSMENT_SUMMARY_SHAPE))
     .optional()
     .describe('Every assessment for the vendor or holding the status, for example two items for a vendor assessed twice. Absent on an id lookup.'),
+  truncated: z.boolean().optional().describe("True when a status listing stopped at 200 assessments and more exist that were not read, for example true for a list holding years of completed assessments. Absent otherwise."),
   graphRequests: z.number().int().describe("Graph requests this call issued, for example 7."),
 } satisfies z.ZodRawShape;
 
@@ -211,13 +218,16 @@ export async function runGetAssessment(input: unknown, context: ToolContext): Pr
 
     if (args.status !== undefined) {
       const label = ac.profile.lifecycle.status[STATUS_KEYS[args.status]];
-      const items = await queryListItems(context.graph, { siteId: ac.siteId, listName, filter: `fields/${columns.status} eq ${odataString(label)}` });
+      const { items, more } = await queryListItemsUpTo(context.graph, { siteId: ac.siteId, listName, filter: `fields/${columns.status} eq ${odataString(label)}`, limit: STATUS_LISTING_LIMIT });
       const assessments = items.map((item) => assessmentSummary(recordFromFields(item.fields, item.id, item.eTag, columns)));
-      const output = { found: assessments.length > 0, assessments, graphRequests: context.graph.requests() - before };
+      const output = { found: assessments.length > 0, assessments, ...(more ? { truncated: true } : {}), graphRequests: context.graph.requests() - before };
+      const counted = more
+        ? `The first ${assessments.length} assessments in ${listName} with ${columns.status} "${label}", and more exist that were not read: `
+        : `${assessments.length} ${assessments.length === 1 ? "assessment" : "assessments"} in ${listName} with ${columns.status} "${label}": `;
       const described =
         assessments.length === 0
           ? `No item in list "${listName}" has ${columns.status} "${label}".`
-          : `${assessments.length} ${assessments.length === 1 ? "assessment" : "assessments"} in ${listName} with ${columns.status} "${label}": ` +
+          : counted +
             assessments.map((summary) => `${summary.assessmentId ?? `item ${summary.itemId} (no id)`} for ${summary.vendor ?? "(no vendor)"} (${summary.scope ?? "no scope"})`).join(", ") +
             ".";
       return { structuredContent: output, content: [{ type: "text" as const, text: described }] };

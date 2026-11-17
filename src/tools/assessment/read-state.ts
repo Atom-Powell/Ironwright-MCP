@@ -1,5 +1,5 @@
 import type { GraphClient } from "../../graph/client.js";
-import { readDriveItem } from "../../graph/items.js";
+import { readDriveItem, type DriveItemFacts, type DriveItemLookup } from "../../graph/items.js";
 import { odataString, queryListItems } from "../../graph/lists.js";
 import { fileNameOf, joinWorkspacePath, renderWorkspaceTemplate, sanitizeFolderName } from "../../domain/assessment/templates.js";
 import { recordFromFields, rootPathUnavailable, type AssessmentRecord, type AssessmentState, type IdentifiedAssessmentRecord } from "../../domain/assessment/state.js";
@@ -138,6 +138,27 @@ export async function findInProgressAssessment(
   return item === undefined ? undefined : recordFromFields(item.fields, item.id, item.eTag, columns);
 }
 
+export type ArtifactLookup = { present: true; item: DriveItemFacts } | { present: false; occupant?: { name: string; isFolder: boolean } };
+
+/**
+ * Whether a path lookup answered the artifact the path names. SharePoint
+ * answers a path case insensitively, so a file named differently only by case
+ * comes back from the lookup. It is not the file the template names, and the
+ * 9c-era campaign showed a misnamed publication completing an assessment on
+ * that reading: the name must match exactly. Whatever else the lookup answered
+ * is named as the occupant, so no caller has to infer what it was.
+ *
+ * Every tool that looks for an artifact asks this. read_assessment_artifact
+ * once did its own lookup and returned a file the lifecycle tools refused to
+ * recognize.
+ */
+export function artifactAt(lookup: DriveItemLookup, path: string): ArtifactLookup {
+  if (lookup.kind !== "found") return { present: false };
+  const item = lookup.item;
+  if (!item.isFolder && item.name === fileNameOf(path)) return { present: true, item };
+  return { present: false, occupant: { name: item.name, isFolder: item.isFolder } };
+}
+
 /** Reads the drive side of the state for a record whose id and folder are known. */
 export async function readAssessmentState(graph: Pick<GraphClient, "get">, ac: AssessmentContext, record: AssessmentRecord | undefined): Promise<AssessmentState> {
   const unavailable = rootPathUnavailable(record);
@@ -154,23 +175,11 @@ export async function readAssessmentState(graph: Pick<GraphClient, "get">, ac: A
     ...entries.map(([, path]) => readDriveItem(graph, { driveId: ac.driveId, path })),
   ]);
   const artifacts = entries.map(([kind, path], index) => {
-    const lookup = lookups[index]!;
-    // SharePoint answers a path case insensitively, so a file named differently only by case comes
-    // back from the lookup. It is not the file the template names, and the 9c-era campaign showed a
-    // misnamed publication completing an assessment on that reading. The name must match exactly.
-    const expectedName = fileNameOf(path);
-    const found = lookup.kind === "found" ? lookup.item : undefined;
-    const present = found !== undefined && !found.isFolder && found.name === expectedName;
-    return {
-      kind,
-      path,
-      present,
-      // The ETag and size describe the artifact, so they are carried only for it. Whatever else the
-      // lookup answered is named as the occupant, so no caller has to infer what it was.
-      eTag: present ? found?.eTag : undefined,
-      size: present ? found?.size : undefined,
-      ...(found !== undefined && !present ? { occupant: { name: found.name, isFolder: found.isFolder } } : {}),
-    };
+    const at = artifactAt(lookups[index]!, path);
+    // The ETag and size describe the artifact, so they are carried only for it.
+    return at.present
+      ? { kind, path, present: true, eTag: at.item.eTag, size: at.item.size }
+      : { kind, path, present: false, eTag: undefined, size: undefined, ...(at.occupant === undefined ? {} : { occupant: at.occupant }) };
   });
   return { record, rootPath: paths.root, rootPresent: root.kind === "found" && root.item.isFolder, artifacts };
 }

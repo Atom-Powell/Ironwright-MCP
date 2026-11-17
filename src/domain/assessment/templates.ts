@@ -121,6 +121,11 @@ export function sanitizeFolderName(name: string): string {
     .replace(/[.\s]+$/, "");
 }
 
+/** The first character of a text that SharePoint refuses in a name, by the one rule the sanitizers use. */
+export function firstRefusedNameCharacter(text: string): string | undefined {
+  return [...text].find((character) => stripRefusedNameCharacters(character).length === 0);
+}
+
 /** The file name a library-relative path ends in, which is the name an artifact must carry exactly. */
 export function fileNameOf(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1);

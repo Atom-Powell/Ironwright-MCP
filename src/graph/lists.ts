@@ -59,6 +59,28 @@ export async function queryListItems(
   return records;
 }
 
+/**
+ * A filtered query that stops once it holds `limit` items and says whether
+ * more matched. For a listing with no natural bound, where `queryListItems`
+ * would page until its own ceiling and then throw. `more` is true when a
+ * further page was offered or the last page read ran past the limit; the
+ * items past the limit are not returned.
+ */
+export async function queryListItemsUpTo(
+  client: Pick<GraphClient, "get">,
+  args: { siteId: string; listName: string; filter: string; limit: number },
+): Promise<{ items: ListItemRecord[]; more: boolean }> {
+  let url: string | undefined = `${listItemsPath(args.siteId, args.listName)}?$expand=fields&$top=50&$filter=${encodeURIComponent(args.filter)}`;
+  const records: ListItemRecord[] = [];
+  while (url !== undefined && records.length < args.limit) {
+    const page: { value?: unknown; "@odata.nextLink"?: unknown } = await client.get(url, NON_INDEXED_QUERY_HEADER);
+    if (!Array.isArray(page.value)) throw new Error(`Graph returned a page of list "${args.listName}" without a value array.`);
+    for (const item of page.value) records.push(recordOf(item, args.listName));
+    url = typeof page["@odata.nextLink"] === "string" ? page["@odata.nextLink"] : undefined;
+  }
+  return { items: records.slice(0, args.limit), more: url !== undefined || records.length > args.limit };
+}
+
 export async function getListItem(
   client: Pick<GraphClient, "get">,
   args: { siteId: string; listName: string; itemId: string },

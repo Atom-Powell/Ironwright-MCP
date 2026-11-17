@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { ProfileValidationError } from "../../../src/domain/profile/load.js";
+import { journalPartitionKey } from "../../../src/store/keys.js";
 import { createProfileRegistry, loadAnyProfile } from "../../../src/profiles/registry.js";
 
 // A loose shape on purpose: each case reaches into the example and breaks one nested field.
@@ -105,6 +106,19 @@ describe("assessment profile refusals", () => {
 
   it("refuses a workspace template with a segment ending in a dot", () => {
     expectIssue(broken((p) => { p.workspace.subfolders = ["Research./Notes"]; }), "workspace.subfolders.0", /ends in a dot/);
+    expectIssue(broken((p) => { p.workspace.subfolders = ["A."]; }), "workspace.subfolders.0", /ends in a dot/);
+  });
+
+  it("refuses {vendor} at the end of a path segment, where a display name ending in a dot would end the name", () => {
+    expectIssue(broken((p) => { p.workspace.artifacts.dossier = "Research/{vendor}/dossier.md"; }), "workspace.artifacts.dossier", /\{vendor\} ends a path segment/);
+    expectIssue(broken((p) => { p.workspace.root = "Assessments/{assessmentId}_{vendor}"; }), "workspace.root", /\{vendor\} ends a path segment/);
+  });
+
+  it("refuses in an id every character the journal's key refuses, so a profile that loads can be journaled", () => {
+    for (const character of ["/", "\\", "#", "?", "\u0007", "\u0085"]) {
+      expect(() => journalPartitionKey("p", `ASM${character}1`), JSON.stringify(character)).toThrow();
+      expectIssue(broken((p) => { p.assessmentId.prefix = `ASM${character}`; }), "assessmentId.prefix", /cannot contain/);
+    }
   });
 
   it("refuses two artifact kinds whose templates name one file", () => {

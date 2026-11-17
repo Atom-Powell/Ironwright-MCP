@@ -6,7 +6,7 @@ import { readDriveItem } from "../../graph/items.js";
 import { downloadDriveItem } from "../../graph/content.js";
 import { fileNameOf } from "../../domain/assessment/templates.js";
 import { profileArtifactKinds, resolveAssessmentContext, unknownKindText } from "./context.js";
-import { findAssessmentById, recordWorkspacePaths } from "./read-state.js";
+import { artifactAt, findAssessmentById, recordWorkspacePaths } from "./read-state.js";
 import { sha256Hex } from "./hash.js";
 
 export const READ_INPUT_SCHEMA = {
@@ -60,18 +60,17 @@ export async function runReadAssessmentArtifact(input: unknown, context: ToolCon
     // The id as the list stores it, which the lookup can match in another case than the caller's.
     const assessmentId = record.assessmentId;
 
-    const lookup = await readDriveItem(context.graph, { driveId: ac.driveId, path });
-    if (lookup.kind !== "found") return failure(`No file is at ${path}, where the profile puts the ${args.kind} for ${assessmentId}.`);
-    if (lookup.item.isFolder) return failure(`A folder, not a file, is at ${path}, where the profile puts the ${args.kind} for ${assessmentId}.`);
-    // SharePoint answers a path without regard to case, so the lookup can answer a file the template
-    // does not name. Every other tool reads that file as not the artifact, and the auditor must not
-    // be handed content the lifecycle tools refuse to recognize.
-    const expectedName = fileNameOf(path);
-    if (lookup.item.name !== expectedName) {
+    // The same answer every lifecycle tool acts on, so the auditor is never handed a file they
+    // refuse to recognize.
+    const at = artifactAt(await readDriveItem(context.graph, { driveId: ac.driveId, path }), path);
+    if (!at.present) {
+      if (at.occupant === undefined) return failure(`No file is at ${path}, where the profile puts the ${args.kind} for ${assessmentId}.`);
+      if (at.occupant.isFolder) return failure(`A folder, not a file, is at ${path}, where the profile puts the ${args.kind} for ${assessmentId}.`);
       return failure(
-        `The lookup of ${path} answered a file named "${lookup.item.name}", not "${expectedName}", the name the profile gives the ${args.kind} for ${assessmentId}. Its content was not read.`,
+        `The lookup of ${path} answered a file named "${at.occupant.name}", not "${fileNameOf(path)}", the name the profile gives the ${args.kind} for ${assessmentId}. Its content was not read.`,
       );
     }
+    const lookup = { item: at.item };
 
     const bytes = await downloadDriveItem(context.graph, { driveId: ac.driveId, workbookPath: path });
     const sha256 = sha256Hex(bytes);

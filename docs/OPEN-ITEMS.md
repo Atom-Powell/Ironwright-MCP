@@ -42,6 +42,7 @@ sections below say what was proven and what was not. Last updated 2026-11-17.
 | 9c Assessment module and the four Graph operations | Verified live 2026-11-08 on the main path: open, save, findings, verify, transition and both reads, 25 calls on the developer tenant. Three checks were not run and stay carried: the implicit parent folder, the publication name case, and an `executive_summary` save | PR #25; sitting below; `docs/superpowers/specs/evidence/2026-11-08-assessment-sitting/` |
 | Pre-EON test campaign | First run 2026-11-09: 8 scenarios on the developer tenant, 2 defects found (concurrent opens duplicated an assessment; a misnamed publication completed an assessment), both fixed in PR #27. Rerun the same day on the fixed server: s2 and s4 pass, s3, s5, s7 and s8 pass, s1 and s6 measured as before. Still to run: interrupted open, throttling and token expiry, inbound auth over a public tunnel, Copilot Studio contact (plan 9d); plan `docs/superpowers/plans/2026-11-09-pre-eon-test-campaign.md` | `scripts/pre-eon/campaign.ts`; sitting below |
 | Phase 9 code review | 2026-11-16: ten defects read out of the 9b, 9c and campaign source; seven fixed against fakes, three wait on a ruling or a probe (see the carried items below). 2026-11-17: a review of those fixes read ten more findings, all fixed against fakes. None of it run live | section below; spec amendments of 2026-11-16 |
+| Assessment module upgrades and the simulated tenant | 2026-11-17: a stateful simulated tenant with a local server and walkthrough; refusals carried under `_meta` after the first client that lists tools rejected them; one lock per assessment; concurrent state reads; honest journal failures; one profile loader with more refused at load; version reporting, a record of every tool call and a bounded startup wait; `get_assessment` readiness, findings and journal readback, and listing by status. Built against the scripted fakes and the simulated tenant. None of it run live | section below; `docs/SIMULATOR.md`; spec amendments of 2026-11-17 |
 | 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9c and carries the unverified A3 and B1 probes, and is the item that slips first | same spec |
 | Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
 | CPA practice domain (multi-site scan and queries, grant issuer loop over a sites file, folder template taxonomy) | Not started; the phase after 9 | same spec |
@@ -198,11 +199,16 @@ warning and `inventory_tree` answered through the guard at 3 Graph requests. The
 deliberately not exercised live, since that would mean granting the server application a broad
 permission with admin consent; it is covered by unit tests only.
 
+**CLOSED 2026-11-17.** The version is read from `package.json` by `src/version.ts` and reported in
+the MCP handshake, the startup line and `GET /health`. The item read:
 **Report the server version in `/health` and the startup log (phase 5b).** From the same refresh:
 a peer server's users asked for a way to see which version is running (Lokka #52), because it
 was hardcoded rather than read from `package.json`. Worth doing with 5b's telemetry, once there
 is a deployment to ask; nothing to build before then.
 
+**CLOSED 2026-11-17.** A token request is abandoned after 15 seconds, in the provider, so startup
+logs a warning and the server starts, the path a failed token request already took. Covered by
+tests only. The item read:
 **Bound the startup identity check with a timeout (phase 5b).** Found 2026-09-24 by the token role
 guard's whole-branch review. `checkStartupIdentity` now asks Entra for a token before the port is
 bound, and it has no timeout of its own: it relies on the `fetch` defaults. A token endpoint that
@@ -306,6 +312,9 @@ expected name exactly and reports a case difference as not present. The artifact
 case a misnamed publication counts there as present. The Task 9 sitting measures it by uploading
 the publication under a name differing only by case before the correctly named one.
 
+**CLOSED 2026-11-17.** The append now raises an error naming the write Graph confirmed, and the
+tool reports that the write stands, that the journal lacks it, and that the call stopped there. The
+item read:
 **Carried from phase 9c, 2026-11-07: a journal append that throws after a confirmed write.** When
 Graph confirms a write and the store then fails to append its journal entry, the call reports the
 store's error through `describeToolFailure`, which does not say that the Graph write happened, and
@@ -349,17 +358,39 @@ Whether Graph honors `If-Match` on a list item `fields` PATCH has never been pro
 assumption gate puts a live probe before any fix. `record_findings` and `open_assessment` are
 serialized within the process; `save_assessment_artifact` and `transition_assessment` are not.
 
+**Narrowed 2026-11-17.** The three lifecycle tools that write to an open assessment now share one
+lock per assessment, so two of this server's own calls can no longer overwrite each other within
+the one process the hosting decision names. What stays open is the precondition itself: a person
+editing the item in the browser between a tool's read and its write is still overwritten, and that
+is what the `If-Match` probe is for.
+
 **Carried from the phase 9 code review, 2026-11-16: a provisional assessment cannot be completed.**
 `requireInProgress` refuses every tool once the status is provisional, and a later `open_assessment`
 for the same vendor and scope creates a second assessment. The spec does not say whether
 provisional is an end state. Needs a ruling.
 
+**CLOSED 2026-11-17, all three.** The id prefix and template are checked at load, the state read
+issues its drive reads together, and the registry's dispatcher is the only profile loader. The item
+read:
 **Carried from the phase 9 code review, 2026-11-16: three smaller findings, not fixed.** The
 assessment id prefix and template are not checked at profile load against the journal key's
 alphabet or SharePoint's name rules. `readAssessmentState` reads the root and every artifact one
 after another on every lifecycle call. `loadAnyProfile` in `src/domain/profile/library.ts` is a
 second profile dispatcher that only tests reach, so the assessment profile tests exercise a
 dispatcher the server never calls.
+
+**Carried from the 2026-11-17 upgrades: what Copilot Studio does with a refusal.** A refusal now
+carries its structure under `_meta` and its evidence as prose. Whether Copilot Studio validates
+structured content against a tool's output schema, as the MCP SDK client does, and whether it
+shows `_meta` or an error result's prose to the agent, has not been probed. The prose alone is
+enough for an agent that sees it. Plan 9d's first refused call is the check.
+
+**Carried from the 2026-11-17 upgrades: nothing in them has met a tenant.** The readiness report,
+the findings and journal readback, the listing by status, the per-assessment lock, the concurrent
+state read and the stricter profile checks were run against the scripted fakes and the simulated
+tenant only. A campaign rerun on the developer tenant is their live check. The campaign client now
+lists the tools before calling them, as an agent host does, so that rerun also exercises the client
+side validation that found the refusal defect.
 
 **Carried from the pre-EON campaign, 2026-11-09: the open lock covers one process.** The per vendor
 lock that stops concurrent opens duplicating an assessment lives in the server process. It holds for
@@ -2547,6 +2578,47 @@ that are prose. It ran nothing against a tenant either.
 | The open lock was keyed on the name, and two vendor records storing one folder name raced past it | Fixed: a second lock on the resolved folder |
 | The expected file name was derived in four places and a dead fallback repeated in four tools | Fixed: one helper, and the id lookup returns a record that carries the id |
 | The spec amendment restated build status | Fixed: it points here |
+
+## The simulated tenant and the upgrades of 2026-11-17
+
+Built in one sitting with no tenant access: the grant issuer secret had lapsed, so nothing here
+could be run live, and nothing was. Each change was written test first. What the tests ran against
+is named in the last column, because it is the limit of what they show.
+
+| Change | What it does | Run against |
+|---|---|---|
+| The simulated tenant, `npm run sim` and `npm run sim:walkthrough` | The assessment tools end to end with no tenant: a stateful site, the real server over it, and routes that stand in for the publisher and the operator | Its own tests, each behavior through the server's real Graph helpers; `docs/SIMULATOR.md` lists what is measured and what is modeled |
+| Refusals under `_meta` | A lifecycle refusal reaches a client that has listed the tools as a tool error with its evidence. It reached such a client as a schema fault | A real MCP client over the real server and the simulated tenant |
+| One lock per assessment | A save, a findings call and a transition for one assessment no longer overlap | The simulated tenant, which interleaves requests; each test failed without the lock |
+| Concurrent state read | The root and every artifact path are read together | A count of the reads in flight |
+| Journal failure reported as what it follows | A failed journal append names the write Graph confirmed | The simulated tenant with a store that refuses one append |
+| One profile loader and stricter load checks | Seven misconfigurations that loaded and failed later are refused at startup | The profile tests, now through the loader the server uses |
+| Version, call record, bounded token request | `/health`, the handshake and the startup line carry the version; each call writes one line; a token request is abandoned after 15 seconds | Unit tests; the compiled build was run once to read the version |
+| `get_assessment` readiness | What each lifecycle tool's precondition finds, from the tool's own function | Twenty cells: five states by four tools, each tool called after its report |
+| `get_assessment` findings and journal readback | The recorded findings, the summary and every journal entry, on request | The scripted fake and the walkthrough |
+| `get_assessment` by status | Every assessment holding a status, across vendors, up to 200 with a flag when more exist | The scripted fake and the walkthrough |
+
+The refusal defect is the one finding of the night that changes what is known about the live
+system. It existed since plan 9b, survived the 9c sitting and both campaign runs, and would have
+been the first thing an agent host met: any refused stage answered with `-32602` and no evidence.
+It was invisible because the campaign's client calls tools without listing them, and the SDK
+client validates output only for tools it has listed. The campaign now lists them.
+
+A third review, of this sitting's own work, read ten more findings before anything was committed.
+All ten are fixed: the startup wait had been bounded by racing the token request, which left the
+request in flight and would have discarded a late token with the wrong roles, so the bound moved
+into the provider; the call record repeated the caller's profile id and assessment id, which can
+hold any text, and now records only the forms the server knows; the status listing had no bound;
+the trailing dot check missed a two character segment; `{vendor}` could end a segment; this file
+said the campaign listed the tools before it did; and the exact name rule and the refused
+character rule each had more than one copy.
+
+Four things here were decided without a ruling and are the operator's to overrule: a refusal's
+structure rides under `_meta["ironwright-mcp/refusal"]`; an id template without `{item}`, and a
+workspace template in which `{vendor}` ends a segment, are refused at load; `get_assessment` reads
+findings and journal entries only when `include` asks; and a status listing stops at 200.
+
+The suite is at 3149 tests across 227 files.
 
 ## The phase 6d live sitting, 2026-09-24: plans an operator describes
 

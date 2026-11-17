@@ -534,6 +534,10 @@ inside the name is left alone: the first fix ran `{vendor}` through the folder n
 which strips a trailing dot, and that would have moved the dossier of an assessment already open
 for `Acme Inc.` to a path holding no file. A consumer's publisher that builds the publication name
 itself must build it from the path `verify_publication` reports, not from the display name.
+`{vendor}` keeps a dot the name ends in, so the profile schema refuses a template in which it ends
+a path segment. One consequence is accepted: an assessment opened before this change for a vendor
+name holding a slash has its dossier under the folder the slash made, and the tools now look for
+it at the path without the slash. No such assessment exists outside the developer tenant.
 
 **A `.` or `..` path segment is refused, at load and before the first write.** `joinWorkspacePath`
 throws on one. The request URL is normalized before it is sent, so such a path addresses a
@@ -588,3 +592,93 @@ path that creates a vendor, and `docs/SETUP.md` names the folder name column amo
 **What these rest on.** That a list `eq` filter matches text without regard to case is not probed;
 the campaign measured it for drive paths only. Every fix above is correct whichever way a list
 filter behaves, and matters only if it ignores case.
+
+## Amendments, 2026-11-17: the simulated tenant and what it led to
+
+A stateful stand-in for the tenant was built so the lifecycle could be run end to end without one,
+and the first run of the server against an MCP client that lists the tools before calling them
+found a defect no earlier test could. The changes below followed. Where each stands is in
+`docs/OPEN-ITEMS.md`.
+
+**A refusal's structure rides under `_meta`, not as structured content.** This supersedes the
+sentence above that a refusal "returns `isError` with that evidence as prose and as structured
+content, which the SDK's error path already permits". The SDK server skips output validation on an
+error result, and that half was pinned by a test. The SDK client does not: once it has listed the
+tools it validates any structured content against the tool's output schema, error or not (SDK
+1.30.0, `client/index.js`). Every agent host lists the tools, so a refusal reached such a client
+as a schema fault, `-32602`, with the evidence discarded. The campaign never saw it because its
+client calls tools without listing them. A refusal now carries its structure under
+`_meta["ironwright-mcp/refusal"]` and no structured content, and the prose is unchanged. This was
+an assumption about another module's output with evidence for one side of it only, which is the
+kind the assumption gate exists for. Whether Copilot Studio validates structured content, and what
+it does with `_meta`, is not probed and waits on plan 9d; the prose carries everything either way.
+
+**One lock per assessment.** `save_assessment_artifact`, `record_findings` and
+`transition_assessment` run one at a time for one assessment, under a lock keyed on the profile
+and the lowercased id. Each reads, decides and writes in separate requests, and the list item
+update carries no precondition, so two overlapping calls decided on a state the other was about to
+change: a save that started before a transition wrote its stage over the transition's, and the
+second of two first saves failed on the file the first had just created. The lock orders them
+within the process, which is every caller under one replica. It is not a substitute for `If-Match`
+on the list item, which still waits on its probe, and it does nothing about a person editing the
+item in the browser.
+
+**The state read is concurrent.** The workspace root and every artifact path are read together.
+They are independent reads, every lifecycle call makes all of them, and in sequence they were most
+of each call's wait: four round trips before a decision where there is now one.
+
+**A journal append that fails says what it follows.** The journal is appended after Graph confirms
+a write, so a failure to append follows a write that happened. It is raised as an error naming the
+operation and the target, and the tool reports that the write stands, that the journal lacks it,
+and that the call stopped there. It used to surface as the store's own message, which reads as a
+call that did nothing. A lifecycle tool that cannot journal stops; it does not go on to make
+writes the journal would also lack.
+
+**Each tool's precondition is defined once, and `get_assessment` reports all of them.** The
+preconditions moved into the domain layer as one function per tool, and the tools call them.
+`get_assessment` by id returns `readiness`: each lifecycle tool, whether its precondition held on
+the state that call read, and the evidence when it did not. It is the tool's own decision over the
+same state, so it cannot drift from the tool, and a test runs every tool after every report to hold
+that. It is a report of one read, not a promise: each tool reads the state again when called, a
+save still refuses a kind the profile does not name or a path something else holds, and a
+transition already made is reported by that tool as done although it shows as not ready.
+
+**`get_assessment` reads more back.** `include` takes `findings`, which reads the recorded
+findings and the summary from the lists, and `journal`, which returns every journal entry under the
+id. Nothing read the findings back before, so an auditor could read the dossier and not what was
+concluded from it, and the journal was reported only as counts. Both are opt in, because a status
+check should stay cheap. `status` lists every assessment holding a status across all vendors, the
+question of what is still open, from the list alone. It returns at most 200 and sets `truncated`
+when more exist, because completed assessments accumulate without bound and the paged query throws
+at its ceiling. Artifact presence carries `occupant` when the path holds something that is not the
+artifact, and one function, `artifactAt`, decides for every tool whether a lookup answered the
+artifact.
+
+**One profile loader, and more is refused at load.** The registry's dispatcher is the only loader;
+the second one beside the library schema, reached only by tests, is gone. An assessment profile is
+now refused at startup when the id prefix or the id template's own text holds a character a folder
+name or a table key refuses, when the id template has no `{item}`, when it ends in a dot or a
+space, when a workspace template's own text holds a character SharePoint refuses or a segment
+ending in a dot, when `{vendor}` ends a path segment, when two artifact kinds name one file, and
+when two of the three lists share a name. Each of these loaded before and failed later, at Graph or in the journal, after an open had
+already created the list item. Requiring `{item}` narrows what a profile may say: a template
+without it renders one id for every assessment, which the id lookup then refuses to choose between.
+
+**The server says which version it is, records each call, and bounds its startup wait.** The
+version is read from `package.json` and reported in the MCP handshake, the startup line and
+`GET /health`. Each tool call writes one line recording the tool, its kind, the profile, the
+assessment id, the outcome, the duration, the correlation id and the Graph request count, and
+nothing the caller sent or the tool answered. The two identifiers are recorded only as the server
+knows them, the profile id when it is configured and the assessment id when the tool answered with
+it, since either input field accepts any text. A token request is abandoned after 15 seconds, in
+the provider, so startup takes the path a failed token request already took. The bound is on the
+request and not on the startup check's wait for it: a check that merely stopped waiting left the
+request in flight for the first callers to queue behind, and would have discarded a late token
+carrying the wrong roles on a server already running, the case the Decision Record says never
+starts.
+
+**The simulated tenant is a test substrate, not evidence.** `scripts/sim/tenant.ts` answers the
+Graph requests the module sends from state it holds, and `docs/SIMULATOR.md` lists each simulated
+behavior as copied from a dated measurement or as modeled. It can show that the server's steps
+compose and that overlapping calls are ordered, which the scripted fake cannot. It cannot stand in
+the Assumptions table: a row there still needs a live probe or the real producer's output.
