@@ -47,8 +47,53 @@ function step(id: string) {
 describe("probe steps", () => {
   it("runs in the order the spec's assumptions depend on each other", () => {
     expect(probeSteps().map((s) => s.id)).toEqual([
-      "R1", "R2", "L1", "L2a", "L2b", "L1b", "L3a", "L3b", "F0", "F1a", "F1b", "F2a", "F2b", "F3a", "F3b", "F3c", "F4",
+      "R1", "R2", "L1", "L2a", "L2b", "L1b", "L3a", "L3b", "L4a", "L4b", "L4c", "L4d", "F0", "F1a", "F1b", "F2a", "F2b", "F3a", "F3b", "F3c", "F4",
     ]);
+  });
+
+  it("captures the list item's eTag at create and again at the read after the id is written", () => {
+    const c = ctx({ itemId: undefined });
+    step("L2a").capture!({ status: 201, headers: {}, body: JSON.stringify({ id: "17", eTag: '"abc,1"' }) }, c);
+    step("L1b").capture!({ status: 200, headers: {}, body: JSON.stringify({ id: "17", eTag: '"abc,2"', fields: {} }) }, c);
+    expect(c.listEtagAtCreate).toBe('"abc,1"');
+    expect(c.listEtag).toBe('"abc,2"');
+  });
+
+  it("sends L4a to the fields address the server patches, under the eTag the item had before its last write", () => {
+    const req = step("L4a").request(ctx({ listEtagAtCreate: '"abc,1"', listEtag: '"abc,2"' }));
+    expect(req.method).toBe("PATCH");
+    expect(req.url.endsWith("/lists/IW%20Probe%20Assessments/items/17/fields")).toBe(true);
+    expect(req.headers?.["if-match"]).toBe('"abc,1"');
+    expect(JSON.parse(req.body!)).toEqual({ Status: "Stale write on fields" });
+  });
+
+  it("reads the item back at L4b, so what the stale write did is seen and the current eTag is fresh", () => {
+    const c = ctx({ listEtagAtCreate: '"abc,1"', listEtag: '"abc,2"' });
+    const req = step("L4b").request(c);
+    expect(req.method).toBe("GET");
+    expect(req.url.endsWith("/items/17?$expand=fields")).toBe(true);
+    step("L4b").capture!({ status: 200, headers: {}, body: JSON.stringify({ eTag: '"abc,3"', fields: { Status: "Stale write on fields" } }) }, c);
+    expect(c.listEtag).toBe('"abc,3"');
+  });
+
+  it("sends L4c under the eTag L4b just read", () => {
+    const req = step("L4c").request(ctx({ listEtagAtCreate: '"abc,1"', listEtag: '"abc,3"' }));
+    expect(req.url.endsWith("/items/17/fields")).toBe(true);
+    expect(req.headers?.["if-match"]).toBe('"abc,3"');
+    expect(JSON.parse(req.body!)).toEqual({ Status: "Current write on fields" });
+  });
+
+  it("sends L4d to the item itself, not its fields, under the stale eTag", () => {
+    const req = step("L4d").request(ctx({ listEtagAtCreate: '"abc,1"', listEtag: '"abc,3"' }));
+    expect(req.method).toBe("PATCH");
+    expect(req.url.endsWith("/lists/IW%20Probe%20Assessments/items/17")).toBe(true);
+    expect(req.headers?.["if-match"]).toBe('"abc,1"');
+    expect(JSON.parse(req.body!)).toEqual({ fields: { Status: "Stale write on the item" } });
+  });
+
+  it("refuses to build a list precondition step when no eTag was captured", () => {
+    expect(() => step("L4a").request(ctx())).toThrow("listEtagAtCreate");
+    expect(() => step("L4c").request(ctx({ listEtagAtCreate: '"abc,1"' }))).toThrow("listEtag");
   });
 
   it("resolves the site by hostname and server-relative path", () => {
@@ -146,6 +191,33 @@ describe("judges", () => {
 
   it("passes F4 when the content read back is the overwritten text", () => {
     expect(step("F4").judge({ status: 200, headers: {}, body: "# probe v2\n" }, ctx())).toEqual({ kind: "pass" });
+  });
+
+  it("passes a stale list write only on a 412 sent under an eTag known to be out of date", () => {
+    const stale = ctx({ listEtagAtCreate: '"abc,1"', listEtag: '"abc,2"' });
+    for (const id of ["L4a", "L4d"]) {
+      expect(step(id).judge({ status: 412, headers: {}, body: "{}" }, stale)).toEqual({ kind: "pass" });
+      const same = step(id).judge({ status: 412, headers: {}, body: "{}" }, ctx({ listEtagAtCreate: '"abc,1"', listEtag: '"abc,1"' }));
+      expect(same.kind).toBe("observed");
+    }
+  });
+
+  it("records a stale list write that Graph accepted as observed, naming that the precondition was ignored", () => {
+    const stale = ctx({ listEtagAtCreate: '"abc,1"', listEtag: '"abc,2"' });
+    const verdict = step("L4a").judge({ status: 200, headers: {}, body: "{}" }, stale);
+    expect(verdict).toEqual({ kind: "observed", note: "200: the stale If-Match was not enforced on this address" });
+  });
+
+  it("reports at L4b whether the stale write landed", () => {
+    const landed = step("L4b").judge({ status: 200, headers: {}, body: JSON.stringify({ fields: { Status: "Stale write on fields" } }) }, ctx());
+    expect(landed).toEqual({ kind: "observed", note: "the stale write landed: Status reads as L4a sent it" });
+    const held = step("L4b").judge({ status: 200, headers: {}, body: JSON.stringify({ fields: { Status: "In Progress" } }) }, ctx());
+    expect(held).toEqual({ kind: "pass" });
+  });
+
+  it("passes L4c on a 200 and records anything else as observed", () => {
+    expect(step("L4c").judge({ status: 200, headers: {}, body: "{}" }, ctx())).toEqual({ kind: "pass" });
+    expect(step("L4c").judge({ status: 412, headers: {}, body: "{}" }, ctx()).kind).toBe("observed");
   });
 
   it("records L3a as observed rather than failed whichever way it answers, since both outcomes inform the design", () => {

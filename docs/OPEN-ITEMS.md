@@ -364,6 +364,16 @@ the one process the hosting decision names. What stays open is the precondition 
 editing the item in the browser between a tool's read and its write is still overwritten, and that
 is what the `If-Match` probe is for.
 
+**Probe written 2026-11-17, not run.** `npm run probe:assessment` now carries four more steps, L4a
+to L4d, between the list steps and the drive steps. L4a patches the item's fields, at the address
+the server patches, under the eTag the create answered, which the id write has since made stale.
+L4b reads the item back, so what that write did is seen and not inferred. L4c repeats the write
+under the eTag just read. L4d sends the stale eTag to the item itself with the fields in the body,
+in case Graph enforces the precondition there and not on the fields address. A 412 at L4a means
+`updateListItemFields` can carry `If-Match` as it stands; a 200 at L4a with a 412 at L4d means the
+fix patches the item; a 200 at both means Graph offers no precondition on a list item and the
+remedy is a read after the write. No fix is designed until the run says which.
+
 **Carried from the phase 9 code review, 2026-11-16: a provisional assessment cannot be completed.**
 `requireInProgress` refuses every tool once the status is provisional, and a later `open_assessment`
 for the same vendor and scope creates a second assessment. The spec does not say whether
@@ -2618,7 +2628,8 @@ structure rides under `_meta["ironwright-mcp/refusal"]`; an id template without 
 workspace template in which `{vendor}` ends a segment, are refused at load; `get_assessment` reads
 findings and journal entries only when `include` asks; and a status listing stops at 200.
 
-The suite is at 3149 tests across 227 files.
+The suite is at 3159 tests across 227 files, ten of them for the `If-Match` probe steps written
+the same day and described in the carried item above.
 
 ## The phase 6d live sitting, 2026-09-24: plans an operator describes
 
