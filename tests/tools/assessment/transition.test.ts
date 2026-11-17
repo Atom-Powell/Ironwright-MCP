@@ -85,4 +85,21 @@ describe("transition_assessment", () => {
     expect(calls.filter((call) => call.method !== "get")).toEqual([]);
     expect(await context.store.listJournal(PROFILE, ID)).toEqual([]);
   });
+
+  it("journals and reports under the stored assessment id when the caller's spelling differs by case", async () => {
+    const typed = ID.toLowerCase();
+    const values = { Status: "Completed", Disposition: "Approved", Risk: "Low", State: "LIFECYCLE" };
+    const { graph } = createScriptedGraph([
+      ...stateScript({ typedId: typed, dossier: dossierItem('"d1"', 120), publication: PUBLICATION }),
+      ...patchAndReadBack(values),
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runTransitionAssessment({ ...INPUT, assessmentId: typed }, context);
+
+    expect(result.isError).toBeUndefined();
+    expect((result.structuredContent as Record<string, unknown>).assessmentId).toBe(ID);
+    expect(await context.store.listJournal(PROFILE, ID)).toHaveLength(1);
+    expect(await context.store.listJournal(PROFILE, typed)).toEqual([]);
+  });
 });

@@ -84,15 +84,22 @@ export async function runSaveAssessmentArtifact(input: unknown, context: ToolCon
     );
     if (!check.ok) return refusalResult(TOOL, stageFor(args.kind, false), args.assessmentId, check);
     const item = record!;
+    // The id as the list stores it. The lookup can match a spelling that differs by case, and the
+    // journal is keyed by the exact string, so keying it by what the caller typed would split it.
+    const assessmentId = item.assessmentId ?? args.assessmentId;
 
     const artifact = state.artifacts.find((entry) => entry.kind === args.kind);
     if (artifact === undefined) throw new Error(`The state read carries no artifact kind "${args.kind}" although the profile names it.`);
     const path = artifact.path;
-    // readAssessmentState records an ETag for anything found, and present only for a file, so an
-    // ETag without presence is a folder occupying the file's path. A create there would answer
-    // 409 and be misreported as a file that appeared between the read and the write.
-    if (!artifact.present && artifact.eTag !== undefined) {
-      return failure(`A folder, not a file, is at ${path}, where the profile puts the ${args.kind}. Nothing was written.`);
+    // Something other than the artifact answered the path lookup. A create there would answer 409
+    // and be misreported as a file that appeared between the read and the write.
+    if (artifact.occupant !== undefined) {
+      if (artifact.occupant.isFolder) return failure(`A folder, not a file, is at ${path}, where the profile puts the ${args.kind}. Nothing was written.`);
+      const expectedName = path.slice(path.lastIndexOf("/") + 1);
+      return failure(
+        `The lookup of ${path} answered a file named "${artifact.occupant.name}", not "${expectedName}", the name the profile gives the ${args.kind}. ` +
+          "The server writes only under that exact name. Nothing was written.",
+      );
     }
 
     // The State write and its journal entry, shared by a save that wrote the file and one that found
@@ -100,7 +107,7 @@ export async function runSaveAssessmentArtifact(input: unknown, context: ToolCon
     // update (L2b), which is the read back for this write. Returns the failure text on a mismatch.
     const recordStage = async (stage: string, saved: string): Promise<string | undefined> => {
       const fields = await updateListItemFields(context.graph, { siteId: ac.siteId, listName, itemId: item.itemId, fields: fieldsFor(columns, { state: stage }) });
-      await appendJournal(context, ac, args.assessmentId, {
+      await appendJournal(context, ac, assessmentId, {
         stage,
         operation: "list_item_updated",
         target: `${listName}/${item.itemId}`,
@@ -142,7 +149,7 @@ export async function runSaveAssessmentArtifact(input: unknown, context: ToolCon
           if (mismatch !== undefined) return failure(mismatch);
         }
         const output = {
-          assessmentId: args.assessmentId,
+          assessmentId,
           kind: args.kind,
           path,
           operation: "unchanged" as const,
@@ -170,7 +177,7 @@ export async function runSaveAssessmentArtifact(input: unknown, context: ToolCon
 
     // Journaled on Graph's 2xx and before the read back: the write happened whatever the read back
     // finds, and a read back that fails or disagrees must not leave the write unrecorded.
-    await appendJournal(context, ac, args.assessmentId, {
+    await appendJournal(context, ac, assessmentId, {
       stage,
       operation: overwritten ? "file_overwritten" : "file_created",
       target: path,
@@ -200,7 +207,7 @@ export async function runSaveAssessmentArtifact(input: unknown, context: ToolCon
     if (mismatch !== undefined) return failure(mismatch);
 
     const output = {
-      assessmentId: args.assessmentId,
+      assessmentId,
       kind: args.kind,
       path,
       operation: overwritten ? ("overwritten" as const) : ("created" as const),

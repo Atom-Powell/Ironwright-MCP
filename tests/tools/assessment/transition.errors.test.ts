@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TRANSITION_INPUT_CONSTRAINTS, runTransitionAssessment } from "../../../src/tools/assessment/transition.js";
-import { assessmentToolContext, createScriptedGraph, listItem, resultText } from "./fake-graph.js";
-import { DOSSIER_PATH, ID, PROFILE, PUBLICATION_PATH, dossierItem, publicationItem, stateFields, stateScript } from "./state-script.js";
+import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, listItem, resultText } from "./fake-graph.js";
+import { DOSSIER_PATH, ID, PROFILE, PUBLICATION_PATH, assessmentByIdQuery, dossierItem, publicationItem, stateFields, stateScript } from "./state-script.js";
 
 const INPUT = { profileId: PROFILE, assessmentId: ID, target: "completed", disposition: "Approved", risk: "Low" };
 const COMPLETED = { Status: "Completed", Disposition: "Approved", Risk: "Low", State: "LIFECYCLE" };
@@ -142,5 +142,16 @@ describe("transition_assessment failures", () => {
     expect(result.isError).toBe(true);
     const journal = await context.store.listJournal(PROFILE, ID);
     expect(journal.map((entry) => entry.operation)).toEqual(["list_item_updated"]);
+  });
+
+  it("refuses an assessment id no item carries with the structured refusal, not a failure blaming the profile", async () => {
+    const { graph, calls } = createScriptedGraph([...RESOLVE_DRIVE_SCRIPT, assessmentByIdQuery([])]);
+
+    const result = await runTransitionAssessment(INPUT, assessmentToolContext(graph));
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({ refused: true, tool: "transition_assessment", stage: "LIFECYCLE", assessmentId: ID, observed: "no item matched" });
+    expect(resultText(result)).not.toContain("artifact kind");
+    expect(calls.filter((call) => call.method !== "get")).toEqual([]);
   });
 });

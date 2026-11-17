@@ -206,4 +206,20 @@ describe("save_assessment_artifact failures", () => {
     expect(resultText(result)).toContain('the State update on Assessments item 2 answered "ID", not "DOSSIER". The journal records what was written.');
     expect((await context.store.listJournal(PROFILE, ID)).map((entry) => entry.operation)).toEqual(["file_created", "list_item_updated"]);
   });
+
+  it("names a file found under another name at the artifact's path, rather than calling it a folder", async () => {
+    // SharePoint answers a path case insensitively, so the lookup returns the file under its own name.
+    const { graph, calls } = createScriptedGraph(stateScript({ dossier: fileItem("acme corp_research_dossier.md", '"e1"', 11) }));
+    const context = assessmentToolContext(graph);
+
+    const result = await runSaveAssessmentArtifact(INPUT, context);
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toBe(
+      `The lookup of ${DOSSIER_PATH} answered a file named "acme corp_research_dossier.md", not "Acme Corp_Research_Dossier.md", the name the profile gives the dossier. ` +
+        "The server writes only under that exact name. Nothing was written.",
+    );
+    expect(calls.filter((call) => call.method !== "get")).toEqual([]);
+    expect(await context.store.listJournal(PROFILE, ID)).toEqual([]);
+  });
 });

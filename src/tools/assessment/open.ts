@@ -7,7 +7,7 @@ import { createListItem, getListItem, updateListItemFields } from "../../graph/l
 import { renderAssessmentId, sanitizeFolderName } from "../../domain/assessment/templates.js";
 import { fieldsFor, recordFromFields } from "../../domain/assessment/state.js";
 import { resolveAssessmentContext } from "./context.js";
-import { findInProgressAssessment, findVendor, workspacePaths } from "./read-state.js";
+import { findInProgressAssessment, findVendor, findVendorByFolder, workspacePaths } from "./read-state.js";
 import { appendJournal } from "./journal.js";
 import { ASSESSMENT_SUMMARY_SHAPE } from "./output.js";
 import { withKeyedLock } from "./keyed-lock.js";
@@ -37,7 +37,9 @@ export async function runOpenAssessment(input: unknown, context: ToolContext): P
   const args = InputObject.parse(input);
   // Keyed on the vendor, not the scope: the vendor record is created here too, and two scopes for one
   // new vendor would otherwise race to create it twice. See keyed-lock.ts for why a lock is the fix.
-  return withKeyedLock(`${args.profileId}|${sanitizeFolderName(args.vendor)}`, () => openAssessment(args, context));
+  // Lowercased because the lookups this protects match a name in either case, so two spellings of
+  // one vendor must queue behind each other; two vendors sharing a key only wait a little longer.
+  return withKeyedLock(`${args.profileId}|${sanitizeFolderName(args.vendor).toLowerCase()}`, () => openAssessment(args, context));
 }
 
 async function openAssessment(args: z.infer<typeof InputObject>, context: ToolContext): Promise<CallToolResult> {
@@ -67,10 +69,32 @@ async function openAssessment(args: z.infer<typeof InputObject>, context: ToolCo
     let wroteId = false;
     let foldersCreated = 0;
     if (!vendor.found) {
+      // No record has this Title, but one may already file under the folder this name sanitizes
+      // to, "Acme Inc" for "Acme Inc.". Assessments are found by folder, so a second record there
+      // would share the first one's assessments. Which vendor the caller means is not the server's
+      // to decide, so it refuses and names the record.
+      const holder = await findVendorByFolder(context.graph, ac, vendorFolder);
+      if (holder !== undefined) {
+        const held = holder.title === undefined ? "a vendor record with no Title" : `the vendor record "${holder.title}"`;
+        const advice = holder.title === undefined ? "" : ` If they are the same vendor, open under "${holder.title}".`;
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: `The vendor name "${args.vendor}" files under the folder "${vendorFolder}", which ${held} (${lists.vendors.name} item ${holder.itemId}) already uses.${advice} Nothing was written.`,
+            },
+          ],
+        };
+      }
       const created = await createListItem(context.graph, { siteId: ac.siteId, listName: lists.vendors.name, fields: { Title: args.vendor, [lists.vendors.columns.folderName]: vendorFolder } });
       await appendJournal(context, ac, "(vendor)", { stage: STAGE, operation: "list_item_created", target: `${lists.vendors.name}/${created.id}`, etagAfter: created.eTag });
       vendorCreated = true;
     }
+
+    // The stored Title when the vendor was found: the lookup can match another spelling of the name,
+    // and the assessment's Title feeds {vendor} in every artifact path.
+    const vendorTitle = vendor.title ?? args.vendor;
 
     // Retry rule: an assessment already in progress for this vendor and scope is returned, not duplicated.
     let record = await findInProgressAssessment(context.graph, ac, folder, args.scope);
@@ -79,7 +103,7 @@ async function openAssessment(args: z.infer<typeof InputObject>, context: ToolCo
       const item = await createListItem(context.graph, {
         siteId: ac.siteId,
         listName: lists.assessments.name,
-        fields: { Title: args.vendor, ...fieldsFor(columns, { vendorFolder: folder, scope: args.scope, status: labels.inProgress, state: STAGE }) },
+        fields: { Title: vendorTitle, ...fieldsFor(columns, { vendorFolder: folder, scope: args.scope, status: labels.inProgress, state: STAGE }) },
       });
       await appendJournal(context, ac, "(unassigned)", { stage: STAGE, operation: "list_item_created", target: `${lists.assessments.name}/${item.id}`, etagAfter: item.eTag });
       record = recordFromFields(item.fields, item.id, item.eTag, columns);
@@ -103,7 +127,7 @@ async function openAssessment(args: z.infer<typeof InputObject>, context: ToolCo
       wroteId = true;
     }
 
-    const paths = workspacePaths(ac, { vendorTitle: record.vendorTitle ?? args.vendor, vendorFolder: record.vendorFolder ?? folder, assessmentId: record.assessmentId! });
+    const paths = workspacePaths(ac, { vendorTitle: record.vendorTitle ?? vendorTitle, vendorFolder: record.vendorFolder ?? folder, assessmentId: record.assessmentId! });
     // An item this call created or completed needs its workspace. On a retry of an item that was
     // already complete, the root and every subfolder are read live, and the pass runs when any is
     // absent: the root is created first, so a crash part way through the pass leaves a present root
@@ -159,7 +183,7 @@ async function openAssessment(args: z.infer<typeof InputObject>, context: ToolCo
     const output = {
       assessmentId: record.assessmentId!,
       itemId: record.itemId,
-      vendor: record.vendorTitle ?? args.vendor,
+      vendor: record.vendorTitle ?? vendorTitle,
       vendorFolder: record.vendorFolder ?? folder,
       scope: record.scope ?? args.scope,
       status: record.status ?? labels.inProgress,

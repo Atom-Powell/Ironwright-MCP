@@ -35,6 +35,12 @@ export function recordWorkspacePaths(ac: AssessmentContext, record: AssessmentRe
 export interface VendorLookup {
   /** True when the Vendors list holds an item with this Title. */
   found: boolean;
+  /**
+   * The Title as the list stores it, when found. The lookup can match a
+   * spelling that differs from the caller's, and the stored one is the name
+   * every path and every later lookup is built from.
+   */
+  title: string | undefined;
   /** The folder name the vendor's items are filed under: the stored one when set, otherwise the sanitized name. */
   folder: string;
 }
@@ -49,7 +55,26 @@ export async function findVendor(graph: Pick<GraphClient, "get">, ac: Assessment
   const vendors = ac.profile.lists.vendors;
   const items = await queryListItems(graph, { siteId: ac.siteId, listName: vendors.name, filter: `fields/Title eq ${odataString(vendor)}` });
   const stored = items[0]?.fields[vendors.columns.folderName];
-  return { found: items.length > 0, folder: typeof stored === "string" && stored.length > 0 ? stored : sanitizeFolderName(vendor) };
+  const title = items[0]?.fields.Title;
+  return {
+    found: items.length > 0,
+    title: typeof title === "string" && title.length > 0 ? title : undefined,
+    folder: typeof stored === "string" && stored.length > 0 ? stored : sanitizeFolderName(vendor),
+  };
+}
+
+/**
+ * The vendor record already filing under a folder name, if any. Assessments
+ * are found by folder name, so two records sharing one would share their
+ * assessments; open_assessment asks this before it creates a record.
+ */
+export async function findVendorByFolder(graph: Pick<GraphClient, "get">, ac: AssessmentContext, folder: string): Promise<{ itemId: string; title: string | undefined } | undefined> {
+  const vendors = ac.profile.lists.vendors;
+  const items = await queryListItems(graph, { siteId: ac.siteId, listName: vendors.name, filter: `fields/${vendors.columns.folderName} eq ${odataString(folder)}` });
+  const item = items[0];
+  if (item === undefined) return undefined;
+  const title = item.fields.Title;
+  return { itemId: item.id, title: typeof title === "string" && title.length > 0 ? title : undefined };
 }
 
 function assessmentsList(ac: AssessmentContext): { siteId: string; listName: string } {
@@ -100,12 +125,17 @@ export async function readAssessmentState(graph: Pick<GraphClient, "get">, ac: A
     // back from the lookup. It is not the file the template names, and the 9c-era campaign showed a
     // misnamed publication completing an assessment on that reading. The name must match exactly.
     const expectedName = path.slice(path.lastIndexOf("/") + 1);
+    const found = lookup.kind === "found" ? lookup.item : undefined;
+    const present = found !== undefined && !found.isFolder && found.name === expectedName;
     artifacts.push({
       kind,
       path,
-      present: lookup.kind === "found" && !lookup.item.isFolder && lookup.item.name === expectedName,
-      eTag: lookup.kind === "found" ? lookup.item.eTag : undefined,
-      size: lookup.kind === "found" ? lookup.item.size : undefined,
+      present,
+      // The ETag and size describe the artifact, so they are carried only for it. Whatever else the
+      // lookup answered is named as the occupant, so no caller has to infer what it was.
+      eTag: present ? found?.eTag : undefined,
+      size: present ? found?.size : undefined,
+      ...(found !== undefined && !present ? { occupant: { name: found.name, isFolder: found.isFolder } } : {}),
     });
   }
   return { record, rootPath: paths.root, rootPresent: root.kind === "found" && root.item.isFolder, artifacts };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderAssessmentId, renderWorkspaceTemplate, unknownWorkspacePlaceholders } from "../../../src/domain/assessment/templates.js";
+import { joinWorkspacePath, renderAssessmentId, renderWorkspaceTemplate, unknownWorkspacePlaceholders } from "../../../src/domain/assessment/templates.js";
 
 const NOW = new Date("2026-11-07T20:39:24Z");
 const VALUES = { vendor: "A", vendorFolder: "A", assessmentId: "X" };
@@ -17,5 +17,11 @@ describe("rendering refuses what validation would have refused", () => {
   });
   it("throws when a rendered segment is empty, so a path never gains a double slash", () => {
     expect(() => renderWorkspaceTemplate("Assessments/{vendorFolder}/{assessmentId}", { ...VALUES, vendorFolder: "" })).toThrow(/vendorFolder/);
+  });
+  it("throws when a vendor name holds no character a name allows, rather than rendering {vendor} empty", () => {
+    expect(() => renderWorkspaceTemplate("Research/{vendor}_Dossier.md", { ...VALUES, vendor: '/:"..' })).toThrow(/vendor/);
+  });
+  it.each(["..", "."])('refuses to join a "%s" segment, which would address a folder other than the one the path names', (segment) => {
+    expect(() => joinWorkspacePath("Assessments/V/A-1", `Research/${segment}/x.md`)).toThrow(/Assessments\/V\/A-1\/Research/);
   });
 });

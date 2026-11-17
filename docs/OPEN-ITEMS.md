@@ -13,7 +13,7 @@ ordered by when they will matter, not by when they were written.
 This table is the one place status lives. `CLAUDE.md`, the README and the PAI vault note point
 here and restate none of it, so a change of state is one edit in one file, made in the same commit
 as the sitting, merge, or decision that caused it. The table says where each phase is; the dated
-sections below say what was proven and what was not. Last updated 2026-11-07.
+sections below say what was proven and what was not. Last updated 2026-11-16.
 
 | Phase | State | Evidence |
 |---|---|---|
@@ -41,6 +41,7 @@ sections below say what was proven and what was not. Last updated 2026-11-07.
 | 9b Core: modules, site sets, inbound authentication, lifecycle kind, journal | Complete against fakes, merged 2026-11-07; nothing in it has met a live tenant yet | PR #22, merged 2026-11-07 |
 | 9c Assessment module and the four Graph operations | Verified live 2026-11-08 on the main path: open, save, findings, verify, transition and both reads, 25 calls on the developer tenant. Three checks were not run and stay carried: the implicit parent folder, the publication name case, and an `executive_summary` save | PR #25; sitting below; `docs/superpowers/specs/evidence/2026-11-08-assessment-sitting/` |
 | Pre-EON test campaign | First run 2026-11-09: 8 scenarios on the developer tenant, 2 defects found (concurrent opens duplicated an assessment; a misnamed publication completed an assessment), both fixed in PR #27. Rerun the same day on the fixed server: s2 and s4 pass, s3, s5, s7 and s8 pass, s1 and s6 measured as before. Still to run: interrupted open, throttling and token expiry, inbound auth over a public tunnel, Copilot Studio contact (plan 9d); plan `docs/superpowers/plans/2026-11-09-pre-eon-test-campaign.md` | `scripts/pre-eon/campaign.ts`; sitting below |
+| Phase 9 code review | 2026-11-16: ten defects read out of the 9b, 9c and campaign source. Seven fixed against fakes on `fix/assessment-review-findings`, none run live; three wait on a ruling or a probe (see the carried items below) | section below; spec amendments of 2026-11-16 |
 | 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9c and carries the unverified A3 and B1 probes, and is the item that slips first | same spec |
 | Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
 | CPA practice domain (multi-site scan and queries, grant issuer loop over a sites file, folder template taxonomy) | Not started; the phase after 9 | same spec |
@@ -333,6 +334,32 @@ server's own, but whether to refuse instead, or to journal the folder, needs a r
 With State set to a value no stage writes, `record_findings` proceeded, because the precondition
 reads the dossier on the drive rather than trusting State. A hand-set Status of Completed did stop a
 save. Whether State should be validated needs a ruling; the drive is what the tools trust.
+
+**Carried from the phase 9 code review, 2026-11-16: a save overwrites a file the server did not
+create.** `save_assessment_artifact` overwrites whatever file is at the artifact's path under the
+ETag it just read. It does not check that the server created that file, although the lifecycle
+safety sentence every such tool advertises says it overwrites only a file it created. The journal
+is the only record of what the server created, and without a table store it is lost on restart, so
+what the check reads, and what it does when the journal is empty, needs a ruling.
+
+**Carried from the phase 9 code review, 2026-11-16: list item updates send no `If-Match`.**
+`updateListItemFields` patches unconditionally although every caller holds the item's ETag, so two
+overlapping lifecycle calls on one assessment overwrite each other's status or State silently.
+Whether Graph honors `If-Match` on a list item `fields` PATCH has never been probed here, so the
+assumption gate puts a live probe before any fix. `record_findings` and `open_assessment` are
+serialized within the process; `save_assessment_artifact` and `transition_assessment` are not.
+
+**Carried from the phase 9 code review, 2026-11-16: a provisional assessment cannot be completed.**
+`requireInProgress` refuses every tool once the status is provisional, and a later `open_assessment`
+for the same vendor and scope creates a second assessment. The spec does not say whether
+provisional is an end state. Needs a ruling.
+
+**Carried from the phase 9 code review, 2026-11-16: three smaller findings, not fixed.** The
+assessment id prefix and template are not checked at profile load against the journal key's
+alphabet or SharePoint's name rules. `readAssessmentState` reads the root and every artifact one
+after another on every lifecycle call. `loadAnyProfile` in `src/domain/profile/library.ts` is a
+second profile dispatcher that only tests reach, so the assessment profile tests exercise a
+dispatcher the server never calls.
 
 **Carried from the pre-EON campaign, 2026-11-09: the open lock covers one process.** The per vendor
 lock that stops concurrent opens duplicating an assessment lives in the server process. It holds for
@@ -2479,6 +2506,30 @@ with the fixed server (main at `12bc570`), closed both.
 | s3, s5, s7, s8 | pass | Same as the first run. |
 
 The grant was restored to `read` afterwards (write to read confirmed by the grant probe) and the server stopped.
+
+## The phase 9 code review, 2026-11-16: ten defects read out of the source, seven fixed
+
+A review of the source changes from plan 9b through the campaign fixes (`e1ae380^1..88b898f`, `src`
+only), run on a stronger model than the reviews those plans had. It read the code and ran nothing.
+Every finding below was then confirmed by a test that failed before its fix, and none of the fixes
+has met a tenant.
+
+| Finding | State |
+|---|---|
+| `{vendor}` rendered raw into artifact paths: a name with a colon opened and then failed every save; a slash added a folder | Fixed: rendered through the folder name sanitizing; a `.` or `..` segment is refused |
+| `record_findings` and `transition_assessment` answered a mistyped id with a message about the profile's artifact kinds | Fixed: the structured refusal, no item matched |
+| Two overlapping `record_findings` calls could both create one finding key, after which every call refused | Fixed: serialized per assessment in the process |
+| A file whose name differs by case was called a folder by a save and not found by the preconditions | Fixed: the state names what the lookup answered |
+| The journal and the Findings rows were keyed by the id the caller typed | Fixed: keyed by the stored id |
+| The open lock's key was case sensitive | Fixed: lowercased |
+| A vendor name sanitizing to an existing vendor's folder got a second record and resumed the other vendor's assessment; the assessment took the caller's spelling as its Title | Fixed: refused, naming the record; the stored Title is used |
+| A save overwrites a file the server did not create | Carried above: needs a ruling |
+| List item updates send no `If-Match` | Carried above: needs a probe |
+| An identical re-save moves State backward | Already accepted in the 9c amendments and carried above since the 9c sitting; the review confirms it happens from FINDINGS too, not only from CORRECTION |
+
+The suite is at 3032 tests across 219 files. Each of the seven would have been reachable by the EON pilot's agent
+without any operator error: a vendor name with punctuation, a client retry, an id typed in another
+case.
 
 ## The phase 6d live sitting, 2026-09-24: plans an operator describes
 

@@ -31,9 +31,19 @@ export interface AssessmentRecord {
 export interface ArtifactPresence {
   kind: string;
   path: string;
+  /** True only for a file whose name is exactly the one the template renders. */
   present: boolean;
+  /** Set only when present. */
   eTag: string | undefined;
+  /** Set only when present. */
   size: number | undefined;
+  /**
+   * What the path lookup answered when it was not that file: a folder, or a
+   * file under another name, which SharePoint returns for a path differing
+   * only by case. Undefined when the path is empty or holds the file, so a
+   * refusal can say what is there instead of calling the path not found.
+   */
+  occupant?: { name: string; isFolder: boolean };
 }
 
 export interface AssessmentState {
@@ -129,8 +139,32 @@ export function requireRoot(state: AssessmentState): Precondition {
 
 export function requireArtifact(state: AssessmentState, kind: string): Precondition {
   const artifact = state.artifacts.find((entry) => entry.kind === kind);
-  if (artifact === undefined) throw new Error(`The state carries no artifact kind "${kind}"; the profile's artifacts decide which kinds exist.`);
+  if (artifact === undefined) {
+    // No root path means the drive was never read, so the state holds no artifact of any kind. That
+    // is a refusal about the item, and must not reach the throw below, which blames the profile.
+    if (state.record === undefined) return requireRecord(state, "the assessments list");
+    if (state.rootPath === undefined) {
+      const reason = state.rootPathUnavailable ?? "the state carries no root path";
+      return {
+        ok: false,
+        expected: `the ${kind} present at its canonical path`,
+        observed: `the ${kind} path could not be computed: ${reason}`,
+        evidence: [{ source: "list", target: `assessments item ${state.record.itemId}`, found: reason }],
+      };
+    }
+    throw new Error(`The state carries no artifact kind "${kind}"; the profile's artifacts decide which kinds exist.`);
+  }
   if (artifact.present) return { ok: true };
+  if (artifact.occupant !== undefined) {
+    const expectedName = artifact.path.slice(artifact.path.lastIndexOf("/") + 1);
+    const { name, isFolder } = artifact.occupant;
+    return {
+      ok: false,
+      expected: `the ${kind} present at its canonical path`,
+      observed: isFolder ? "not present: a folder is at the path" : `not present: the path answered a file named "${name}", not "${expectedName}"`,
+      evidence: [{ source: "drive", target: artifact.path, found: `${isFolder ? "a folder" : "a file"} named "${name}"` }],
+    };
+  }
   return {
     ok: false,
     expected: `the ${kind} present at its canonical path`,

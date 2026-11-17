@@ -9,6 +9,7 @@ import { resolveAssessmentContext } from "./context.js";
 import { findAssessmentById, readAssessmentState } from "./read-state.js";
 import { appendJournal } from "./journal.js";
 import { refusalResult } from "./refusal.js";
+import { withKeyedLock } from "./keyed-lock.js";
 
 export const RECORD_INPUT_CONSTRAINTS = "Every finding's risk is one of the profile's risk labels, and no two findings share a key.";
 
@@ -89,6 +90,14 @@ function inputProblem(context: ToolContext, args: z.infer<typeof InputObject>): 
 
 export async function runRecordFindings(input: unknown, context: ToolContext): Promise<CallToolResult> {
   const args = InputObject.parse(input);
+  // The read of the existing keys and the creates are separate Graph requests, the window
+  // keyed-lock.ts describes for open_assessment. Two overlapping calls, and a retry of a slow one
+  // is enough, would each create a key, and nothing deletes a finding, so every later call would
+  // refuse on the duplicate. The key is lowercased because the id lookup matches either case.
+  return withKeyedLock(`${args.profileId}|findings|${args.assessmentId.toLowerCase()}`, () => recordFindings(args, context));
+}
+
+async function recordFindings(args: z.infer<typeof InputObject>, context: ToolContext): Promise<CallToolResult> {
   const subject: FailureSubject = { tool: TOOL, profileId: args.profileId };
   const before = context.graph.requests();
 
@@ -112,11 +121,13 @@ export async function runRecordFindings(input: unknown, context: ToolContext): P
     );
     if (!check.ok) return refusalResult(TOOL, STAGE, args.assessmentId, check);
     const item = record!;
+    // The id as the list stores it, which is what findings are filed under and the journal is keyed by.
+    const assessmentId = item.assessmentId ?? args.assessmentId;
 
     const existing = await queryListItems(context.graph, {
       siteId: ac.siteId,
       listName: findingsList.name,
-      filter: `fields/${fc.assessmentId} eq ${odataString(args.assessmentId)}`,
+      filter: `fields/${fc.assessmentId} eq ${odataString(assessmentId)}`,
     });
     const byKey = new Map<string, ListItemRecord[]>();
     for (const row of existing) {
@@ -127,7 +138,7 @@ export async function runRecordFindings(input: unknown, context: ToolContext): P
     for (const [key, rows] of byKey) {
       if (rows.length > 1) {
         return failure(
-          `${rows.length} items in list "${findingsList.name}" carry the finding key "${key}" for ${args.assessmentId} (items ${rows.map((row) => row.id).join(", ")}); ` +
+          `${rows.length} items in list "${findingsList.name}" carry the finding key "${key}" for ${assessmentId} (items ${rows.map((row) => row.id).join(", ")}); ` +
             "the server will not choose between them. Nothing was written.",
         );
       }
@@ -148,7 +159,7 @@ export async function runRecordFindings(input: unknown, context: ToolContext): P
         sent = values;
         itemId = prior.id;
         answered = await updateListItemFields(context.graph, { siteId: ac.siteId, listName: findingsList.name, itemId, fields: sent });
-        await appendJournal(context, ac, args.assessmentId, {
+        await appendJournal(context, ac, assessmentId, {
           stage: STAGE,
           operation: "list_item_updated",
           target: `${findingsList.name}/${itemId}`,
@@ -156,11 +167,11 @@ export async function runRecordFindings(input: unknown, context: ToolContext): P
         });
         outcomes.push({ key: finding.key, itemId, outcome: "updated" });
       } else {
-        sent = { Title: finding.key, [fc.assessmentId]: args.assessmentId, [fc.findingKey]: finding.key, ...values };
+        sent = { Title: finding.key, [fc.assessmentId]: assessmentId, [fc.findingKey]: finding.key, ...values };
         const created = await createListItem(context.graph, { siteId: ac.siteId, listName: findingsList.name, fields: sent });
         itemId = created.id;
         answered = created.fields;
-        await appendJournal(context, ac, args.assessmentId, {
+        await appendJournal(context, ac, assessmentId, {
           stage: STAGE,
           operation: "list_item_created",
           target: `${findingsList.name}/${itemId}`,
@@ -197,7 +208,7 @@ export async function runRecordFindings(input: unknown, context: ToolContext): P
     } else {
       const sent = fieldsFor(assessments.columns, { summary: args.summary, state: STAGE });
       const answered = await updateListItemFields(context.graph, { siteId: ac.siteId, listName: assessments.name, itemId: item.itemId, fields: sent });
-      await appendJournal(context, ac, args.assessmentId, {
+      await appendJournal(context, ac, assessmentId, {
         stage: STAGE,
         operation: "list_item_updated",
         target: `${assessments.name}/${item.itemId}`,
@@ -214,14 +225,14 @@ export async function runRecordFindings(input: unknown, context: ToolContext): P
     }
 
     const output = {
-      assessmentId: args.assessmentId,
+      assessmentId,
       ...counts,
       findings: outcomes,
       correlationId: ac.correlationId,
       graphRequests: context.graph.requests() - before,
     };
     const written = counts.created + counts.updated > 0 ? " Each finding written was answered with the values sent." : "";
-    const text = `Findings for ${args.assessmentId}: ${tally}.${written} ${closing}`;
+    const text = `Findings for ${assessmentId}: ${tally}.${written} ${closing}`;
     return { structuredContent: output, content: [{ type: "text" as const, text }] };
   } catch (error) {
     console.error(`${TOOL} failed for profile "${args.profileId}"`, error);

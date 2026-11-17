@@ -23,7 +23,7 @@ export const ASSESSMENT_SUMMARY_SHAPE = {
 export const ARTIFACT_PRESENCE_SHAPE = {
   kind: z.string().describe('The profile\'s artifact kind, for example "dossier".'),
   path: z.string().describe('Library-relative canonical path, for example "Assessments/Acme Corp/ASM-2026-00002/Research/Acme Corp_Research_Dossier.md".'),
-  present: z.boolean().describe("True when a file is at the canonical path, for example false before the dossier is saved."),
+  present: z.boolean().describe("True when a file named exactly as the profile's template renders is at the canonical path, for example false before the dossier is saved, or when the path holds a folder or a file whose name differs by case."),
   eTag: z.string().optional().describe('The file\'s ETag as read, for example "\\"{GUID},3\\"". Absent when no file is present.'),
   size: z.number().int().optional().describe("The file's size in bytes as read, for example 16. Absent when no file is present."),
 } satisfies z.ZodRawShape;

@@ -228,4 +228,41 @@ describe("open_assessment", () => {
     expect((result.structuredContent as Record<string, unknown>).workspaceRoot).toBe("Assessments/ACME/ASM-2026-00002");
     expect(calls.some((call) => call.method === "post" && call.path.includes("/lists/Vendors/"))).toBe(false);
   });
+
+  it("serializes concurrent opens whose vendor names differ only by case, since SharePoint matches them as one vendor", async () => {
+    const { graph } = createScriptedGraph([
+      ...firstOpenScript(),
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" })], "acme corp"),
+      assessmentsQuery("Acme Corp", [listItem("2", { ...assessmentFields("Acme Corp"), AssessmentId: "ASM-2026-00002" })]),
+      ...workspaceReads("Acme Corp", "ASM-2026-00002"),
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const [first, second] = await Promise.all([runOpenAssessment(INPUT, context), runOpenAssessment({ ...INPUT, vendor: "acme corp" }, context)]);
+
+    expect(first.isError).toBeUndefined();
+    expect(second.isError).toBeUndefined();
+    expect((first.structuredContent as Record<string, unknown>).created).toBe(true);
+    expect((second.structuredContent as Record<string, unknown>).created).toBe(false);
+  });
+
+  it("titles a new assessment with the vendor record's stored name, not the caller's spelling of it", async () => {
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" })], "acme corp"),
+      assessmentsQuery("Acme Corp", []),
+      { method: "post", pathIncludes: "/lists/Assessments/items", response: listItem("2", assessmentFields("Acme Corp")) },
+      ...idWriteBack("Acme Corp", "2", "ASM-2026-00002"),
+      ...folderCreates("Acme Corp", "ASM-2026-00002"),
+      ...readBacks("Acme Corp", "ASM-2026-00002"),
+    ]);
+
+    const result = await runOpenAssessment({ ...INPUT, vendor: "acme corp" }, assessmentToolContext(graph));
+
+    expect(result.isError).toBeUndefined();
+    const created = calls.find((call) => call.method === "post" && call.path.includes("/lists/Assessments/items"))!;
+    expect((created.body as { fields: Record<string, unknown> }).fields.Title).toBe("Acme Corp");
+    expect((result.structuredContent as Record<string, unknown>).vendor).toBe("Acme Corp");
+  });
 });

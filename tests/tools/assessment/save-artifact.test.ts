@@ -172,4 +172,17 @@ describe("save_assessment_artifact", () => {
       expect((calls.find((call) => call.method === "putBytes")!.body as { contentType: string }).contentType).toBe("text/plain");
     });
   });
+
+  it("journals and reports under the stored assessment id when the caller's spelling differs by case", async () => {
+    const typed = ID.toLowerCase();
+    const { graph } = createScriptedGraph([...stateScript({ typedId: typed }), ...createScript(DOSSIER_PATH, "Acme Corp_Research_Dossier.md", BYTES, "DOSSIER")]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runSaveAssessmentArtifact({ profileId: PROFILE, assessmentId: typed, kind: "dossier", content: CONTENT }, context);
+
+    expect(result.isError).toBeUndefined();
+    expect((result.structuredContent as Record<string, unknown>).assessmentId).toBe(ID);
+    expect((await context.store.listJournal(PROFILE, ID)).map((entry) => entry.operation)).toEqual(["file_created", "list_item_updated"]);
+    expect(await context.store.listJournal(PROFILE, typed)).toEqual([]);
+  });
 });

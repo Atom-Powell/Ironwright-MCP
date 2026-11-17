@@ -122,4 +122,53 @@ describe("record_findings", () => {
     expect(calls.filter((call) => call.method !== "get")).toEqual([]);
     expect(await context.store.listJournal(PROFILE, ID)).toEqual([]);
   });
+
+  it("files findings and journals under the stored assessment id when the caller's spelling differs by case", async () => {
+    const typed = ID.toLowerCase();
+    const { graph, calls } = createScriptedGraph([
+      ...stateScript({ typedId: typed, dossier: dossierItem('"d1"', 120) }),
+      findingsQuery([]),
+      { method: "post", pathIncludes: "/lists/Findings/items", response: listItem("11", rowOf(F1)) },
+      { method: "post", pathIncludes: "/lists/Findings/items", response: listItem("12", rowOf(F2)) },
+      summaryPatch(),
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runRecordFindings({ ...INPUT, assessmentId: typed }, context);
+
+    expect(result.isError).toBeUndefined();
+    expect((result.structuredContent as Record<string, unknown>).assessmentId).toBe(ID);
+    expect(calls.filter((call) => call.method === "post").map((call) => call.body)).toEqual([{ fields: rowOf(F1) }, { fields: rowOf(F2) }]);
+    expect(await context.store.listJournal(PROFILE, ID)).toHaveLength(3);
+    expect(await context.store.listJournal(PROFILE, typed)).toEqual([]);
+  });
+
+  it("serializes two concurrent calls for one assessment, so the second finds the findings the first created", async () => {
+    // One scripted sequence: the first call's creates, then a second call that reads them back.
+    // Run unlocked, both calls would read an empty Findings list and each would create F-1 and F-2.
+    const recorded = { Summary: SUMMARY, State: "FINDINGS" };
+    const { graph, calls } = createScriptedGraph([
+      ...WITH_DOSSIER,
+      findingsQuery([]),
+      { method: "post", pathIncludes: "/lists/Findings/items", response: listItem("11", rowOf(F1)) },
+      { method: "post", pathIncludes: "/lists/Findings/items", response: listItem("12", rowOf(F2)) },
+      summaryPatch(),
+      ...stateScript({ fields: recorded, dossier: dossierItem('"d1"', 120) }),
+      findingsQuery([listItem("11", rowOf(F1)), listItem("12", rowOf(F2))]),
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const [first, second] = await Promise.all([runRecordFindings(INPUT, context), runRecordFindings(INPUT, context)]);
+
+    expect(first.isError).toBeUndefined();
+    expect(second.isError).toBeUndefined();
+    expect(first.structuredContent).toMatchObject({ created: 2, updated: 0, unchanged: 0 });
+    expect(second.structuredContent).toMatchObject({ created: 0, updated: 0, unchanged: 2 });
+    expect(calls.filter((call) => call.method === "post")).toHaveLength(2);
+    // The property itself: the second call's read of the Findings list comes after the first call's last create.
+    const findingsReads = calls.flatMap((call, index) => (call.method === "get" && call.path.includes("/lists/Findings/items") ? [index] : []));
+    const lastCreate = calls.map((call) => call.method).lastIndexOf("post");
+    expect(findingsReads).toHaveLength(2);
+    expect(findingsReads[1]).toBeGreaterThan(lastCreate);
+  });
 });

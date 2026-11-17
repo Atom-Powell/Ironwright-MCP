@@ -6,8 +6,13 @@ export function assessmentFields(folder: string): Record<string, unknown> {
   return { Title: "Acme Corp", VendorFolder: folder, Scope: "Security", Status: "In Progress", State: "ID" };
 }
 
-export function vendorsQuery(items: unknown[]): ScriptEntry {
-  return { method: "get", pathIncludes: ["/lists/Vendors/items?", "Title eq 'Acme Corp'"], headersInclude: NON_INDEXED_QUERY_HEADER, response: page(items) };
+export function vendorsQuery(items: unknown[], title = "Acme Corp"): ScriptEntry {
+  return { method: "get", pathIncludes: ["/lists/Vendors/items?", `Title eq '${title}'`], headersInclude: NON_INDEXED_QUERY_HEADER, response: page(items) };
+}
+
+/** The second vendor lookup, made only when no Title matched: who already files under this folder name. */
+export function vendorFolderQuery(folder: string, items: unknown[]): ScriptEntry {
+  return { method: "get", pathIncludes: ["/lists/Vendors/items?", `FolderName eq '${folder}'`], headersInclude: NON_INDEXED_QUERY_HEADER, response: page(items) };
 }
 
 export function assessmentsQuery(folder: string, items: unknown[]): ScriptEntry {
@@ -90,6 +95,7 @@ export function firstOpenScript(conflict: string[] = []): ScriptEntry[] {
   return [
     ...RESOLVE_DRIVE_SCRIPT,
     vendorsQuery([]),
+    vendorFolderQuery("Acme Corp", []),
     { method: "post", pathIncludes: "/lists/Vendors/items", response: listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" }) },
     assessmentsQuery("Acme Corp", []),
     { method: "post", pathIncludes: "/lists/Assessments/items", response: listItem("2", assessmentFields("Acme Corp")) },

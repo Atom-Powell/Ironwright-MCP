@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RECORD_INPUT_CONSTRAINTS, runRecordFindings } from "../../../src/tools/assessment/record-findings.js";
-import { assessmentToolContext, createScriptedGraph, listItem, resultText } from "./fake-graph.js";
-import { DOSSIER_PATH, ID, PROFILE, dossierItem, findingFields, findingsQuery, stateFields, stateScript } from "./state-script.js";
+import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, fileItem, listItem, resultText } from "./fake-graph.js";
+import { DOSSIER_PATH, ID, PROFILE, assessmentByIdQuery, dossierItem, findingFields, findingsQuery, stateFields, stateScript } from "./state-script.js";
 
 const F1 = { key: "F-1", observation: "SOC 2 Type II report covers only the hosting subsidiary.", risk: "High", recommendation: "Request the parent company report." };
 const F2 = { key: "F-2", observation: "No penetration test in the last year.", risk: "Medium", recommendation: "Request a current penetration test summary." };
@@ -134,5 +134,30 @@ describe("record_findings failures", () => {
     expect(resultText(result)).toContain('State read "DOSSIER", not "FINDINGS"');
     const journal = await context.store.listJournal(PROFILE, ID);
     expect(journal.map((entry) => [entry.operation, entry.target])).toEqual([["list_item_updated", "Assessments/2"]]);
+  });
+
+  it("refuses an assessment id no item carries with the structured refusal, not a failure blaming the profile", async () => {
+    const { graph, calls } = createScriptedGraph([...RESOLVE_DRIVE_SCRIPT, assessmentByIdQuery([])]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runRecordFindings(INPUT, context);
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({ refused: true, tool: "record_findings", stage: "FINDINGS", assessmentId: ID, observed: "no item matched" });
+    expect(resultText(result)).not.toContain("artifact kind");
+    expect(calls.filter((call) => call.method !== "get")).toEqual([]);
+  });
+
+  it("says a file under another name holds the dossier's path, rather than reporting the path not found", async () => {
+    const { graph, calls } = createScriptedGraph(stateScript({ dossier: fileItem("acme corp_research_dossier.md", '"d1"', 120) }));
+
+    const result = await runRecordFindings(INPUT, assessmentToolContext(graph));
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      refused: true,
+      evidence: [{ source: "drive", target: DOSSIER_PATH, found: 'a file named "acme corp_research_dossier.md"' }],
+    });
+    expect(calls.filter((call) => call.method !== "get")).toEqual([]);
   });
 });

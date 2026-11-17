@@ -63,7 +63,9 @@ export function renderWorkspaceTemplate(template: string, values: WorkspaceValue
     template,
     (token) => {
       switch (token) {
-        case "vendor": return values.vendor;
+        // The display name is the caller's text, so it is rendered as a name SharePoint accepts: left
+        // raw, a colon made every save fail after the open had succeeded, and a slash added a folder.
+        case "vendor": return sanitizeFolderName(values.vendor);
         case "vendorFolder": return values.vendorFolder;
         case "assessmentId": return values.assessmentId;
         default: return undefined;
@@ -112,10 +114,17 @@ export function sanitizeFolderName(name: string): string {
     .trim();
 }
 
+/**
+ * A "." or ".." segment is refused rather than joined. The request URL is
+ * normalized before it is sent, so such a path would address a folder other
+ * than the one it names, and the journal would record the path as written.
+ */
 export function joinWorkspacePath(...segments: string[]): string {
-  return segments
+  const parts = segments
     .flatMap((segment) => segment.split("/"))
     .map((part) => part.trim())
-    .filter((part) => part.length > 0)
-    .join("/");
+    .filter((part) => part.length > 0);
+  const dots = parts.find((part) => part === "." || part === "..");
+  if (dots !== undefined) throw new Error(`The path ${parts.join("/")} has a "${dots}" segment, which does not name a folder.`);
+  return parts.join("/");
 }

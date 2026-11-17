@@ -77,12 +77,14 @@ export async function runTransitionAssessment(input: unknown, context: ToolConte
 
     const record = await findAssessmentById(context.graph, ac, args.assessmentId);
     const state = await readAssessmentState(context.graph, ac, record);
+    // The id as the list stores it, which the journal is keyed by; the lookup can match another case.
+    const assessmentId = record?.assessmentId ?? args.assessmentId;
 
     // A retry of a transition that already landed is reported rather than written again, and is
     // checked before the preconditions because a completed assessment is no longer in progress.
     if (record !== undefined && record.status === label && record.disposition === args.disposition && record.risk === args.risk) {
       const output = {
-        assessmentId: args.assessmentId,
+        assessmentId,
         previousStatus: record.status,
         status: record.status,
         disposition: record.disposition,
@@ -92,7 +94,7 @@ export async function runTransitionAssessment(input: unknown, context: ToolConte
         graphRequests: context.graph.requests() - before,
       };
       const text =
-        `${args.assessmentId} already reads status "${label}", disposition "${args.disposition}" and risk "${args.risk}" on ${listName} item ${record.itemId}. ` +
+        `${assessmentId} already reads status "${label}", disposition "${args.disposition}" and risk "${args.risk}" on ${listName} item ${record.itemId}. ` +
         "Nothing was written.";
       return { structuredContent: output, content: [{ type: "text" as const, text }] };
     }
@@ -122,7 +124,7 @@ export async function runTransitionAssessment(input: unknown, context: ToolConte
     } catch (error) {
       readError = error;
     }
-    await appendJournal(context, ac, args.assessmentId, {
+    await appendJournal(context, ac, assessmentId, {
       stage: STAGE,
       operation: "list_item_updated",
       target: `${listName}/${item.itemId}`,
@@ -144,7 +146,7 @@ export async function runTransitionAssessment(input: unknown, context: ToolConte
     }
 
     const output = {
-      assessmentId: args.assessmentId,
+      assessmentId,
       previousStatus: item.status,
       status: read.status,
       disposition: read.disposition,
@@ -154,7 +156,7 @@ export async function runTransitionAssessment(input: unknown, context: ToolConte
       graphRequests: context.graph.requests() - before,
     };
     const text =
-      `Moved ${args.assessmentId} from ${JSON.stringify(item.status ?? null)} to "${read.status}" with disposition "${read.disposition}", risk "${read.risk}" ` +
+      `Moved ${assessmentId} from ${JSON.stringify(item.status ?? null)} to "${read.status}" with disposition "${read.disposition}", risk "${read.risk}" ` +
       `and ${columns.state} "${read.state}", as read back from ${listName} item ${item.itemId}.`;
     return { structuredContent: output, content: [{ type: "text" as const, text }] };
   } catch (error) {

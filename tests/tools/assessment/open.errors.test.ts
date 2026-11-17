@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runOpenAssessment } from "../../../src/tools/assessment/open.js";
 import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, fileItem, listItem, resultText } from "./fake-graph.js";
-import { assessmentFields, assessmentsQuery, folderCreates, idWriteBack, readBacks, vendorsQuery, workspaceReads } from "./open-script.js";
+import { assessmentFields, assessmentsQuery, folderCreates, idWriteBack, readBacks, vendorFolderQuery, vendorsQuery, workspaceReads } from "./open-script.js";
 
 const PROFILE = "vendor-assessments";
 const INPUT = { profileId: PROFILE, vendor: "Acme Corp", scope: "Security" };
@@ -126,5 +126,24 @@ describe("open_assessment failures", () => {
     expect(text).toContain("with 403 (accessDenied)");
     expect(text).toContain('while serving open_assessment for profile "vendor-assessments"');
     expect(text).toContain("This server does not infer a cause from the status.");
+  });
+
+  it("refuses a new vendor name whose folder another vendor record already uses, writing nothing", async () => {
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([], "Acme Corp."),
+      vendorFolderQuery("Acme Corp", [listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" })]),
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runOpenAssessment({ ...INPUT, vendor: "Acme Corp." }, context);
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toBe(
+      'The vendor name "Acme Corp." files under the folder "Acme Corp", which the vendor record "Acme Corp" (Vendors item 7) already uses. ' +
+        'If they are the same vendor, open under "Acme Corp". Nothing was written.',
+    );
+    expect(calls.filter((call) => call.method !== "get")).toEqual([]);
+    expect(await context.store.listJournal(PROFILE, "(vendor)")).toEqual([]);
   });
 });

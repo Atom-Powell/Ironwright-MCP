@@ -22,7 +22,7 @@ export const AssessmentProfileSchema = z
         subfolders: z.array(Template).default([]).describe('Folders created under the root at open, for example ["Research", "Evidence"].'),
         artifacts: z
           .record(z.string().regex(/^[a-z][a-z0-9_]*$/, "an artifact kind: lowercase letters, digits and underscores"), Template)
-          .describe('Named artifact kinds to path templates under the root, for example {"dossier": "Research/{vendor}_Research_Dossier.md"}. "dossier" and "publication" are required.'),
+          .describe('Named artifact kinds to path templates under the root, for example {"dossier": "Research/{vendor}_Research_Dossier.md"}. "dossier" and "publication" are required. {vendor} renders the vendor name without the characters SharePoint refuses in a file or folder name, as {vendorFolder} does.'),
       })
       .strict(),
     assessmentId: z

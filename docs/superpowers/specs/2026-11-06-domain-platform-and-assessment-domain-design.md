@@ -517,3 +517,52 @@ and the third that can change the tenant beside `post`.
 **The site and drive are resolved on every call.** The module reads the site and the drive on each
 call, two reads, rather than caching a drive id, because nothing in the server caches a drive id
 across calls today and a stale one would be the ID navigation failure the project exists to avoid.
+
+## Amendments, 2026-11-16, from a code review of the phase 9 source
+
+A review of every source change from plan 9b through the campaign fixes read ten defects out of the
+code. Seven are fixed on `fix/assessment-review-findings` and amend this spec as follows. Three wait
+on a ruling or a probe and are recorded in `docs/OPEN-ITEMS.md`. Nothing in this section was run
+against a tenant; each fix is pinned by a test that failed first.
+
+**`{vendor}` renders as a name SharePoint accepts.** The workspace placeholder `{vendor}` is rendered
+through the same sanitizing as the vendor folder name. Rendered raw, a vendor named `Acme: Cloud`
+opened, because the root uses `{vendorFolder}`, and then failed every save with a name Graph
+refuses, with no tool to remove the assessment; a name holding `/` added a folder the journal never
+recorded. A consumer's publisher that builds the publication name itself must build it from the
+path `verify_publication` reports, not from the display name.
+
+**A `.` or `..` path segment is refused.** `joinWorkspacePath` throws on one. The request URL is
+normalized before it is sent, so such a path addresses a different folder from the one the journal
+would record.
+
+**Artifact presence names what else is at the path.** `ArtifactPresence` carries `eTag` and `size`
+only for the artifact itself, and an `occupant` (name, folder or file) when the lookup answered
+anything else. The campaign fix made a file whose name differs by case read as not present;
+`save_assessment_artifact` then called it a folder and the preconditions called the path not
+found. Both now say what the lookup answered.
+
+**A missing item is a refusal in every lifecycle tool.** `requireArtifact` returns a refusal when
+the drive was never read, because no item matched the id or the item lacks a field the paths need.
+It used to throw a message about the profile's artifact kinds, which `record_findings` and
+`transition_assessment` surfaced for a mistyped id.
+
+**The stored assessment id keys everything.** After the item is found, the journal, the Findings
+rows, the output and the prose all use the id as the list stores it. The journal's partition key is
+case sensitive, and a caller's id in another case would have split one assessment's journal in two.
+
+**`record_findings` is serialized per assessment**, with the lock `open_assessment` uses, for the
+same reason: the read of existing finding keys and the creates are separate requests, and nothing
+deletes a duplicate finding. The open lock's key is lowercased, so two spellings of one vendor queue
+behind each other.
+
+**A vendor is one folder name.** `open_assessment` titles a new assessment with the vendor record's
+stored Title, not the caller's spelling. When no record has the Title given, it looks for a record
+already filing under the folder name that Title sanitizes to and refuses if there is one, naming
+it, where it used to create a second vendor record and then resume the first vendor's assessment.
+It refuses rather than merges because whether `Acme Inc.` and `Acme Inc` are one vendor is not the
+server's to decide. The lookup costs one more list query, only on the path that creates a vendor.
+
+**What these rest on.** That a list `eq` filter matches text without regard to case is not probed;
+the campaign measured it for drive paths only. Every fix above is correct whichever way a list
+filter behaves, and matters only if it ignores case.

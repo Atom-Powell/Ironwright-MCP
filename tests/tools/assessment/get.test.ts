@@ -179,4 +179,42 @@ describe("get_assessment", () => {
     expect(resultText(result)).toBe(GET_INPUT_CONSTRAINTS);
     expect(graph.requests()).toBe(0);
   });
+
+  it("carries no ETag or size for a path that holds a file under another name, as the output schema says of an absent file", async () => {
+    const { graph } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      { method: "get", pathIncludes: ["/lists/Assessments/items?", `AssessmentId eq '${ID}'`], headersInclude: NON_INDEXED_QUERY_HEADER, response: page([listItem("2", PROBE_FIELDS)]) },
+      { method: "get", pathIncludes: `/drives/drive-1/root:/${ROOT}:?`, response: folderItem(ID) },
+      { method: "get", pathIncludes: "_Research_Dossier.md", throws: { status: 404, code: "itemNotFound" } },
+      { method: "get", pathIncludes: "_Executive_Summary.md", throws: { status: 404, code: "itemNotFound" } },
+      { method: "get", pathIncludes: "_Risk_Assessment.docx", response: fileItem("acme corp_asm-2026-00002_risk_assessment.docx", '"p1"', 52) },
+    ]);
+
+    const result = await runGetAssessment({ profileId: PROFILE, assessmentId: ID }, assessmentToolContext(graph));
+
+    const artifacts = (result.structuredContent as { artifacts: Array<{ kind: string; present: boolean; eTag?: string; size?: number }> }).artifacts;
+    const publication = artifacts.find((artifact) => artifact.kind === "publication")!;
+    expect(publication).toMatchObject({ present: false });
+    expect(publication.eTag).toBeUndefined();
+    expect(publication.size).toBeUndefined();
+  });
+
+  it("reads the journal under the stored assessment id when the caller's spelling differs by case", async () => {
+    const typed = ID.toLowerCase();
+    const { graph } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      { method: "get", pathIncludes: ["/lists/Assessments/items?", `AssessmentId eq '${typed}'`], headersInclude: NON_INDEXED_QUERY_HEADER, response: page([listItem("2", PROBE_FIELDS)]) },
+      { method: "get", pathIncludes: `/drives/drive-1/root:/${ROOT}:?`, response: folderItem(ID) },
+      { method: "get", pathIncludes: "_Research_Dossier.md", throws: { status: 404, code: "itemNotFound" } },
+      { method: "get", pathIncludes: "_Executive_Summary.md", throws: { status: 404, code: "itemNotFound" } },
+      { method: "get", pathIncludes: "_Risk_Assessment.docx", throws: { status: 404, code: "itemNotFound" } },
+    ]);
+    const context = assessmentToolContext(graph);
+    await context.store.appendJournalEntry(PROFILE, ID, { at: "2026-11-07T10:00:00.000Z", correlationId: "c-1", stage: "ID", operation: "folder_created", target: ROOT });
+
+    const result = await runGetAssessment({ profileId: PROFILE, assessmentId: typed }, context);
+
+    expect((result.structuredContent as { journal: { entries: number } }).journal.entries).toBe(1);
+    expect(resultText(result)).toContain(`${ID}: item 2`);
+  });
 });

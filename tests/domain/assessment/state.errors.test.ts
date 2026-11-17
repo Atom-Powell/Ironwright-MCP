@@ -73,4 +73,30 @@ describe("precondition failures", () => {
   it("throws, naming the kind, for an artifact kind the state does not know", () => {
     expect(() => requireArtifact(stateWith(), "memo")).toThrow(/"memo"/);
   });
+
+  it("refuses, rather than throws, when no assessment item was found and so no artifact was read", () => {
+    const result = failure(requireArtifact(stateWith({ record: undefined, rootPath: undefined, rootPathUnavailable: "no assessment item was found", rootPresent: false, artifacts: [] }), "dossier"));
+    expect(result.observed).toBe("no item matched");
+    expect(result.evidence[0]).toMatchObject({ source: "list" });
+  });
+
+  it("names the missing field when the artifact's path could not be computed, citing the list item", () => {
+    const result = failure(requireArtifact(stateWith({ rootPath: undefined, rootPathUnavailable: "item 7 has no Title", rootPresent: false, artifacts: [] }), "dossier"));
+    expect(result.observed).toBe("the dossier path could not be computed: item 7 has no Title");
+    expect(result.evidence).toEqual([{ source: "list", target: "assessments item 7", found: "item 7 has no Title" }]);
+  });
+
+  it("says a folder holds the artifact's path rather than reporting it not found", () => {
+    const artifact = { kind: "dossier", path: "Assessments/V/A-1/Research/d.md", present: false, eTag: undefined, size: undefined, occupant: { name: "d.md", isFolder: true } };
+    const result = failure(requireArtifact(stateWith({ artifacts: [artifact] }), "dossier"));
+    expect(result.observed).toBe("not present: a folder is at the path");
+    expect(result.evidence).toEqual([{ source: "drive", target: "Assessments/V/A-1/Research/d.md", found: 'a folder named "d.md"' }]);
+  });
+
+  it("names the file found under another name rather than reporting the path not found", () => {
+    const artifact = { kind: "dossier", path: "Assessments/V/A-1/Research/d.md", present: false, eTag: undefined, size: undefined, occupant: { name: "D.MD", isFolder: false } };
+    const result = failure(requireArtifact(stateWith({ artifacts: [artifact] }), "dossier"));
+    expect(result.observed).toBe('not present: the path answered a file named "D.MD", not "d.md"');
+    expect(result.evidence).toEqual([{ source: "drive", target: "Assessments/V/A-1/Research/d.md", found: 'a file named "D.MD"' }]);
+  });
 });

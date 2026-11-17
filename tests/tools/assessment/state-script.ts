@@ -16,8 +16,8 @@ export function stateFields(overrides: Record<string, unknown> = {}): Record<str
 }
 
 /** findAssessmentById's query; an empty `items` scripts an id no item carries. */
-export function assessmentByIdQuery(items: unknown[]): ScriptEntry {
-  return { method: "get", pathIncludes: ["/lists/Assessments/items?", `AssessmentId eq '${ID}'`], headersInclude: NON_INDEXED_QUERY_HEADER, response: page(items) };
+export function assessmentByIdQuery(items: unknown[], typedId = ID): ScriptEntry {
+  return { method: "get", pathIncludes: ["/lists/Assessments/items?", `AssessmentId eq '${typedId}'`], headersInclude: NON_INDEXED_QUERY_HEADER, response: page(items) };
 }
 
 /** A metadata read of one path: the item given, or 404 when `item` is undefined. */
@@ -33,6 +33,8 @@ export function contentRead(path: string, bytes: Uint8Array): ScriptEntry {
 
 export interface StateOptions {
   fields?: Record<string, unknown>;
+  /** The id as the caller typed it, when it differs from the stored one; the item answered still carries ID. */
+  typedId?: string;
   rootPresent?: boolean;
   /** Each artifact's item as the state read finds it; undefined answers 404. */
   dossier?: unknown;
@@ -48,7 +50,7 @@ export interface StateOptions {
 export function stateScript(options: StateOptions = {}): ScriptEntry[] {
   return [
     ...RESOLVE_DRIVE_SCRIPT,
-    assessmentByIdQuery([listItem("2", stateFields(options.fields))]),
+    assessmentByIdQuery([listItem("2", stateFields(options.fields))], options.typedId),
     itemRead(ROOT, options.rootPresent === false ? undefined : folderItem(ID)),
     itemRead(DOSSIER_PATH, options.dossier),
     itemRead(SUMMARY_PATH, options.summary),
