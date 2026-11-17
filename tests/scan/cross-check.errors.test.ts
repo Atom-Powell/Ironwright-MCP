@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { crossCheckOtherLibraries } from "../../src/scan/cross-check.js";
 import { loadProfile } from "../../src/domain/profile/load.js";
-import { loadAnyProfile } from "../../src/domain/profile/library.js";
+import { loadAnyProfile } from "../../src/profiles/registry.js";
 import type { GraphClient } from "../../src/graph/client.js";
 import { UnexpectedTokenRolesError } from "../../src/graph/token.js";
 

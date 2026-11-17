@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { loadAnyProfile } from "../../../src/domain/profile/library.js";
+import { loadAnyProfile } from "../../../src/profiles/registry.js";
 import { ProfileValidationError } from "../../../src/domain/profile/load.js";
 
 const example = () => JSON.parse(readFileSync("examples/profiles/example.json", "utf8")) as Record<string, unknown>;

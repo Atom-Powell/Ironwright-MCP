@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { isLibraryProfile, loadAnyProfile } from "../../../src/domain/profile/library.js";
+import { isLibraryProfile } from "../../../src/domain/profile/library.js";
+import { loadAnyProfile } from "../../../src/profiles/registry.js";
 
 const example = JSON.parse(readFileSync("examples/profiles/example.json", "utf8")) as unknown;
 

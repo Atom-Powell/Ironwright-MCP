@@ -1,8 +1,7 @@
 import { z } from "zod";
 import { type Profile } from "./schema.js";
-import { ProfileIdSchema, SiteEntrySchema, normalizeProfileSites, refineIdentityAgreesWithSites } from "./base.js";
-import { AssessmentProfileSchema, type AssessmentProfile } from "./assessment.js";
-import { ProfileValidationError, loadProfile } from "./load.js";
+import { ProfileIdSchema, SiteEntrySchema, refineIdentityAgreesWithSites } from "./base.js";
+import type { AssessmentProfile } from "./assessment.js";
 
 /**
  * Identity only: the site and the library, and the search region a scan would
@@ -54,29 +53,4 @@ export function isLibraryProfile(profile: AnyProfile): profile is LibraryProfile
 
 export function isAssessmentProfile(profile: AnyProfile): profile is AssessmentProfile {
   return profile.kind === "assessment";
-}
-
-/**
- * The one entry point for a profile of either kind. An absent `kind` is a
- * compliance profile, so every profile written before kinds existed loads
- * exactly as it did.
- */
-export function loadAnyProfile(rawInput: unknown): AnyProfile {
-  const input = normalizeProfileSites(rawInput);
-  const kind = typeof input === "object" && input !== null ? (input as { kind?: unknown }).kind : undefined;
-  if (kind === undefined || kind === "compliance") {
-    const { kind: _ignored, ...rest } = input as Record<string, unknown>;
-    return loadProfile(rest);
-  }
-  if (kind === "assessment") {
-    const assessment = AssessmentProfileSchema.safeParse(input);
-    if (assessment.success) return assessment.data;
-    throw new ProfileValidationError(assessment.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`));
-  }
-  if (kind !== "library") {
-    throw new ProfileValidationError([`kind: must be "compliance", "library" or "assessment", not ${JSON.stringify(kind)}`]);
-  }
-  const result = LibraryProfileSchema.safeParse(input);
-  if (result.success) return result.data;
-  throw new ProfileValidationError(result.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`));
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadAnyProfile } from "../../../src/domain/profile/library.js";
+import { loadAnyProfile } from "../../../src/profiles/registry.js";
 import { ProfileValidationError } from "../../../src/domain/profile/load.js";
 
 const identity = { siteUrl: "https://contoso.sharepoint.com/sites/Example", library: "Docs" };

@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { loadAnyProfile } from "../../../src/domain/profile/library.js";
 import { ProfileValidationError } from "../../../src/domain/profile/load.js";
-import { createProfileRegistry } from "../../../src/profiles/registry.js";
+import { createProfileRegistry, loadAnyProfile } from "../../../src/profiles/registry.js";
 
 // A loose shape on purpose: each case reaches into the example and breaks one nested field.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -71,6 +70,53 @@ describe("assessment profile refusals", () => {
 
   it("refuses a .. segment padded with spaces, since a path segment is trimmed before it is joined", () => {
     expectIssue(broken((p) => { p.workspace.subfolders = ["Research/ .. /Other"]; }), "workspace.subfolders.0", /"\.\." segment/);
+  });
+
+  it("refuses an id prefix holding a character a folder name or a journal key cannot, naming it", () => {
+    expectIssue(broken((p) => { p.assessmentId.prefix = "ASM/2026"; }), "assessmentId.prefix", /"\/"/);
+    expectIssue(broken((p) => { p.assessmentId.prefix = "ASM#"; }), "assessmentId.prefix", /"#"/);
+  });
+
+  it("refuses a backslash and a control character in the id prefix, which a table key refuses", () => {
+    expectIssue(broken((p) => { p.assessmentId.prefix = "ASM\\2026"; }), "assessmentId.prefix", /cannot contain/);
+    expectIssue(broken((p) => { p.assessmentId.prefix = "ASM\u0007"; }), "assessmentId.prefix", /cannot contain/);
+  });
+
+  it("refuses a backslash in a workspace template", () => {
+    expectIssue(broken((p) => { p.workspace.artifacts.dossier = "Research\\{vendor}.md"; }), "workspace.artifacts.dossier", /SharePoint refuses/);
+  });
+
+  it("refuses an id template whose own text holds such a character", () => {
+    expectIssue(broken((p) => { p.assessmentId.template = "{prefix}:{item:5}"; }), "assessmentId.template", /":"/);
+  });
+
+  it("refuses an id template that would render an id ending in a dot, which SharePoint refuses on a folder", () => {
+    expectIssue(broken((p) => { p.assessmentId.template = "{prefix}-{item}."; }), "assessmentId.template", /ends in a dot/);
+  });
+
+  it("refuses an id template without {item}, since every assessment would render the same id", () => {
+    expectIssue(broken((p) => { p.assessmentId.template = "{prefix}-{yyyy}-{mm}"; }), "assessmentId.template", /\{item\}/);
+  });
+
+  it("refuses a workspace template whose own text holds a character SharePoint refuses in a name", () => {
+    expectIssue(broken((p) => { p.workspace.artifacts.dossier = "Research/{vendor}: Dossier.md"; }), "workspace.artifacts.dossier", /":"/);
+    expectIssue(broken((p) => { p.workspace.subfolders = ["Research?"]; }), "workspace.subfolders.0", /"\?"/);
+  });
+
+  it("refuses a workspace template with a segment ending in a dot", () => {
+    expectIssue(broken((p) => { p.workspace.subfolders = ["Research./Notes"]; }), "workspace.subfolders.0", /ends in a dot/);
+  });
+
+  it("refuses two artifact kinds whose templates name one file", () => {
+    expectIssue(
+      broken((p) => { p.workspace.artifacts.executive_summary = "research/{vendor}_Research_Dossier.md"; }),
+      "workspace.artifacts.executive_summary",
+      /same file as "dossier"/,
+    );
+  });
+
+  it("refuses two of the three lists sharing a name", () => {
+    expectIssue(broken((p) => { p.lists.findings.name = "assessments"; }), "lists.findings.name", /same list as lists\.assessments/);
   });
 
   it("refuses two equal status labels", () => {
