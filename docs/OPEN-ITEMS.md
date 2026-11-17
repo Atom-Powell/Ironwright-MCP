@@ -2628,8 +2628,21 @@ structure rides under `_meta["ironwright-mcp/refusal"]`; an id template without 
 workspace template in which `{vendor}` ends a segment, are refused at load; `get_assessment` reads
 findings and journal entries only when `include` asks; and a status listing stops at 200.
 
-The suite is at 3159 tests across 227 files, ten of them for the `If-Match` probe steps written
-the same day and described in the carried item above.
+**One command for a live sitting, written 2026-11-17, not run live.** `npm run sitting` does in one
+run what the operator did by hand across two windows: it reissues the grant issuer when its
+credentials are not in the environment, widens the grant, runs the probe and the campaign, makes
+the calls that check the `get_assessment` additions and a refusal through a client that has listed
+the tools, stops the server under an open and retries it, and restores the grant to `read` whatever
+happened. The operator supplies two sign-ins, the word yes and the server application's secret,
+and the grant issuer's secret is read from the setup command's output into memory and never shown.
+The interrupted open, which the campaign plan left to a person, is here because the server being
+stopped is one this script started, and it is stopped outright, where Ctrl+C would have let the
+server drain the call. `npm run sitting -- --sim` runs the server steps over the simulated tenant;
+that run and one with refused credentials, which stopped before changing anything, are all it has
+met. Its first live run is also the live check of everything in the table above.
+
+The suite is at 3177 tests across 229 files, twenty eight of them for the `If-Match` probe steps
+and the sitting runner written the same day.
 
 ## The phase 6d live sitting, 2026-09-24: plans an operator describes
 
