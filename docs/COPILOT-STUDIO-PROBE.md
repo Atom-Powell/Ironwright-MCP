@@ -280,6 +280,36 @@ codes and user agents, never values or keys.
   secret entered when the server was started, not the site or the grant; the sitting of the same
   morning had used the same application successfully.
 
+### The first read that reached SharePoint, and what it cost to get there
+
+- **The read.** "Use the Ironwright MCP tool to list the assessments with status In Progress for
+  profile technology-success-vendor-risk" called `get_assessment`; the server read the Technology
+  Success site's Assessments list in 3 Graph requests and answered "No item in list Assessments has
+  Status In Progress", which was true. The follow-up "Now show me the completed ones for that
+  profile, with their vendor, disposition and risk" carried the profile from the turn before and
+  returned the one case the sitting of the same morning had completed: ASM-2026-00001, vendor
+  "Pilot Check 1118T1714", disposition Approved, risk Low, scope Pilot. Real list data, read through
+  Copilot Studio, matching what the sitting wrote.
+- **A connection with the wrong key fails at `initialize`, and the agent can hide it.** Before the
+  connection held the right key, every call failed with `"HttpStatusCode":"unauthorized"`,
+  `"mcpMethod":"initialize"`, visible only in the activity view as an Execution summary ending
+  "The tool action completed with status Failed". With **Web Search** on and no instructions, the
+  agent then searched the public web and answered "I couldn't locate any matching assessment
+  records", which reads as an empty result and is not one. Asked to use the tool by name, it said
+  instead "The Ironwright MCP tool is not available in this session". For a governed deployment:
+  turn Web Search off on an agent whose answers must come from the server, and give it instructions
+  that say to report a tool failure as a failure.
+- **The inbound key is the thing to manage, and it cost most of an hour.** The start script made a
+  new key at every start, the operator copied keys between windows, a probe key was pasted as a
+  client secret, and a connection ended up holding a key the running server did not use. What
+  settled it: one key, kept in a password manager and pasted at every start; the script printing
+  the key's last four characters at every start; and a local check that takes a pasted key and
+  reports whether the running server accepts it, printing only its length and last four characters.
+  A customer deployment needs the same three things written into its runbook.
+- **The test pane has its own session.** **New test session** (top of the test pane) starts a fresh
+  one; the connection a session uses is set in the connection manager (**Manage your connections**,
+  one row per tool with **Manage**, which opens **Create or pick a connection**).
+
 ## Running the probe server
 
 The probe server is `scripts/copilot-probe/`. It exposes two dummy tools (`get_fruit_stock` and
