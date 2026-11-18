@@ -16,6 +16,9 @@
  *   npm run sitting -- --sim             the same server steps over the simulated tenant, no credentials
  *   npm run sitting -- --interrupt-ms=800   how long an open runs before the server is stopped under it
  *
+ * When a second site is named, in IW_SECOND_SITE_URL or as secondSiteUrl in the identity file, the
+ * live sitting ends with the two site probe in second-site.ts.
+ *
  * Reads IW_TENANT_ID, IW_CLIENT_ID, IW_CLIENT_SECRET and IW_SITE_URL when they
  * are set and asks for whichever is missing; the site comes from the profile.
  * The tenant id and client id are remembered in .superpowers/sitting/identity.json,
@@ -37,6 +40,8 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { clientCredentialsTokenProvider, requireExactRoles, SERVER_TOKEN_ROLES } from "../../src/graph/token.js";
 import { REFUSAL_META_KEY } from "../../src/tools/refusal.js";
 import { runScript as runRepoScript, type ScriptRun } from "./run-script.js";
+import { probeSecondSite } from "./second-site.js";
+import { createGraphClient } from "../../src/graph/client.js";
 import {
   judgeCampaign,
   judgeListPrecondition,
@@ -231,8 +236,54 @@ function readProfile(): ProfileFacts {
   };
 }
 
+interface SavedIdentity {
+  tenantId?: string;
+  clientId?: string;
+  /** A second site in the same tenant, for the two site probe. Not a secret. */
+  secondSiteUrl?: string;
+}
+
+function readIdentity(): SavedIdentity {
+  return existsSync(IDENTITY_FILE) ? (JSON.parse(readFileSync(IDENTITY_FILE, "utf8")) as SavedIdentity) : {};
+}
+
+/**
+ * One application, two sites: the assumption a site per client rests on. Run only when a second
+ * site is named, in IW_SECOND_SITE_URL or the identity file. It never stops the sitting: whatever
+ * it finds or fails at is a line in the summary, and it puts its own grant back to read.
+ */
+async function runSecondSite(profile: ProfileFacts): Promise<void> {
+  const secondSiteUrl = process.env.IW_SECOND_SITE_URL?.trim() || readIdentity().secondSiteUrl;
+  if (secondSiteUrl === undefined || secondSiteUrl.length === 0) return;
+  say("Probing a second site under the same server application.");
+  const tenantId = process.env.IW_TENANT_ID!;
+  const clientId = process.env.IW_CLIENT_ID!;
+  try {
+    const server = createGraphClient({
+      tokenProvider: requireExactRoles(clientCredentialsTokenProvider({ tenantId, clientId, clientSecret: process.env.IW_CLIENT_SECRET! }), SERVER_TOKEN_ROLES),
+    });
+    const issuer = createGraphClient({
+      tokenProvider: clientCredentialsTokenProvider({ tenantId, clientId: process.env.IW_BOOTSTRAP_CLIENT_ID!, clientSecret: process.env.IW_BOOTSTRAP_CLIENT_SECRET! }),
+    });
+    const found = await probeSecondSite({
+      server,
+      issuer,
+      firstSiteUrl: process.env.IW_SITE_URL ?? profile.siteUrl,
+      secondSiteUrl,
+      clientId,
+      library: process.env.IW_PROBE_LIBRARY?.trim() || "Documents",
+      stamp: STAMP,
+      sleep,
+      log: (line) => say(line),
+    });
+    results.push(...found);
+  } catch (error) {
+    record({ step: "second site probe", verdict: "fail", detail: error instanceof Error ? error.message : String(error) });
+  }
+}
+
 async function gatherIdentity(profile: ProfileFacts): Promise<void> {
-  const saved = existsSync(IDENTITY_FILE) ? (JSON.parse(readFileSync(IDENTITY_FILE, "utf8")) as { tenantId?: string; clientId?: string }) : {};
+  const saved = readIdentity();
   const tenantId = process.env.IW_TENANT_ID?.trim() || saved.tenantId || (await ask("Tenant id of the developer tenant: "));
   const clientId = process.env.IW_CLIENT_ID?.trim() || saved.clientId || (await ask("Client id of the server application: "));
   if (tenantId.length === 0 || clientId.length === 0) throw new Error("The tenant id and the server application's client id are both needed.");
@@ -256,7 +307,8 @@ async function gatherIdentity(profile: ProfileFacts): Promise<void> {
   }
   // Remembered only now: a mistyped id that was saved would be offered back on every later run.
   mkdirSync(join(".superpowers", "sitting"), { recursive: true });
-  writeFileSync(IDENTITY_FILE, `${JSON.stringify({ tenantId, clientId }, null, 2)}\n`);
+  // Whatever else the file holds, the second site's address for one, is kept.
+  writeFileSync(IDENTITY_FILE, `${JSON.stringify({ ...saved, tenantId, clientId }, null, 2)}\n`);
   say("The server application's token carries exactly Sites.Selected.");
 }
 
@@ -303,7 +355,9 @@ async function ensureGrantIssuer(): Promise<void> {
 }
 
 async function runProbe(): Promise<void> {
-  const out = `docs/superpowers/specs/evidence/${new Date().toISOString().slice(0, 10)}-list-if-match-probe`;
+  // Beside the sitting's other results, not under docs: the repository keeps one recording of
+  // the probe, and a sitting that only repeats it should not add a folder to be committed.
+  const out = join(FOLDER, "probe-evidence");
   const probe = await runScript("probe", "scripts/assessment-probe/main.ts", [`--out=${out}`], { IW_PROBE_LIBRARY: process.env.IW_PROBE_LIBRARY?.trim() || "Documents" });
   record(judgeListPrecondition(parseProbeLines(probe.text)));
 }
@@ -498,6 +552,7 @@ async function main(): Promise<void> {
   }
   await runReadChecks(profile);
   await runInterruptedOpen(profile);
+  if (!SIM) await runSecondSite(profile);
 }
 
 let cleaning: Promise<void> | undefined;
