@@ -43,6 +43,15 @@ export function profileArtifactKinds(context: ToolContext, profileId: string): s
   return isAssessmentProfile(profile) ? Object.keys(profile.workspace.artifacts) : undefined;
 }
 
+/**
+ * The profile's lifecycle, read from the registry without Graph, for the checks a tool makes
+ * before any request. Undefined for a profile that is not an assessment profile.
+ */
+export function profileLifecycle(context: ToolContext, profileId: string): AssessmentProfile["lifecycle"] | undefined {
+  const profile = context.profiles.getAny(profileId);
+  return isAssessmentProfile(profile) ? profile.lifecycle : undefined;
+}
+
 export function unknownKindText(profileId: string, kind: string, kinds: readonly string[]): string {
   return `Profile "${profileId}" names no artifact kind "${kind}". Its kinds are ${kinds.join(", ")}. Nothing was read or written.`;
 }

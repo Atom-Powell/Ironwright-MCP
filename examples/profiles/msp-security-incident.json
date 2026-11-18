@@ -1,0 +1,50 @@
+{
+  "kind": "assessment",
+  "profileId": "security-incidents",
+  "sites": [
+    {
+      "siteUrl": "https://contoso.sharepoint.com/sites/Example",
+      "library": "Documents"
+    }
+  ],
+  "workspace": {
+    "root": "Incidents/{vendorFolder}/{assessmentId}",
+    "subfolders": ["Record", "Evidence", "Review"],
+    "artifacts": {
+      "timeline": "Record/{assessmentId}_Timeline.md",
+      "containment": "Record/{assessmentId}_Containment.md",
+      "client_notice": "Review/{assessmentId}_Client_Notice.md",
+      "postmortem": "Review/{vendorFolder}_{assessmentId}_Postmortem.docx"
+    }
+  },
+  "assessmentId": {
+    "prefix": "INC",
+    "template": "{prefix}-{yyyy}-{item:5}"
+  },
+  "lists": {
+    "vendors": { "name": "Clients", "columns": { "folderName": "FolderName" } },
+    "assessments": {
+      "name": "Incidents",
+      "columns": {
+        "assessmentId": "IncidentId", "vendorFolder": "ClientFolder", "scope": "Category", "status": "Status",
+        "state": "State", "disposition": "Resolution", "risk": "Severity", "summary": "Summary"
+      }
+    },
+    "findings": {
+      "name": "Incident Findings",
+      "columns": { "assessmentId": "IncidentId", "findingKey": "FindingKey", "observation": "Observation", "risk": "Severity", "recommendation": "Remediation" }
+    }
+  },
+  "lifecycle": {
+    "status": { "inProgress": "Open", "completed": "Closed", "provisional": "Contained" },
+    "dispositions": ["Resolved", "Resolved with follow up", "False positive"],
+    "risks": ["Low", "Medium", "High", "Critical"],
+    "gates": {
+      "findings": ["timeline"],
+      "provisional": ["timeline", "containment"],
+      "completed": ["timeline", "containment", "postmortem"]
+    },
+    "external": ["postmortem"],
+    "corrected": ["timeline", "containment"]
+  }
+}

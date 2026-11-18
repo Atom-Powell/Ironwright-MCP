@@ -7,7 +7,7 @@ import { downloadDriveItem } from "../../graph/content.js";
 import { updateListItemFields } from "../../graph/lists.js";
 import { fieldsFor, savePrecondition } from "../../domain/assessment/state.js";
 import { fileNameOf } from "../../domain/assessment/templates.js";
-import { profileArtifactKinds, resolveAssessmentContext, unknownKindText } from "./context.js";
+import { profileArtifactKinds, profileLifecycle, resolveAssessmentContext, unknownKindText } from "./context.js";
 import { findAssessmentById, readAssessmentState } from "./read-state.js";
 import { sha256Hex } from "./hash.js";
 import { appendJournal } from "./journal.js";
@@ -21,7 +21,7 @@ export const SAVE_INPUT_SCHEMA = {
   kind: z
     .string()
     .min(1)
-    .describe('An artifact kind the profile names, for example "dossier" or "executive_summary". "publication" is refused: the publisher writes it and verify_publication checks it.'),
+    .describe('An artifact kind the profile names, for example "dossier" or "executive_summary". A kind the profile lists as external is refused, by default "publication": it is produced outside this server and verify_publication checks it.'),
   content: z.string().min(1).describe('The full text to persist, UTF-8, for example "# Acme Corp research dossier ...". Up to 4 MiB encoded.'),
 } satisfies z.ZodRawShape;
 
@@ -35,7 +35,7 @@ export const SAVE_OUTPUT_SCHEMA = {
   stage: z
     .string()
     .describe(
-      'The stage this save stands for, for example "DOSSIER", or "CORRECTION" when the dossier was overwritten. A save that wrote the file records it in the State column. On "unchanged" it is the kind\'s own stage and nothing is recorded, so the State column may read another stage.',
+      'The stage this save stands for: the kind upper cased, for example "DOSSIER", or "CORRECTION" when a kind the profile lists as corrected was overwritten, which by default is the dossier. A save that wrote the file records it in the State column. On "unchanged" it is the kind\'s own stage and nothing is recorded, so the State column may read another stage.',
     ),
   bytes: z.number().int().describe('Bytes of the file as last read: read back after a write, or as downloaded on "unchanged", for example 2048.'),
   sha256: z.string().describe('sha256 of those bytes, equal to the hash of the content sent, for example "9f86d0...".'),
@@ -53,11 +53,18 @@ export const SAVE_OUTPUT_SCHEMA = {
 const InputObject = z.object(SAVE_INPUT_SCHEMA);
 const TOOL = "save_assessment_artifact";
 
-export const PUBLICATION_REFUSAL = "The publication is written by the consumer's publisher at its canonical path; verify_publication checks it. Nothing was written.";
+/** The refusal of a kind the profile lists as produced outside this server. */
+export function externalKindRefusal(kind: string): string {
+  return `The ${kind} is not written by this server: the profile lists it as produced outside it, and verify_publication checks it. Nothing was written.`;
+}
 
-/** A second save of the dossier is a correction of research already recorded, so it is journaled as its own stage. */
-export function stageFor(kind: string, overwritten: boolean): string {
-  return kind === "dossier" && overwritten ? "CORRECTION" : kind.toUpperCase();
+/**
+ * The stage a save stands for: the kind's own, or CORRECTION when a kind the
+ * profile lists as corrected is overwritten. A second save of such a kind is a
+ * correction of work already recorded, so it is journaled as its own stage.
+ */
+export function stageFor(kind: string, overwritten: boolean, corrected: readonly string[]): string {
+  return overwritten && corrected.includes(kind) ? "CORRECTION" : kind.toUpperCase();
 }
 
 function failure(text: string): CallToolResult {
@@ -84,11 +91,15 @@ async function saveAssessmentArtifact(args: z.infer<typeof InputObject>, context
   // Checked here as well as inside createFile and overwriteFile, so content over the cap costs no Graph request at all.
   const bytes = new TextEncoder().encode(args.content);
   if (bytes.byteLength > MAX_SMALL_UPLOAD_BYTES) return failure(new UploadTooLargeError(bytes.byteLength).message);
-  if (args.kind === "publication") return failure(PUBLICATION_REFUSAL);
 
   try {
     const kinds = profileArtifactKinds(context, args.profileId);
     if (kinds !== undefined && !kinds.includes(args.kind)) return failure(unknownKindText(args.profileId, args.kind, kinds));
+    // Both from the registry, before any Graph request. Empty for a profile that is not an
+    // assessment profile, which resolveAssessmentContext then refuses in its own words.
+    const lifecycle = profileLifecycle(context, args.profileId);
+    if (lifecycle?.external.includes(args.kind) === true) return failure(externalKindRefusal(args.kind));
+    const corrected = lifecycle?.corrected ?? [];
 
     const ac = await resolveAssessmentContext(context, args.profileId);
     subject.siteUrl = ac.profile.identity.siteUrl;
@@ -98,11 +109,11 @@ async function saveAssessmentArtifact(args: z.infer<typeof InputObject>, context
 
     const record = await findAssessmentById(context.graph, ac, args.assessmentId);
     const state = await readAssessmentState(context.graph, ac, record);
-    const check = savePrecondition(state, ac.profile.lifecycle.status, `${listName} where ${columns.assessmentId} is "${args.assessmentId}"`);
+    const check = savePrecondition(state, ac.profile.lifecycle, `${listName} where ${columns.assessmentId} is "${args.assessmentId}"`);
     // The id as the list stores it once the item is found. The lookup can match a spelling that
     // differs by case, and the journal is keyed by the exact string, so keying it by what the caller
     // typed would split it.
-    if (!check.ok) return refusalResult(TOOL, stageFor(args.kind, false), record?.assessmentId ?? args.assessmentId, check);
+    if (!check.ok) return refusalResult(TOOL, stageFor(args.kind, false, corrected), record?.assessmentId ?? args.assessmentId, check);
     const item = record!;
     const assessmentId = item.assessmentId;
 
@@ -193,7 +204,7 @@ async function saveAssessmentArtifact(args: z.infer<typeof InputObject>, context
         const made = await createFolder(context.graph, { driveId: ac.driveId, parentPath: folder.slice(0, cut), name: folder.slice(cut + 1) });
         if (made.kind === "created") {
           await appendJournal(context, ac, assessmentId, {
-            stage: stageFor(args.kind, false),
+            stage: stageFor(args.kind, false, corrected),
             operation: "folder_created",
             target: folder,
             ...(made.item.eTag !== undefined ? { etagAfter: made.item.eTag } : {}),
@@ -223,7 +234,7 @@ async function saveAssessmentArtifact(args: z.infer<typeof InputObject>, context
       // State write that failed is no longer repaired by repeating the save. State is a marker
       // for people, the drive is what the tools read, and the next stage's write moves it on.
       if (priorHash === sent) {
-        const stage = stageFor(args.kind, false);
+        const stage = stageFor(args.kind, false, corrected);
         const output = {
           assessmentId,
           kind: args.kind,
@@ -251,7 +262,7 @@ async function saveAssessmentArtifact(args: z.infer<typeof InputObject>, context
       written = outcome.item;
     }
     const overwritten = artifact.present;
-    const stage = stageFor(args.kind, overwritten);
+    const stage = stageFor(args.kind, overwritten, corrected);
 
     // Journaled on Graph's 2xx and before the read back: the write happened whatever the read back
     // finds, and a read back that fails or disagrees must not leave the write unrecorded.

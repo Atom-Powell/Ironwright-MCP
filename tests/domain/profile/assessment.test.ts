@@ -1,10 +1,46 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { AssessmentProfileSchema } from "../../../src/domain/profile/assessment.js";
+import { AssessmentProfileSchema, type AssessmentProfile } from "../../../src/domain/profile/assessment.js";
 import { isAssessmentProfile, isLibraryProfile } from "../../../src/domain/profile/library.js";
 import { loadAnyProfile } from "../../../src/profiles/registry.js";
 
 const example = JSON.parse(readFileSync("examples/profiles/assessment-example.json", "utf8")) as unknown;
+
+describe("the lifecycle a profile defines", () => {
+  const example = (): Record<string, any> => JSON.parse(readFileSync("examples/profiles/assessment-example.json", "utf8")); // eslint-disable-line @typescript-eslint/no-explicit-any
+
+  it("defaults the gates, the external kinds and the corrected kinds to the vendor risk workflow", () => {
+    const profile = loadAnyProfile(example()) as AssessmentProfile;
+
+    expect(profile.lifecycle.gates).toEqual({ findings: ["dossier"], provisional: ["dossier"], completed: ["dossier", "publication"] });
+    expect(profile.lifecycle.external).toEqual(["publication"]);
+    expect(profile.lifecycle.corrected).toEqual(["dossier"]);
+  });
+
+  it("loads a profile whose workflow names neither a dossier nor a publication", () => {
+    const input = example();
+    input.workspace.artifacts = { intake: "Intake/{vendor}_Intake.md", handover: "Handover/{assessmentId}_Handover.pdf" };
+    input.workspace.subfolders = ["Intake", "Handover"];
+    input.lifecycle.gates = { findings: ["intake"], provisional: ["intake"], completed: ["intake", "handover"] };
+    input.lifecycle.external = ["handover"];
+    input.lifecycle.corrected = [];
+
+    const profile = loadAnyProfile(input) as AssessmentProfile;
+
+    expect(Object.keys(profile.workspace.artifacts)).toEqual(["intake", "handover"]);
+    expect(profile.lifecycle.gates.completed).toEqual(["intake", "handover"]);
+  });
+
+  it.each(["msp-client-onboarding.json", "msp-security-incident.json"])("loads the shipped example %s as an assessment profile", (file) => {
+    const profile = loadAnyProfile(JSON.parse(readFileSync(`examples/profiles/${file}`, "utf8"))) as AssessmentProfile;
+
+    expect(profile.kind).toBe("assessment");
+    // Every kind a gate names is one the server can find, and an external kind is one a gate waits on.
+    const kinds = Object.keys(profile.workspace.artifacts);
+    for (const kind of [...profile.lifecycle.gates.findings, ...profile.lifecycle.gates.provisional, ...profile.lifecycle.gates.completed]) expect(kinds).toContain(kind);
+    for (const kind of profile.lifecycle.external) expect(profile.lifecycle.gates.completed).toContain(kind);
+  });
+});
 
 describe("the assessment profile kind", () => {
   it("loads the committed example as an assessment profile", () => {

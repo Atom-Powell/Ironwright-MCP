@@ -45,6 +45,7 @@ sections below say what was proven and what was not. Last updated 2026-11-17.
 | Assessment module upgrades and the simulated tenant | 2026-11-17: a stateful simulated tenant with a local server and walkthrough; refusals carried under `_meta` after the first client that lists tools rejected them; one lock per assessment; concurrent state reads; honest journal failures; one profile loader with more refused at load; version reporting, a record of every tool call and a bounded startup wait; `get_assessment` readiness, findings and journal readback, and listing by status. Built against the scripted fakes and the simulated tenant. Verified live 2026-11-17: a refusal through a client that lists the tools, the lock per assessment, the state read, profile loading, the version in the startup line, the call record, and all three `get_assessment` additions. Not exercised live: a journal append failure, the token request bound, a status listing past 200 | sections below; `docs/SIMULATOR.md`; `docs/superpowers/specs/evidence/2026-11-17-sitting/`; spec amendments of 2026-11-17 |
 | List item writes under `If-Match` | Probed live 2026-11-17: Graph refuses a stale fields PATCH with 412 and answers a current one with the new ETag. Every list item update has sent the precondition since the rulings of the same day, against the fakes and the simulated tenant; not run live | carried item below; `docs/superpowers/specs/evidence/2026-11-17-list-if-match-probe/` |
 | The six rulings of 2026-11-17 | Ruled by the operator and built the same day: the safety sentence reworded, provisional no longer an end state, a folder a save brings back journaled, State left to the drive, an unchanged save recording no stage, a refused list write refused in turn. Against the fakes and the simulated tenant; `npm run sitting` checks two of them; none run live | section below; spec amendments of 2026-11-17 |
+| 10 Profile defined lifecycles | Built 2026-11-17 against the fakes and the simulated tenant: the gates, the external kinds and the corrected kinds are profile data, `verify_publication` takes a kind, and two example profiles for a managed service provider ship. A client onboarding runs end to end on the simulated tenant. Not run live | `docs/superpowers/specs/2026-11-17-profile-defined-lifecycle-design.md`; section below |
 | 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9c and carries the unverified A3 and B1 probes, and is the item that slips first | same spec |
 | Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
 | CPA practice domain (multi-site scan and queries, grant issuer loop over a sites file, folder template taxonomy) | Not started; the phase after 9 | same spec |
@@ -2834,6 +2835,56 @@ needs the item edited while a call is in flight; the probe measured the 412 itse
 from that answer to the tool's words is covered by the fakes only.
 
 The suite is at 3283 tests across 229 files after the gateway ruling.
+
+## Phase 10, 2026-11-17: the workflow moves into the profile
+
+The operator said the pilot should cover as many needs of a managed service provider as the
+server can, and that the recommendations should be acted on without asking, except where an
+answer was truly needed. The design is in
+`docs/superpowers/specs/2026-11-17-profile-defined-lifecycle-design.md`. What was built is the
+first of its three moves.
+
+**What changed.** The assessment module no longer knows the words dossier and publication. Which
+artifact kinds gate findings, a provisional status and completion, which kinds are produced
+outside the server, and which are recorded as a correction when overwritten are settings under
+the profile's `lifecycle`, defaulting to the vendor risk workflow. `verify_publication` takes an
+optional `kind` for a profile that lists more than one external kind. Two example profiles ship
+beside the vendor risk one: a client onboarding and a security incident record.
+
+**What it was run against.** The module's existing tests, unchanged, against the example profile
+that sets none of the new settings, which is the evidence that the pilot's profile behaves as it
+did. The schema's refusals. And a client onboarding taken from open to completed through the real
+tool handlers on the simulated tenant, under the shipped example: findings refused until the
+intake exists, the signed handover refused as a kind the server does not write, the provisional
+status refused until the runbook exists, completion refused until someone else uploads the
+handover, then completed.
+
+**Decided without asking, and the operator's to overrule.** No tool or input field was renamed,
+so a client is still passed as `vendor`. The findings list keeps its four fields. A provisional
+assessment still cannot be saved to, which in the onboarding example means nothing more can be
+written while it awaits its handover.
+
+**Reviewed before it was committed.** An independent read found no defect in what the tools do
+and five things in what they say. Three are fixed: two descriptions still named the dossier and
+the publication as facts and not as defaults; gates that set one stage and not the others were
+refused with the word "Required" and now say the three are set together; and a collision between
+an external kind and a corrected list the profile never wrote did not say where that list came
+from. Two are left as they are. A save of an external kind against a profile id the registry
+does not know, or against a profile of another kind, now answers about the profile and no longer
+about the kind, which is the more useful answer. And a kind named twice in one gate is accepted
+and checked twice.
+
+The suite is at 3308 tests across 229 files.
+
+**What waits on the operator, and nothing else does.**
+
+- A live run under a second profile needs three more lists in the developer site: a clients list,
+  a cases list and an issues list, with the columns the example profile names. Creating them is a
+  step in the site, not in this repository.
+- One site per client is the second move and is not built. It rests on an assumption no probe has
+  made, one application holding grants on two sites, so a second site in the developer tenant
+  comes first.
+- Whether the tools should be renamed for a consumer that is not assessing vendors.
 
 ## The phase 6d live sitting, 2026-09-24: plans an operator describes
 

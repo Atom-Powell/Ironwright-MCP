@@ -188,18 +188,30 @@ export function allOf(...checks: Precondition[]): Precondition {
 }
 
 /**
+ * The part of a profile's lifecycle the preconditions read: its status labels
+ * and which artifact kinds each stage waits on. The kinds are the profile's.
+ * Nothing here knows the word dossier or publication; vendor risk gates on
+ * those two by the profile schema's defaults, and a client onboarding or an
+ * incident record gates on its own.
+ */
+export interface LifecycleRules {
+  status: { inProgress: string; provisional: string };
+  gates: { findings: readonly string[]; provisional: readonly string[]; completed: readonly string[] };
+}
+
+/**
  * What each lifecycle tool requires before it writes, stated once. The tool
  * evaluates its own function here and get_assessment reports all of them, so
  * the report of what a tool would do is the tool's own decision over the same
  * state and cannot drift from it. `lookedUp` names where the item was looked
  * for, for the evidence of an item that was not found.
  */
-export function savePrecondition(state: AssessmentState, labels: { inProgress: string }, lookedUp: string): Precondition {
-  return allOf(requireRecord(state, lookedUp), requireInProgress(state, labels), requireRoot(state));
+export function savePrecondition(state: AssessmentState, rules: Pick<LifecycleRules, "status">, lookedUp: string): Precondition {
+  return allOf(requireRecord(state, lookedUp), requireInProgress(state, rules.status), requireRoot(state));
 }
 
-export function findingsPrecondition(state: AssessmentState, labels: { inProgress: string }, lookedUp: string): Precondition {
-  return allOf(requireRecord(state, lookedUp), requireInProgress(state, labels), requireArtifact(state, "dossier"));
+export function findingsPrecondition(state: AssessmentState, rules: LifecycleRules, lookedUp: string): Precondition {
+  return allOf(requireRecord(state, lookedUp), requireInProgress(state, rules.status), ...rules.gates.findings.map((kind) => requireArtifact(state, kind)));
 }
 
 export type TransitionTarget = "completed" | "provisional";
@@ -212,12 +224,11 @@ export type TransitionTarget = "completed" | "provisional";
  * itself is still entered only from in progress, and the other lifecycle
  * tools still require in progress.
  */
-export function transitionPrecondition(state: AssessmentState, labels: { inProgress: string; provisional: string }, target: TransitionTarget, lookedUp: string): Precondition {
+export function transitionPrecondition(state: AssessmentState, rules: LifecycleRules, target: TransitionTarget, lookedUp: string): Precondition {
   return allOf(
     requireRecord(state, lookedUp),
-    target === "completed" ? requireStatus(state, [labels.inProgress, labels.provisional]) : requireInProgress(state, labels),
-    requireArtifact(state, "dossier"),
-    ...(target === "completed" ? [requireArtifact(state, "publication")] : []),
+    target === "completed" ? requireStatus(state, [rules.status.inProgress, rules.status.provisional]) : requireInProgress(state, rules.status),
+    ...rules.gates[target].map((kind) => requireArtifact(state, kind)),
   );
 }
 
@@ -238,7 +249,7 @@ export interface ActionReadiness {
  * a path something else occupies, and every tool reads the state again when it
  * is called.
  */
-export function lifecycleReadiness(state: AssessmentState, labels: { inProgress: string; provisional: string }, lookedUp: string): ActionReadiness[] {
+export function lifecycleReadiness(state: AssessmentState, rules: LifecycleRules, lookedUp: string): ActionReadiness[] {
   const entry = (tool: ActionReadiness["tool"], check: Precondition, target?: TransitionTarget): ActionReadiness => ({
     tool,
     ...(target === undefined ? {} : { target }),
@@ -246,10 +257,10 @@ export function lifecycleReadiness(state: AssessmentState, labels: { inProgress:
     ...(check.ok ? {} : { expected: check.expected, observed: check.observed, evidence: check.evidence }),
   });
   return [
-    entry("save_assessment_artifact", savePrecondition(state, labels, lookedUp)),
-    entry("record_findings", findingsPrecondition(state, labels, lookedUp)),
-    entry("transition_assessment", transitionPrecondition(state, labels, "provisional", lookedUp), "provisional"),
-    entry("transition_assessment", transitionPrecondition(state, labels, "completed", lookedUp), "completed"),
+    entry("save_assessment_artifact", savePrecondition(state, rules, lookedUp)),
+    entry("record_findings", findingsPrecondition(state, rules, lookedUp)),
+    entry("transition_assessment", transitionPrecondition(state, rules, "provisional", lookedUp), "provisional"),
+    entry("transition_assessment", transitionPrecondition(state, rules, "completed", lookedUp), "completed"),
   ];
 }
 

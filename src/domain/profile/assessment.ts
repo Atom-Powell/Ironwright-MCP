@@ -15,8 +15,27 @@ const Label = z.string().min(1);
  */
 const REFUSED_IN_A_KEY = /[#\u0000-\u001F\u007F-\u009F]/;
 
-/** Artifact kinds the module itself refers to; a profile may add more. */
-export const REQUIRED_ARTIFACT_KINDS = ["dossier", "publication"] as const;
+const Kind = z.string().regex(/^[a-z][a-z0-9_]*$/, "an artifact kind: lowercase letters, digits and underscores");
+
+/**
+ * The vendor risk workflow, which is what a profile gets when it says nothing
+ * about its lifecycle: findings and a provisional status wait on the dossier,
+ * completion waits on the dossier and the publication, the publication is
+ * produced outside this server, and a dossier saved a second time is a
+ * correction. Stated once, so the defaults and the messages that explain them
+ * cannot drift apart.
+ */
+const DEFAULT_GATES = { findings: ["dossier"], provisional: ["dossier"], completed: ["dossier", "publication"] };
+const DEFAULT_EXTERNAL = ["publication"];
+const DEFAULT_CORRECTED = ["dossier"];
+
+/**
+ * The gates default as a whole, not key by key: a profile that sets one stage's
+ * gate and inherited another workflow's for the rest would be half one
+ * workflow and half another. So a gate left out is refused, in these words,
+ * where Zod alone would say only "Required".
+ */
+const GATE_MISSING = { required_error: "a profile that sets gates sets all three, findings, provisional and completed; leave gates out entirely for the default workflow" };
 
 export const AssessmentProfileSchema = z
   .object({
@@ -30,7 +49,7 @@ export const AssessmentProfileSchema = z
         subfolders: z.array(Template).default([]).describe('Folders created under the root at open, for example ["Research", "Evidence"].'),
         artifacts: z
           .record(z.string().regex(/^[a-z][a-z0-9_]*$/, "an artifact kind: lowercase letters, digits and underscores"), Template)
-          .describe('Named artifact kinds to path templates under the root, for example {"dossier": "Research/{vendor}_Research_Dossier.md"}. "dossier" and "publication" are required. {vendor} renders the vendor display name with the characters SharePoint refuses in a name removed and nothing else changed, so it cannot end a path segment. {vendorFolder} is the folder name, which also loses a trailing dot.'),
+          .describe('Named artifact kinds to path templates under the root, for example {"dossier": "Research/{vendor}_Research_Dossier.md"}. Every kind the lifecycle names must be defined here, which by default means "dossier" and "publication". {vendor} renders the vendor display name with the characters SharePoint refuses in a name removed and nothing else changed, so it cannot end a path segment. {vendorFolder} is the folder name, which also loses a trailing dot.'),
       })
       .strict(),
     assessmentId: z
@@ -68,6 +87,26 @@ export const AssessmentProfileSchema = z
         status: z.object({ inProgress: Label, completed: Label, provisional: Label }).strict(),
         dispositions: z.array(Label).min(1),
         risks: z.array(Label).min(1),
+        gates: z
+          .object({
+            findings: z.array(Kind, GATE_MISSING).describe('Artifact kinds that must be present before record_findings writes, for example ["dossier"], or ["intake"] for a client onboarding. May be empty.'),
+            provisional: z.array(Kind, GATE_MISSING).describe('Artifact kinds that must be present before a transition to the provisional status, for example ["dossier"]. May be empty.'),
+            completed: z
+              .array(Kind, GATE_MISSING)
+              .min(1, "the completed gate names at least one artifact kind, or completion would be verified against nothing")
+              .describe('Artifact kinds that must be present before a transition to the completed status, for example ["dossier", "publication"].'),
+          })
+          .strict()
+          .default(DEFAULT_GATES)
+          .describe("Which artifact kinds each stage waits on. The code holds no kind's name: a workflow is whatever its profile gates. Defaults to the vendor risk workflow."),
+        external: z
+          .array(Kind)
+          .default(DEFAULT_EXTERNAL)
+          .describe('Artifact kinds produced outside this server, by a person or a publisher, for example ["publication"] or ["handover"]. save_assessment_artifact refuses them and verify_publication reads them. May be empty.'),
+        corrected: z
+          .array(Kind)
+          .default(DEFAULT_CORRECTED)
+          .describe('Artifact kinds whose overwrite is recorded as the CORRECTION stage, not as the kind\'s own, for example ["dossier"]. May be empty.'),
       })
       .strict(),
   })
@@ -121,9 +160,38 @@ export const AssessmentProfileSchema = z
         seenTemplates.set(key, kind);
       }
     }
-    for (const kind of REQUIRED_ARTIFACT_KINDS) {
-      if (!(kind in profile.workspace.artifacts)) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["workspace", "artifacts", kind], message: `the module needs an artifact kind "${kind}"` });
+    // Every kind the lifecycle names has to be one the workspace gives a path. A gate on a kind
+    // with no path would load and then refuse its stage forever, naming a file nothing can find.
+    // Each message says what the setting defaults to, because a profile that sets nothing is told
+    // about a setting it never wrote.
+    const kinds = Object.keys(profile.workspace.artifacts);
+    const named: Array<[(string | number)[], readonly string[], string]> = [
+      [["lifecycle", "gates", "findings"], profile.lifecycle.gates.findings, `When the profile sets no gates, this one defaults to ${DEFAULT_GATES.findings.join(" and ")}.`],
+      [["lifecycle", "gates", "provisional"], profile.lifecycle.gates.provisional, `When the profile sets no gates, this one defaults to ${DEFAULT_GATES.provisional.join(" and ")}.`],
+      [["lifecycle", "gates", "completed"], profile.lifecycle.gates.completed, `When the profile sets no gates, this one defaults to ${DEFAULT_GATES.completed.join(" and ")}.`],
+      [["lifecycle", "external"], profile.lifecycle.external, `When the profile does not set it, external defaults to ${DEFAULT_EXTERNAL.join(" and ")}.`],
+      [["lifecycle", "corrected"], profile.lifecycle.corrected, `When the profile does not set it, corrected defaults to ${DEFAULT_CORRECTED.join(" and ")}.`],
+    ];
+    for (const [path, list, fallback] of named) {
+      for (const kind of list) {
+        if (!kinds.includes(kind)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path,
+            message: `names the artifact kind "${kind}", which workspace.artifacts does not define; its kinds are ${kinds.join(", ")}. ${fallback}`,
+          });
+        }
+      }
+    }
+    for (const kind of profile.lifecycle.corrected) {
+      if (profile.lifecycle.external.includes(kind)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["lifecycle", "corrected"],
+          message:
+            `"${kind}" is listed as external, and the server never writes an external kind, so an overwrite of it cannot be recorded as a correction. ` +
+            `When the profile does not set it, corrected defaults to ${DEFAULT_CORRECTED.join(" and ")}.`,
+        });
       }
     }
 

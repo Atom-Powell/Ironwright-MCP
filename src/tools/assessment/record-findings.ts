@@ -115,7 +115,7 @@ async function recordFindings(args: z.infer<typeof InputObject>, context: ToolCo
 
     const record = await findAssessmentById(context.graph, ac, args.assessmentId);
     const state = await readAssessmentState(context.graph, ac, record);
-    const check = findingsPrecondition(state, ac.profile.lifecycle.status, `${assessments.name} where ${assessments.columns.assessmentId} is "${args.assessmentId}"`);
+    const check = findingsPrecondition(state, ac.profile.lifecycle, `${assessments.name} where ${assessments.columns.assessmentId} is "${args.assessmentId}"`);
     if (!check.ok) return refusalResult(TOOL, STAGE, record?.assessmentId ?? args.assessmentId, check);
     const item = record!;
     // The id as the list stores it, which is what findings are filed under and the journal is keyed by.

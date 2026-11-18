@@ -15,7 +15,7 @@ export const READ_INPUT_SCHEMA = {
   kind: z
     .string()
     .min(1)
-    .describe('An artifact kind the profile names, for example "dossier". "publication" is allowed and is returned only if its bytes decode as UTF-8 text.'),
+    .describe('An artifact kind the profile names, for example "dossier". A kind produced outside this server, such as "publication", is allowed and is returned only if its bytes decode as UTF-8 text.'),
 } satisfies z.ZodRawShape;
 
 export const READ_OUTPUT_SCHEMA = {

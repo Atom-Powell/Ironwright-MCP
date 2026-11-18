@@ -282,6 +282,17 @@ server application's grant must hold `write` for them. Widen it with
 artifact content is capped at 4 MiB, and the `publication` kind is never written by this server,
 only verified.
 
+The workflow itself is the profile's. Three optional settings under `lifecycle` say which
+artifact kinds each stage waits on (`gates`, with `findings`, `provisional` and `completed`), which
+kinds are produced outside the server (`external`) and which are recorded as a correction when
+overwritten (`corrected`). A profile that sets none gets the vendor risk workflow: findings and a
+provisional status wait on `dossier`, completion on `dossier` and `publication`, `publication` is
+external, and an overwritten `dossier` is a correction. The lists need not be about vendors at
+all. `examples/profiles/msp-client-onboarding.json` and `examples/profiles/msp-security-incident.json`
+run a client onboarding and an incident record on the same tools, with their own list names,
+column names, kinds and gates. The tool and field names do not change with the profile, so the
+party a case is about is passed as `vendor` whatever the lists call it.
+
 Provisioning the three lists from the profile is not built. An operator creates them by hand, or
 uses the probe's seed (`npm run probe:assessment:seed`, under `scripts/assessment-probe/`) as a
 pattern.

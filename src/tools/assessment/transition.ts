@@ -20,7 +20,7 @@ export const TRANSITION_INPUT_SCHEMA = {
   target: z
     .enum(["completed", "provisional"])
     .describe(
-      'The status to move to, for example "completed", which needs the dossier and the publication present and is reached from in progress or from provisional, or "provisional", which needs only the dossier and is reached from in progress.',
+      'The status to move to, for example "completed", which is reached from in progress or from provisional and needs the artifacts the profile\'s completed gate names, by default the dossier and the publication, or "provisional", which is reached from in progress and needs those its provisional gate names, by default the dossier.',
     ),
   disposition: z.string().min(1).describe('One of the profile\'s disposition labels, for example "Approved with conditions".'),
   risk: z.string().min(1).describe('One of the profile\'s risk labels for the overall risk, for example "Medium".'),
@@ -108,7 +108,7 @@ async function transitionAssessment(args: z.infer<typeof InputObject>, context: 
       return { structuredContent: output, content: [{ type: "text" as const, text }] };
     }
 
-    const check = transitionPrecondition(state, ac.profile.lifecycle.status, args.target, `${listName} where ${columns.assessmentId} is "${args.assessmentId}"`);
+    const check = transitionPrecondition(state, ac.profile.lifecycle, args.target, `${listName} where ${columns.assessmentId} is "${args.assessmentId}"`);
     if (!check.ok) return refusalResult(TOOL, STAGE, assessmentId, check);
     const item = record!;
 

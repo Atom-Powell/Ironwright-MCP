@@ -49,12 +49,47 @@ describe("assessment profile refusals", () => {
     expectIssue(broken((p) => { p.assessmentId.template = "{prefix}-{vendor}"; }), "assessmentId.template", /vendor/);
   });
 
-  it("refuses artifacts with no dossier", () => {
-    expectIssue(broken((p) => { delete p.workspace.artifacts.dossier; }), "workspace.artifacts.dossier", /the module needs/);
+  // The gates default to the vendor risk workflow, so a profile that sets none still needs the
+  // two kinds that workflow names, and is told which gate asks for them.
+  it("refuses a profile that sets no gates and defines no dossier, naming the gates that default to it", () => {
+    const input = broken((p) => { delete p.workspace.artifacts.dossier; });
+    expectIssue(input, "lifecycle.gates.findings", /names the artifact kind "dossier", which workspace\.artifacts does not define/);
+    expectIssue(input, "lifecycle.gates.findings", /defaults to dossier/);
+    expectIssue(input, "lifecycle.corrected", /"dossier"/);
   });
 
-  it("refuses artifacts with no publication", () => {
-    expectIssue(broken((p) => { delete p.workspace.artifacts.publication; }), "workspace.artifacts.publication", /the module needs/);
+  it("refuses a profile that sets no gates and defines no publication, naming the gate and the external list", () => {
+    const input = broken((p) => { delete p.workspace.artifacts.publication; });
+    expectIssue(input, "lifecycle.gates.completed", /names the artifact kind "publication", which workspace\.artifacts does not define/);
+    expectIssue(input, "lifecycle.external", /"publication"/);
+  });
+
+  it("refuses a gate that names a kind the profile does not define, listing the kinds it does", () => {
+    expectIssue(
+      broken((p) => { p.lifecycle.gates = { findings: ["dossier"], provisional: ["dossier"], completed: ["dossier", "sign_off"] }; }),
+      "lifecycle.gates.completed",
+      /names the artifact kind "sign_off", which workspace\.artifacts does not define; its kinds are dossier, executive_summary, publication/,
+    );
+  });
+
+  it("refuses a completed gate that names no kind, since completion would then be verified against nothing", () => {
+    expectIssue(broken((p) => { p.lifecycle.gates = { findings: [], provisional: [], completed: [] }; }), "lifecycle.gates.completed", /at least one/);
+  });
+
+  it("refuses a kind listed both as corrected and as external, since the server never writes an external kind", () => {
+    expectIssue(broken((p) => { p.lifecycle.corrected = ["dossier", "publication"]; }), "lifecycle.corrected", /"publication" is listed as external/);
+  });
+
+  // The operator wrote only external here. The issue lands on corrected, a setting they never
+  // wrote, so it has to say where the dossier in it came from.
+  it("says corrected defaults to dossier when an external dossier collides with a corrected the profile never set", () => {
+    expectIssue(broken((p) => { p.lifecycle.external = ["publication", "dossier"]; }), "lifecycle.corrected", /"dossier" is listed as external.*corrected defaults to dossier/);
+  });
+
+  it("refuses gates that set one stage and not the others, saying the three are set together", () => {
+    const input = broken((p) => { p.lifecycle.gates = { findings: ["dossier"] }; });
+    expectIssue(input, "lifecycle.gates.provisional", /a profile that sets gates sets all three/);
+    expectIssue(input, "lifecycle.gates.completed", /a profile that sets gates sets all three/);
   });
 
   it("refuses a subfolder template that starts with a slash", () => {

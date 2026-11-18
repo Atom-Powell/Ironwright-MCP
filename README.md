@@ -54,6 +54,10 @@ takes one assessment from open to completed against a simulated tenant and print
 and `npm run sim` leaves that server running on `http://127.0.0.1:3939/mcp` for any MCP client.
 `docs/SIMULATOR.md` says what the simulation is copied from and what it cannot show.
 
+The workflow those tools run is the profile's, not the code's. `examples/profiles/` holds three
+assessment profiles: vendor risk, a client onboarding and a security incident record. Set
+`SIM_PROFILE` to one of them and `npm run sim` serves that workflow on the same seven tools.
+
 Running from a build takes two commands rather than one, because `npm start` runs the compiled
 output and does not compile it. Run `npm run build:prod` first, then `npm start`. Use `build:prod`
 rather than `build` for anything you keep or deploy: `npm run build` also emits `dist/setup/`, the

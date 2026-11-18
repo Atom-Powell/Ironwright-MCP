@@ -296,6 +296,57 @@ describe("overlapping lifecycle calls on one assessment", () => {
     expect(journal.filter((entry) => entry.operation === "folder_created" && entry.stage === "EXECUTIVE_SUMMARY").map((entry) => entry.target)).toEqual([published]);
   });
 
+  // The same seven tools under a profile that names its own lists, kinds and gates. Nothing in
+  // the code knows what an intake or a signed handover is; the shipped example profile does.
+  it("runs a client onboarding end to end under a profile that defines its own workflow", async () => {
+    const d = deployment({ profilePath: "examples/profiles/msp-client-onboarding.json" });
+    const P = "client-onboarding";
+    const id = structured(await runOpenAssessment({ profileId: P, vendor: "Contoso Dental", scope: "Managed IT" }, d.context)).assessmentId as string;
+    expect(id).toBe("ONB-2026-00001");
+    const root = `Clients/Contoso Dental/Onboarding/${id}`;
+
+    // Findings wait on the intake, by this profile's gate.
+    const early = await runRecordFindings({ profileId: P, assessmentId: id, findings: FINDINGS, summary: "Two issues." }, d.context);
+    expect(early.isError).toBe(true);
+    expect(text(early)).toContain("expected the intake present at its canonical path");
+
+    expect(structured(await runSaveAssessmentArtifact({ profileId: P, assessmentId: id, kind: "intake", content: "# Intake\n" }, d.context))).toMatchObject({
+      operation: "created",
+      stage: "INTAKE",
+      path: `${root}/Intake/Contoso Dental_Intake.md`,
+    });
+    // The intake is a kind this profile lists as corrected.
+    expect(structured(await runSaveAssessmentArtifact({ profileId: P, assessmentId: id, kind: "intake", content: "# Intake, revised\n" }, d.context)).stage).toBe("CORRECTION");
+    expect(structured(await runRecordFindings({ profileId: P, assessmentId: id, findings: FINDINGS, summary: "Two issues." }, d.context))).toMatchObject({ created: 2 });
+
+    // The signed handover is the client's document. The server refuses to write it.
+    const forged = await runSaveAssessmentArtifact({ profileId: P, assessmentId: id, kind: "handover", content: "signed" }, d.context);
+    expect(forged.isError).toBe(true);
+    expect(text(forged)).toContain("The handover is not written by this server");
+
+    // Awaiting Handover, this profile's provisional status, waits on the runbook as well.
+    const noRunbook = await runTransitionAssessment({ profileId: P, assessmentId: id, target: "provisional", disposition: "Onboarded with exceptions", risk: "Low" }, d.context);
+    expect(text(noRunbook)).toContain("expected the runbook present at its canonical path");
+    structured(await runSaveAssessmentArtifact({ profileId: P, assessmentId: id, kind: "runbook", content: "# Runbook\n" }, d.context));
+    expect(structured(await runTransitionAssessment({ profileId: P, assessmentId: id, target: "provisional", disposition: "Onboarded with exceptions", risk: "Low" }, d.context)).status).toBe("Awaiting Handover");
+
+    // Completion waits on the signed handover, which someone other than this server uploads.
+    expect(structured(await runVerifyPublication({ profileId: P, assessmentId: id }, d.context))).toMatchObject({ kind: "handover", present: false });
+    const noHandover = await runTransitionAssessment({ profileId: P, assessmentId: id, target: "completed", disposition: "Onboarded", risk: "Low" }, d.context);
+    expect(text(noHandover)).toContain("expected the handover present at its canonical path");
+    d.sim.putFile(`${root}/Handover/Contoso Dental_${id}_Signed_Handover.pdf`, bytes("pdf bytes"));
+    expect(structured(await runVerifyPublication({ profileId: P, assessmentId: id }, d.context)).present).toBe(true);
+
+    expect(structured(await runTransitionAssessment({ profileId: P, assessmentId: id, target: "completed", disposition: "Onboarded", risk: "Low" }, d.context))).toMatchObject({
+      transitioned: true,
+      previousStatus: "Awaiting Handover",
+      status: "Completed",
+    });
+    expect(d.sim.listItems("Onboardings")[0]!.fields).toMatchObject({ OnboardingId: id, Status: "Completed", Outcome: "Onboarded", State: "LIFECYCLE" });
+    expect(d.sim.listItems("Clients")).toHaveLength(1);
+    expect(d.sim.listItems("Onboarding Issues")).toHaveLength(2);
+  });
+
   it("orders a save and a record_findings call for one assessment typed in two cases", async () => {
     const d = deployment();
     const id = await opened(d);

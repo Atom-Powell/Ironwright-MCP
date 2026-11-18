@@ -174,6 +174,15 @@ The code holds invariants and the profile holds every convention a customer woul
 theirs; no customer constant enters the code. Spec:
 `docs/superpowers/specs/2026-11-06-domain-platform-and-assessment-domain-design.md`.
 
+Amended 2026-11-17: the assessment module's workflow is itself profile data. The module had held
+one workflow's vocabulary, a dossier and a publication, which is a convention a customer would
+recognize as theirs. Which artifact kinds gate each stage, which are produced outside the server
+and which are corrected when overwritten are now settings of the profile, defaulting to vendor
+risk, so one module serves the record keeping of a managed service provider: a client onboarding
+or an incident record is a profile, not a module. The identity boundary does not move with it.
+What a service provider administers, as against what it records, stays out of reach by design.
+Spec: `docs/superpowers/specs/2026-11-17-profile-defined-lifecycle-design.md`.
+
 **Setup.** Two phases, because a live run proved Graph refuses a delegated token on the per-site
 grant endpoint even for a Global Administrator. A separate grant-issuer application holds
 `Sites.FullControl.All` and issues that grant with an app-only token, so the server's own
@@ -226,12 +235,13 @@ the rule now covers the assessment item and the findings as well as the files.
 | `read_assessment_artifact` | read | The persisted text and its hash, for the auditor |
 | `record_findings` | lifecycle | One item per finding, keyed so a retry updates; writes the summary |
 | `transition_assessment` | lifecycle | Completed needs dossier and publication present and is reached from in progress or provisional; provisional needs the dossier |
-| `verify_publication` | read | What is at the publication's canonical path |
+| `verify_publication` | read | What is at the canonical path of an artifact produced outside the server, by default the publication |
 | `get_assessment` | read | By id: status, artifact presence, what each lifecycle tool's precondition finds and the journal summary, with the findings and journal entries on request. Or a listing by vendor or by status |
 
 A profile is `compliance` (the default: workbook, taxonomy, naming, deliverables), `library`
 (site and library only) or `assessment` (a site, a library, a workspace, three lists and the
-lifecycle labels). A library-only profile works with `inventory_tree`, `query_repository`'s
+lifecycle: its labels, and since phase 10 which artifact kinds gate each stage, which are produced
+outside the server and which are corrected when overwritten). A library-only profile works with `inventory_tree`, `query_repository`'s
 `empty_folders` question and the two custom plan tools, and the four tools that accept a library
 profile accept an assessment profile too; every other tool refuses a library profile before any
 Graph request, and `tests/tools/profile-kinds.test.ts` makes every tool declare which it is.
@@ -336,6 +346,12 @@ frozen at the end of `docs/OPEN-ITEMS.md`.
    and the grant, 9b the core (modules, site sets, inbound authentication, the lifecycle kind, the
    Graph operations, the journal), 9c the assessment module, 9d ingress and Copilot Studio contact.
    The CPA practice domain follows as its own phase once 9 is verified live.
+10. **Profile defined lifecycles**, added 2026-11-17 for the pilot at a managed service provider and
+   numbered last for the same reason 9 was. The assessment module's gates, its external kinds and
+   its corrected kinds become profile data, so the seven tools run a client onboarding or an
+   incident record as they run vendor risk, per
+   `docs/superpowers/specs/2026-11-17-profile-defined-lifecycle-design.md`. One site per client is
+   not in it: that is the multi-site work that follows 9, which a service provider now needs too.
 8. **Evaluation suite**, whose questions are already written in `docs/EVALUATION-QUESTIONS.md`, so
    that phase 3 had a concrete target rather than inventing its own test afterward.
 

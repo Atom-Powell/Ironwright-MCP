@@ -1,0 +1,50 @@
+{
+  "kind": "assessment",
+  "profileId": "client-onboarding",
+  "sites": [
+    {
+      "siteUrl": "https://contoso.sharepoint.com/sites/Example",
+      "library": "Documents"
+    }
+  ],
+  "workspace": {
+    "root": "Clients/{vendorFolder}/Onboarding/{assessmentId}",
+    "subfolders": ["Intake", "Evidence", "Handover"],
+    "artifacts": {
+      "intake": "Intake/{vendor}_Intake.md",
+      "access_review": "Evidence/{assessmentId}_Access_Review.md",
+      "runbook": "Handover/{vendor}_Runbook.md",
+      "handover": "Handover/{vendorFolder}_{assessmentId}_Signed_Handover.pdf"
+    }
+  },
+  "assessmentId": {
+    "prefix": "ONB",
+    "template": "{prefix}-{yyyy}-{item:5}"
+  },
+  "lists": {
+    "vendors": { "name": "Clients", "columns": { "folderName": "FolderName" } },
+    "assessments": {
+      "name": "Onboardings",
+      "columns": {
+        "assessmentId": "OnboardingId", "vendorFolder": "ClientFolder", "scope": "Scope", "status": "Status",
+        "state": "State", "disposition": "Outcome", "risk": "Risk", "summary": "Summary"
+      }
+    },
+    "findings": {
+      "name": "Onboarding Issues",
+      "columns": { "assessmentId": "OnboardingId", "findingKey": "IssueKey", "observation": "Observation", "risk": "Risk", "recommendation": "Action" }
+    }
+  },
+  "lifecycle": {
+    "status": { "inProgress": "In Progress", "completed": "Completed", "provisional": "Awaiting Handover" },
+    "dispositions": ["Onboarded", "Onboarded with exceptions", "Withdrawn"],
+    "risks": ["Low", "Medium", "High"],
+    "gates": {
+      "findings": ["intake"],
+      "provisional": ["intake", "runbook"],
+      "completed": ["intake", "runbook", "handover"]
+    },
+    "external": ["handover"],
+    "corrected": ["intake"]
+  }
+}

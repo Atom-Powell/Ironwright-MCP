@@ -224,6 +224,57 @@ describe("save_assessment_artifact", () => {
     expect(journal.map((entry) => entry.stage)).toEqual(["EXECUTIVE_SUMMARY", "EXECUTIVE_SUMMARY"]);
   });
 
+  // Which kinds are produced outside the server and which are corrected when overwritten are the
+  // profile's to say. The example profile says nothing and gets the vendor risk workflow.
+  describe("the profile's lifecycle", () => {
+    function contextWith(graph: GraphClient, lifecycle: Record<string, unknown>): ToolContext {
+      const profile = JSON.parse(readFileSync("examples/profiles/assessment-example.json", "utf8")) as { lifecycle: Record<string, unknown> };
+      Object.assign(profile.lifecycle, lifecycle);
+      const profiles = createProfileRegistry([{ source: "assessment-example.json", contents: profile }], SITE_URL);
+      return createFakeToolContext({ profiles, graph });
+    }
+    const overwriteOf = (path: string, item: (eTag: string, size: number) => Record<string, unknown>, state: string): ScriptEntry[] => [
+      contentRead(path, new TextEncoder().encode("older text")),
+      { method: "putBytes", pathIncludes: `/drives/drive-1/root:/${path}:/content`, headersInclude: { "if-match": '"e1"' }, response: item('"e2"', BYTES.byteLength) },
+      itemRead(path, item('"e2"', BYTES.byteLength)),
+      contentRead(path, BYTES),
+      fieldsPatch(state),
+    ];
+    const summaryItem = (eTag: string, size: number): Record<string, unknown> => fileItem(`${ID}_Executive_Summary.md`, eTag, size);
+
+    it("refuses a kind the profile lists as external before any Graph request", async () => {
+      const { graph } = createScriptedGraph([]);
+
+      const result = await runSaveAssessmentArtifact(
+        { profileId: PROFILE, assessmentId: ID, kind: "executive_summary", content: CONTENT },
+        contextWith(graph, { external: ["publication", "executive_summary"] }),
+      );
+
+      expect(result.isError).toBe(true);
+      expect(resultText(result)).toBe("The executive_summary is not written by this server: the profile lists it as produced outside it, and verify_publication checks it. Nothing was written.");
+      expect(graph.requests()).toBe(0);
+    });
+
+    it("records an overwritten dossier under its own stage when the profile lists no corrected kind", async () => {
+      const { graph } = createScriptedGraph([...stateScript({ dossier: dossierItem('"e1"', 10) }), ...overwriteOf(DOSSIER_PATH, dossierItem, "DOSSIER")]);
+
+      const result = await runSaveAssessmentArtifact({ profileId: PROFILE, assessmentId: ID, kind: "dossier", content: CONTENT }, contextWith(graph, { corrected: [] }));
+
+      expect(result.structuredContent).toMatchObject({ operation: "overwritten", stage: "DOSSIER" });
+    });
+
+    it("records CORRECTION for an overwrite of whichever kind the profile lists as corrected", async () => {
+      const { graph } = createScriptedGraph([...stateScript({ summary: summaryItem('"e1"', 10) }), ...overwriteOf(SUMMARY_PATH, summaryItem, "CORRECTION")]);
+
+      const result = await runSaveAssessmentArtifact(
+        { profileId: PROFILE, assessmentId: ID, kind: "executive_summary", content: CONTENT },
+        contextWith(graph, { corrected: ["executive_summary"] }),
+      );
+
+      expect(result.structuredContent).toMatchObject({ operation: "overwritten", stage: "CORRECTION" });
+    });
+  });
+
   describe("content type", () => {
     /** The example profile plus a kind whose path is not markdown, which no shipped example names. */
     function contextWithNotes(graph: GraphClient): ToolContext {

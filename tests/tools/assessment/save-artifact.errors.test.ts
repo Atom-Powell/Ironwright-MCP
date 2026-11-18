@@ -36,7 +36,7 @@ describe("save_assessment_artifact failures", () => {
     const result = await runSaveAssessmentArtifact({ ...INPUT, kind: "publication" }, assessmentToolContext(graph));
 
     expect(result.isError).toBe(true);
-    expect(resultText(result)).toContain("The publication is written by the consumer's publisher at its canonical path; verify_publication checks it.");
+    expect(resultText(result)).toBe("The publication is not written by this server: the profile lists it as produced outside it, and verify_publication checks it. Nothing was written.");
     expect(graph.requests()).toBe(0);
   });
 

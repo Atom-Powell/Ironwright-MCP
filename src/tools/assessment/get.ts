@@ -166,7 +166,7 @@ export async function runGetAssessment(input: unknown, context: ToolContext): Pr
         ...(artifact.occupant === undefined ? {} : { occupant: artifact.occupant }),
       }));
       // The tools' own preconditions over the state just read, so this cannot disagree with them.
-      const readiness = lifecycleReadiness(state, ac.profile.lifecycle.status, `${listName} where ${columns.assessmentId} is "${args.assessmentId}"`);
+      const readiness = lifecycleReadiness(state, ac.profile.lifecycle, `${listName} where ${columns.assessmentId} is "${args.assessmentId}"`);
 
       const wantFindings = args.include?.includes("findings") === true;
       const wantJournal = args.include?.includes("journal") === true;
