@@ -52,6 +52,22 @@ export function loadGraphCredentials(env: NodeJS.ProcessEnv): GraphCredentialsCo
  * URL is what an operator already pasted into the setup command, not a secret.
  */
 export function loadGrantedSiteUrl(env: NodeJS.ProcessEnv): string {
+  return loadGrantedSiteUrls(env)[0]!;
+}
+
+/**
+ * Every site the server's application is granted, from the one variable. A
+ * deployment is usually granted one. It may be granted several, a site per
+ * department for a consumer whose departments each keep their own, and then
+ * they are listed here separated by commas, spaces or new lines. Each profile
+ * still addresses one of them; this is the set a profile's site must be in.
+ *
+ * Measured 2026-11-17: one application holds a grant on each of two sites and
+ * reaches both under one token, and is refused a site it holds no grant on.
+ * So the list is a statement of what was granted, checked at startup, and the
+ * boundary itself stays where it was, in SharePoint.
+ */
+export function loadGrantedSiteUrls(env: NodeJS.ProcessEnv): string[] {
   const value = env.IW_SITE_URL;
   if (!present(value)) {
     throw new Error(
@@ -60,7 +76,15 @@ export function loadGrantedSiteUrl(env: NodeJS.ProcessEnv): string {
         "answer which site it can reach, without it.",
     );
   }
-  return value;
+  const urls = value.split(/[\s,]+/).filter((entry) => entry.length > 0);
+  for (const url of urls) {
+    try {
+      new URL(url);
+    } catch {
+      throw new Error(`IW_SITE_URL names "${url}", which is not a URL. It holds the site the server is granted, or several separated by commas or spaces.`);
+    }
+  }
+  return [...new Set(urls)];
 }
 
 /**
