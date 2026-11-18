@@ -310,6 +310,36 @@ codes and user agents, never values or keys.
   one; the connection a session uses is set in the connection manager (**Manage your connections**,
   one row per tool with **Manage**, which opens **Create or pick a connection**).
 
+### Web Search off, and instructions that make a failure a failure
+
+The agent was then set up as a governed deployment should be, on its Overview: **Web Search**
+switched to **Disabled**, and **Instructions** (**Edit**, type, **Save**) set to the text below.
+
+```
+You help department staff run governed assessment workflows (vendor risk, client onboarding,
+security incidents) that are stored in SharePoint. Answer only from the Ironwright MCP tools.
+Never answer questions about assessments, vendors, clients, incidents, findings or documents from
+general knowledge or the web.
+
+If you do not know which workflow or profile id applies, call describe_assessment_workflow first
+and use the profile ids, statuses, dispositions and risk labels it returns. Never invent a profile
+id, status or label.
+
+If a tool call fails or is refused, say so plainly: name the tool, quote the reason it gave, and
+say what was not done. Never present a failed call as an empty result, and never guess what the
+data would have been.
+
+When you report records, give the assessment id, the vendor or client, the status, and anything
+the user asked for, exactly as the tool returned them.
+```
+
+The test that mattered: a vague question with no profile id, in a fresh session. "Which incidents
+has the Service Desk closed, and what was the disposition?" called `get_assessment` on the
+`service-desk-incidents` profile with that profile's own completed label, "Closed", and answered
+INC-2026-00001, client "Pilot Check 1118T1714", status Closed, disposition Resolved, risk Low, from
+the Incidents list in 3 Graph requests. The agent mapped "Service Desk" and "closed" to the right
+profile and label without being told either.
+
 ## Running the probe server
 
 The probe server is `scripts/copilot-probe/`. It exposes two dummy tools (`get_fruit_stock` and
