@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeProfileSites, SiteEntrySchema } from "../../../src/domain/profile/base.js";
-import { loadAnyProfile } from "../../../src/domain/profile/library.js";
+import { loadAnyProfile } from "../../../src/profiles/registry.js";
 import { readFileSync } from "node:fs";
 
 const example = () => JSON.parse(readFileSync("examples/profiles/example.json", "utf8")) as Record<string, unknown>;

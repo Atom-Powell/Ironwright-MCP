@@ -24,6 +24,17 @@ describe("checkStartupIdentity failures", () => {
     expect(lines[0]).toContain("will run on first use");
   });
 
+  it("warns and continues when the token request ran out of time, which the provider bounds", async () => {
+    const lines: string[] = [];
+    const ranOut = new Error("The token endpoint did not answer within 15000 ms.");
+
+    await expect(checkStartupIdentity({ getToken: () => Promise.reject(ranOut) }, (line) => lines.push(line))).resolves.toBe("skipped");
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("did not answer within 15000 ms");
+    expect(lines[0]).toContain("will run on first use");
+  });
+
   it("warns once and continues when the network fails", async () => {
     const lines: string[] = [];
 

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { loadAnyProfile } from "../../src/domain/profile/library.js";
-import { createProfileRegistry, ProfileRegistryError } from "../../src/profiles/registry.js";
+import { createProfileRegistry, ProfileRegistryError, loadAnyProfile } from "../../src/profiles/registry.js";
 
 const SITE = "https://contoso.sharepoint.com/sites/Example";
 const example = () => JSON.parse(readFileSync("examples/profiles/example.json", "utf8")) as Record<string, unknown>;
@@ -28,7 +27,7 @@ describe("registry dispatch by kind, refused", () => {
     expect((caught as ProfileRegistryError).issues[0]).toMatch(/sites\[1\].*sites\/Other.*grant covers/);
   });
 
-  it("refuses a null kind through both dispatchers, so they agree", () => {
+  it("refuses a null kind, at the registry and at the loader the registry calls", () => {
     const input = { ...example(), kind: null };
     expect(() => createProfileRegistry([{ source: "x.json", contents: input }], SITE)).toThrow(/null/);
     expect(() => loadAnyProfile(input)).toThrow(/null/);

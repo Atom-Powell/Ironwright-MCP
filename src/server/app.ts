@@ -11,6 +11,11 @@ export interface AppOptions {
   serverFactory: () => McpServer;
   /** Required, so a caller cannot build an unauthenticated app by omission. */
   auth: InboundAuthConfig;
+  /**
+   * The server's version, reported by GET /health when given. A constant of
+   * this process, read once at startup, so reporting it reaches nothing.
+   */
+  version?: string;
 }
 
 export function createApp(opts: AppOptions): express.Express {
@@ -36,8 +41,12 @@ export function createApp(opts: AppOptions): express.Express {
   // and called inline in this handler, so the rule above binds whoever touches
   // this route next by convention, not by anything the suite enforces past that
   // one seam.
+  //
+  // The version is the one addition, and it is not a check: it is a string this process already
+  // holds. An operator asking which build is answering should not need a shell on the host.
+  const health = opts.version === undefined ? { status: "ok" } : { status: "ok", version: opts.version };
   app.get("/health", (_req, res) => {
-    res.status(200).json({ status: "ok" });
+    res.status(200).json(health);
   });
 
   // After /health and before everything else, the 404 and 405 handlers included,

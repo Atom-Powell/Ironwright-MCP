@@ -4,8 +4,9 @@ import type { ToolContext } from "../context.js";
 import { describeToolFailure, type FailureSubject } from "../errors.js";
 import { readDriveItem } from "../../graph/items.js";
 import { downloadDriveItem } from "../../graph/content.js";
+import { fileNameOf } from "../../domain/assessment/templates.js";
 import { profileArtifactKinds, resolveAssessmentContext, unknownKindText } from "./context.js";
-import { findAssessmentById, recordWorkspacePaths } from "./read-state.js";
+import { artifactAt, findAssessmentById, recordWorkspacePaths } from "./read-state.js";
 import { sha256Hex } from "./hash.js";
 
 export const READ_INPUT_SCHEMA = {
@@ -14,7 +15,7 @@ export const READ_INPUT_SCHEMA = {
   kind: z
     .string()
     .min(1)
-    .describe('An artifact kind the profile names, for example "dossier". "publication" is allowed and is returned only if its bytes decode as UTF-8 text.'),
+    .describe('An artifact kind the profile names, for example "dossier". A kind produced outside this server, such as "publication", is allowed and is returned only if its bytes decode as UTF-8 text.'),
 } satisfies z.ZodRawShape;
 
 export const READ_OUTPUT_SCHEMA = {
@@ -56,10 +57,20 @@ export async function runReadAssessmentArtifact(input: unknown, context: ToolCon
       return failure(`${listName} item ${record.itemId} lacks the Title or vendor folder the profile's paths are built from, so no artifact path could be computed. Nothing was read from the drive.`);
     }
     const path = paths.artifacts[args.kind]!;
+    // The id as the list stores it, which the lookup can match in another case than the caller's.
+    const assessmentId = record.assessmentId;
 
-    const lookup = await readDriveItem(context.graph, { driveId: ac.driveId, path });
-    if (lookup.kind !== "found") return failure(`No file is at ${path}, where the profile puts the ${args.kind} for ${args.assessmentId}.`);
-    if (lookup.item.isFolder) return failure(`A folder, not a file, is at ${path}, where the profile puts the ${args.kind} for ${args.assessmentId}.`);
+    // The same answer every lifecycle tool acts on, so the auditor is never handed a file they
+    // refuse to recognize.
+    const at = artifactAt(await readDriveItem(context.graph, { driveId: ac.driveId, path }), path);
+    if (!at.present) {
+      if (at.occupant === undefined) return failure(`No file is at ${path}, where the profile puts the ${args.kind} for ${assessmentId}.`);
+      if (at.occupant.isFolder) return failure(`A folder, not a file, is at ${path}, where the profile puts the ${args.kind} for ${assessmentId}.`);
+      return failure(
+        `The lookup of ${path} answered a file named "${at.occupant.name}", not "${fileNameOf(path)}", the name the profile gives the ${args.kind} for ${assessmentId}. Its content was not read.`,
+      );
+    }
+    const lookup = { item: at.item };
 
     const bytes = await downloadDriveItem(context.graph, { driveId: ac.driveId, workbookPath: path });
     const sha256 = sha256Hex(bytes);
@@ -71,7 +82,7 @@ export async function runReadAssessmentArtifact(input: unknown, context: ToolCon
     }
 
     const output = {
-      assessmentId: args.assessmentId,
+      assessmentId,
       kind: args.kind,
       path,
       content,

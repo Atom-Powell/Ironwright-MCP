@@ -331,7 +331,7 @@ probe server first and the real server second, with the call trace as the eviden
 
 ## Assumptions
 
-Rows L and F were measured on 2026-11-07 by the probe under `scripts/assessment-probe/`, run against
+Rows L and F were measured on 2026-11-07, and row L4 on 2026-11-17, by the probe under `scripts/assessment-probe/`, run against
 the Ironwright developer tenant under a token the runner verified to carry exactly `Sites.Selected`.
 The redacted recording and report are in `evidence/2026-11-07-assessment-probe/` beside this spec,
 and the findings that changed the design are in the 2026-11-07 amendment at the end. Rows A and B
@@ -343,6 +343,7 @@ implementation plan that depends on it.
 | `Sites.Selected` reaches list items under the site for read, create and update | The state lists are the consumer's system of record | L1 | Confirmed 2026-11-07: read 200, create 201, fields update 200 (L1, L2a, L2b). Under the `read` role the create answered 403 `accessDenied` |
 | List item create returns the item with its integer id; a fields PATCH returns the updated fields | ID minting and every status update | L2 | Confirmed 2026-11-07: the body's `id` is the integer rendered as a string, `"2"`; the fields PATCH returned the whole fields object with the new value, and a single item read it back (L2a, L2b, L1b) |
 | A list query filtered on a field works on this grant, with or without the non indexed query header | Open by vendor and scope, lookup by ID | L3 | Amended 2026-11-07: without the header, 400 `invalidRequest` naming the column as not indexed; with `Prefer: HonorNonIndexedQueriesWarningMayFailRandomly`, 200 with the one item (L3a, L3b) |
+| A fields PATCH on a list item under `If-Match` answers 412 on a stale ETag, and its answer on success carries the new one | A lifecycle write to the assessment item must not overwrite an edit made since the tool read it | L4 | Confirmed 2026-11-17: 412 `resourceModified` under the eTag the create answered, the item read back unchanged, 200 with `@odata.etag` under the eTag just read, and 412 for the same stale write sent to the item itself (L4a to L4d). Evidence in `evidence/2026-11-17-list-if-match-probe/` |
 | Folder create by path with `conflictBehavior: fail` returns the item with an ETag and answers 409 on an existing folder | Additive workspace creation and the retry rule | F1 | Confirmed 2026-11-07: 201 with `eTag` in the body, 409 `nameAlreadyExists` on the repeat (F0, F1a, F1b) |
 | A small content PUT with `conflictBehavior: fail` refuses an occupied name with 409 | Create file never replaces | F2 | Confirmed 2026-11-07: 201 with `eTag` in the body, 409 `nameAlreadyExists` on the occupied name, and the content read back unchanged (F2a, F2b, F4) |
 | The same PUT under `If-Match` answers 412 on a stale ETag and returns the new ETag on success | Overwrite only under a precondition | F3 | Confirmed for the stale and current cases, 200 with a new `eTag` and 412 (F3a, F3b). Amended 2026-11-07 for the absent case: a PUT under `If-Match` to a path holding nothing created the file and answered 201 (F3c) |
@@ -517,3 +518,233 @@ and the third that can change the tenant beside `post`.
 **The site and drive are resolved on every call.** The module reads the site and the drive on each
 call, two reads, rather than caching a drive id, because nothing in the server caches a drive id
 across calls today and a stale one would be the ID navigation failure the project exists to avoid.
+
+## Amendments, 2026-11-16, from a code review of the phase 9 source
+
+A review of every source change from plan 9b through the campaign fixes read ten defects out of the
+code, and a review of the fixes on 2026-11-17 read ten more out of those. The amendments below are
+the design changes the two led to. Which findings are fixed and which wait is recorded in
+`docs/OPEN-ITEMS.md`, not here.
+
+**`{vendor}` renders without the characters SharePoint refuses.** The workspace placeholder
+`{vendor}` is rendered with the characters SharePoint refuses anywhere in a name removed, and
+nothing else changed. Rendered raw, a vendor named `Acme: Cloud` opened, because the root uses
+`{vendorFolder}`, and then failed every save with a name Graph refuses, with no tool to remove the
+assessment; a name holding `/` added a folder the journal never recorded. A dot or a run of spaces
+inside the name is left alone: the first fix ran `{vendor}` through the folder name sanitizing,
+which strips a trailing dot, and that would have moved the dossier of an assessment already open
+for `Acme Inc.` to a path holding no file. A consumer's publisher that builds the publication name
+itself must build it from the path `verify_publication` reports, not from the display name.
+`{vendor}` keeps a dot the name ends in, so the profile schema refuses a template in which it ends
+a path segment. One consequence is accepted: an assessment opened before this change for a vendor
+name holding a slash has its dossier under the folder the slash made, and the tools now look for
+it at the path without the slash. No such assessment exists outside the developer tenant.
+
+**A `.` or `..` path segment is refused, at load and before the first write.** `joinWorkspacePath`
+throws on one. The request URL is normalized before it is sent, so such a path addresses a
+different folder from the one the journal would record. The profile schema refuses a template
+holding either segment, trimmed as the join trims it, so the refusal is a startup message rather
+than a failure on every call. The folder name sanitizing strips trailing dots and the spaces
+between them together, so `. .` leaves nothing rather than `.`. `open_assessment` renders every
+path once before its first write, with a stand-in for the id, so a stored folder name the paths
+cannot hold is refused with nothing written, where it would have thrown after the vendor record,
+the item and the id existed.
+
+**Artifact presence names what else is at the path.** `ArtifactPresence` carries `eTag` and `size`
+only for the artifact itself, and an `occupant` (name, folder or file) when the lookup answered
+anything else. The campaign fix made a file whose name differs by case read as not present;
+`save_assessment_artifact` then called it a folder and the preconditions called the path not
+found. Both now say what the lookup answered.
+
+**A missing item is a refusal in every lifecycle tool.** `requireArtifact` returns a refusal when
+the drive was never read, because no item matched the id or the item lacks a field the paths need.
+It used to throw a message about the profile's artifact kinds, which `record_findings` and
+`transition_assessment` surfaced for a mistyped id.
+
+**The stored assessment id keys everything.** After the item is found, the journal, the Findings
+rows, the output, the prose and a refusal all use the id as the list stores it, in every tool that
+takes an id. The journal's partition key is case sensitive, and a caller's id in another case would
+have split one assessment's journal in two. `findAssessmentById` returns a record that carries the
+id, so no caller holds a fallback to the typed one.
+
+**`read_assessment_artifact` applies the exact name rule.** It refuses a file whose name differs
+from the one the template renders, as artifact presence does, and does not download it. It did its
+own lookup, so it handed the auditor a file the lifecycle tools refused to recognize.
+
+**`record_findings` is serialized per assessment**, with the lock `open_assessment` uses, for the
+same reason: the read of existing finding keys and the creates are separate requests, and nothing
+deletes a duplicate finding. The open lock's key is lowercased, so two spellings of one vendor queue
+behind each other. `open_assessment` then takes a second lock keyed on the folder it resolved,
+because the in progress lookup is by folder and two vendor records can store one folder name. The
+folder's lock is always taken inside the name's, so the two cannot wait on each other.
+
+**A vendor is one folder name.** `open_assessment` titles a new assessment with the vendor record's
+stored Title, not the caller's spelling. When no record has the Title given, it looks for a record
+already filing under the folder name that Title sanitizes to and refuses if there is one, naming
+it, where it used to create a second vendor record and then resume the first vendor's assessment.
+It refuses rather than merges because whether `Acme Inc.` and `Acme Inc` are one vendor is not the
+server's to decide. A record files under its stored folder name, or under its sanitized Title when
+that column is empty, so the lookup is two queries: the folder column, then a Title equal to the
+folder name whose column is empty. A Title that only sanitizes to the folder name, with an empty
+column, is found by neither; no filter expresses it. A vendor found by Title with no stored folder
+is filed under its stored Title sanitized, not the caller's spelling. The lookup runs only on the
+path that creates a vendor, and `docs/SETUP.md` names the folder name column among those to index.
+
+**What these rest on.** That a list `eq` filter matches text without regard to case is not probed;
+the campaign measured it for drive paths only. Every fix above is correct whichever way a list
+filter behaves, and matters only if it ignores case.
+
+## Amendments, 2026-11-17: the simulated tenant and what it led to
+
+A stateful stand-in for the tenant was built so the lifecycle could be run end to end without one,
+and the first run of the server against an MCP client that lists the tools before calling them
+found a defect no earlier test could. The changes below followed. Where each stands is in
+`docs/OPEN-ITEMS.md`.
+
+**A refusal's structure rides under `_meta`, not as structured content.** This supersedes the
+sentence above that a refusal "returns `isError` with that evidence as prose and as structured
+content, which the SDK's error path already permits". The SDK server skips output validation on an
+error result, and that half was pinned by a test. The SDK client does not: once it has listed the
+tools it validates any structured content against the tool's output schema, error or not (SDK
+1.30.0, `client/index.js`). Every agent host lists the tools, so a refusal reached such a client
+as a schema fault, `-32602`, with the evidence discarded. The campaign never saw it because its
+client calls tools without listing them. A refusal now carries its structure under
+`_meta["ironwright-mcp/refusal"]` and no structured content, and the prose is unchanged. This was
+an assumption about another module's output with evidence for one side of it only, which is the
+kind the assumption gate exists for. Whether Copilot Studio validates structured content, and what
+it does with `_meta`, is not probed and waits on plan 9d; the prose carries everything either way.
+
+**One lock per assessment.** `save_assessment_artifact`, `record_findings` and
+`transition_assessment` run one at a time for one assessment, under a lock keyed on the profile
+and the lowercased id. Each reads, decides and writes in separate requests, and the list item
+update carries no precondition, so two overlapping calls decided on a state the other was about to
+change: a save that started before a transition wrote its stage over the transition's, and the
+second of two first saves failed on the file the first had just created. The lock orders them
+within the process, which is every caller under one replica. It is not a substitute for `If-Match`
+on the list item, which still waits on its probe, and it does nothing about a person editing the
+item in the browser.
+
+**The state read is concurrent.** The workspace root and every artifact path are read together.
+They are independent reads, every lifecycle call makes all of them, and in sequence they were most
+of each call's wait: four round trips before a decision where there is now one.
+
+**A journal append that fails says what it follows.** The journal is appended after Graph confirms
+a write, so a failure to append follows a write that happened. It is raised as an error naming the
+operation and the target, and the tool reports that the write stands, that the journal lacks it,
+and that the call stopped there. It used to surface as the store's own message, which reads as a
+call that did nothing. A lifecycle tool that cannot journal stops; it does not go on to make
+writes the journal would also lack.
+
+**Each tool's precondition is defined once, and `get_assessment` reports all of them.** The
+preconditions moved into the domain layer as one function per tool, and the tools call them.
+`get_assessment` by id returns `readiness`: each lifecycle tool, whether its precondition held on
+the state that call read, and the evidence when it did not. It is the tool's own decision over the
+same state, so it cannot drift from the tool, and a test runs every tool after every report to hold
+that. It is a report of one read, not a promise: each tool reads the state again when called, a
+save still refuses a kind the profile does not name or a path something else holds, and a
+transition already made is reported by that tool as done although it shows as not ready.
+
+**`get_assessment` reads more back.** `include` takes `findings`, which reads the recorded
+findings and the summary from the lists, and `journal`, which returns every journal entry under the
+id. Nothing read the findings back before, so an auditor could read the dossier and not what was
+concluded from it, and the journal was reported only as counts. Both are opt in, because a status
+check should stay cheap. `status` lists every assessment holding a status across all vendors, the
+question of what is still open, from the list alone. It returns at most 200 and sets `truncated`
+when more exist, because completed assessments accumulate without bound and the paged query throws
+at its ceiling. Artifact presence carries `occupant` when the path holds something that is not the
+artifact, and one function, `artifactAt`, decides for every tool whether a lookup answered the
+artifact.
+
+**One profile loader, and more is refused at load.** The registry's dispatcher is the only loader;
+the second one beside the library schema, reached only by tests, is gone. An assessment profile is
+now refused at startup when the id prefix or the id template's own text holds a character a folder
+name or a table key refuses, when the id template has no `{item}`, when it ends in a dot or a
+space, when a workspace template's own text holds a character SharePoint refuses or a segment
+ending in a dot, when `{vendor}` ends a path segment, when two artifact kinds name one file, and
+when two of the three lists share a name. Each of these loaded before and failed later, at Graph or in the journal, after an open had
+already created the list item. Requiring `{item}` narrows what a profile may say: a template
+without it renders one id for every assessment, which the id lookup then refuses to choose between.
+
+**The server says which version it is, records each call, and bounds its startup wait.** The
+version is read from `package.json` and reported in the MCP handshake, the startup line and
+`GET /health`. Each tool call writes one line recording the tool, its kind, the profile, the
+assessment id, the outcome, the duration, the correlation id and the Graph request count, and
+nothing the caller sent or the tool answered. The two identifiers are recorded only as the server
+knows them, the profile id when it is configured and the assessment id when the tool answered with
+it, since either input field accepts any text. A token request is abandoned after 15 seconds, in
+the provider, so startup takes the path a failed token request already took. The bound is on the
+request and not on the startup check's wait for it: a check that merely stopped waiting left the
+request in flight for the first callers to queue behind, and would have discarded a late token
+carrying the wrong roles on a server already running, the case the Decision Record says never
+starts.
+
+**The simulated tenant is a test substrate, not evidence.** `scripts/sim/tenant.ts` answers the
+Graph requests the module sends from state it holds, and `docs/SIMULATOR.md` lists each simulated
+behavior as copied from a dated measurement or as modeled. It can show that the server's steps
+compose and that overlapping calls are ordered, which the scripted fake cannot. It cannot stand in
+the Assumptions table: a row there still needs a live probe or the real producer's output.
+
+## Amendments, 2026-11-17, from the list precondition probe
+
+**A list item write can carry a precondition, and this design did not use one.** Row L4 of the
+Assumptions table was measured after the design above was built, by four steps added to the probe.
+Graph refuses a fields PATCH sent under a stale `If-Match` with 412 `resourceModified`, at the
+address `updateListItemFields` already writes, and answers one sent under the current eTag with the
+item's new `@odata.etag`. The Decision Record's rule, an ETag precondition on every write, has
+therefore been reachable for the assessment item all along, and the module's unconditional update
+is a departure from it, not a limit of the platform. The lock per assessment above orders this
+server's own calls and stays; the precondition is what covers a person editing the item in the
+browser.
+
+What a lifecycle tool does when its write is refused this way was the operator's to choose, and
+is the sixth ruling in the section below.
+
+## Amendments, 2026-11-17: six rulings
+
+Each was a question a test could measure and not decide. Where each stands is in
+`docs/OPEN-ITEMS.md`.
+
+**The lifecycle rule says what the server can keep.** The Decision Record's amendment of
+2026-11-06 and the sentence every lifecycle tool carries said a tool overwrites only a file it
+created. The server holds no durable record of what it created: that record is the journal, and
+without a table store a restart empties it. A save has always overwritten whatever file sat at the
+artifact's path. The rule now reads that a tool creates records and files only at paths the server
+computes and changes an existing file or list item only under the ETag it just read. The first
+half is why a foreign file can be at that path only if someone put it at a path the server owns,
+and the second is why nothing changed since the tool's read is lost.
+
+**Provisional is not an end state.** It is where an assessment waits for its publication.
+`transition_assessment` reaches completed from in progress or from provisional, and provisional
+only from in progress. `open_assessment` returns the vendor's open assessment for a scope, which
+is the one in progress or, failing that, one parked as provisional. It asks in two queries of the
+three clause shape already measured, the second only on the way to creating an assessment, and
+does not send an `or` across a column, which this list has never been asked. A save and a
+findings call still require in progress: the ruling was about completion.
+
+**A folder a save brings back is journaled.** A content PUT under a missing folder recreates it
+(campaign s1, 2026-11-09). The save is kept, not refused, since the path is the server's own. A
+save that creates a file first reads each folder between the workspace root and the file and
+creates an absent one itself, with the folder create `open_assessment` uses, journaling it on
+that request's 201. The first build of this inferred the folder from its absence before the write
+and its presence after, which a review showed could claim a folder someone else had restored in
+between; a create request answers 409 for that folder, and it is not claimed. A file found where
+one of those folders belongs is refused before anything is written.
+
+**State is not validated.** A hand edited State stops no tool. State is a marker a person reads in
+the list; the tools decide on the status column and on what the drive holds.
+
+**A save that writes no file records no stage.** When the file already holds the content sent,
+nothing is written, the State column included. This supersedes the 9c amendment under which such
+a save set State to the kind's own stage when it read otherwise, which moved State backward from
+CORRECTION and from FINDINGS on a harmless retry. The repair that branch existed for, a State
+write that had failed after its file write, is given up with it.
+
+**A list item write refused by its precondition is refused in turn.** Every update of a list item
+is sent under `If-Match` with the eTag the item was read with, and one read without an eTag is
+not written at all. On a 412 the tool does not read again and retry, because the item changed
+under a decision already made and the caller decides whether it stands. `transition_assessment`
+has written nothing at that point and answers with the structured refusal. The other three may
+have written, so each says what stands: a save's file and its journal entry, the findings recorded
+before the one refused, the item an open created. A save still writes its file before the State
+update, so State never names a stage whose file was not written; the price is a save that can end
+with its file written and its stage unrecorded.

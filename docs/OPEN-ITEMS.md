@@ -13,7 +13,7 @@ ordered by when they will matter, not by when they were written.
 This table is the one place status lives. `CLAUDE.md`, the README and the PAI vault note point
 here and restate none of it, so a change of state is one edit in one file, made in the same commit
 as the sitting, merge, or decision that caused it. The table says where each phase is; the dated
-sections below say what was proven and what was not. Last updated 2026-11-07.
+sections below say what was proven and what was not. Last updated 2026-11-17.
 
 | Phase | State | Evidence |
 |---|---|---|
@@ -40,7 +40,12 @@ sections below say what was proven and what was not. Last updated 2026-11-07.
 | 9a Probes and the grant | Complete: probes L and F run live 2026-11-07, fifteen of seventeen steps as designed and the spec amended on the other two (`If-Match` on a content PUT does not guard an absent path; a filtered list query needs the non-indexed header); A3 and B1 stay unverified until 9d | `docs/superpowers/specs/evidence/2026-11-07-assessment-probe/`; sitting below; PR #24 |
 | 9b Core: modules, site sets, inbound authentication, lifecycle kind, journal | Complete against fakes, merged 2026-11-07; nothing in it has met a live tenant yet | PR #22, merged 2026-11-07 |
 | 9c Assessment module and the four Graph operations | Verified live 2026-11-08 on the main path: open, save, findings, verify, transition and both reads, 25 calls on the developer tenant. Three checks were not run and stay carried: the implicit parent folder, the publication name case, and an `executive_summary` save | PR #25; sitting below; `docs/superpowers/specs/evidence/2026-11-08-assessment-sitting/` |
-| Pre-EON test campaign | First run 2026-11-09: 8 scenarios on the developer tenant, 2 defects found (concurrent opens duplicated an assessment; a misnamed publication completed an assessment), both fixed in PR #27. Rerun the same day on the fixed server: s2 and s4 pass, s3, s5, s7 and s8 pass, s1 and s6 measured as before. Still to run: interrupted open, throttling and token expiry, inbound auth over a public tunnel, Copilot Studio contact (plan 9d); plan `docs/superpowers/plans/2026-11-09-pre-eon-test-campaign.md` | `scripts/pre-eon/campaign.ts`; sitting below |
+| Pre-EON test campaign | First run 2026-11-09: 8 scenarios on the developer tenant, 2 defects found (concurrent opens duplicated an assessment; a misnamed publication completed an assessment), both fixed in PR #27. Rerun the same day on the fixed server: s2 and s4 pass, s3, s5, s7 and s8 pass, s1 and s6 measured as before. Third run 2026-11-17, through `npm run sitting` on the build carrying the review fixes and the upgrades: the same eight verdicts, and the interrupted open, run for the first time, passed. Still to run: throttling and token expiry, inbound auth over a public tunnel, Copilot Studio contact (plan 9d); plan `docs/superpowers/plans/2026-11-09-pre-eon-test-campaign.md` | `scripts/pre-eon/campaign.ts`; sitting below |
+| Phase 9 code review | 2026-11-16: ten defects read out of the 9b, 9c and campaign source; seven fixed against fakes, three wait on a ruling or a probe (see the carried items below). 2026-11-17: a review of those fixes read ten more findings, all fixed against fakes. Run live 2026-11-17 on the paths the campaign and the sitting's own calls take, with no defect found; a fix whose case those paths do not reach is still covered by tests only | section below; the sitting of 2026-11-17; spec amendments of 2026-11-16 |
+| Assessment module upgrades and the simulated tenant | 2026-11-17: a stateful simulated tenant with a local server and walkthrough; refusals carried under `_meta` after the first client that lists tools rejected them; one lock per assessment; concurrent state reads; honest journal failures; one profile loader with more refused at load; version reporting, a record of every tool call and a bounded startup wait; `get_assessment` readiness, findings and journal readback, and listing by status. Built against the scripted fakes and the simulated tenant. Verified live 2026-11-17: a refusal through a client that lists the tools, the lock per assessment, the state read, profile loading, the version in the startup line, the call record, and all three `get_assessment` additions. Not exercised live: a journal append failure, the token request bound, a status listing past 200 | sections below; `docs/SIMULATOR.md`; `docs/superpowers/specs/evidence/2026-11-17-sitting/`; spec amendments of 2026-11-17 |
+| List item writes under `If-Match` | Probed live 2026-11-17: Graph refuses a stale fields PATCH with 412 and answers a current one with the new ETag. Every list item update has sent the precondition since the rulings of the same day, against the fakes and the simulated tenant; not run live | carried item below; `docs/superpowers/specs/evidence/2026-11-17-list-if-match-probe/` |
+| The six rulings of 2026-11-17 | Ruled by the operator and built the same day: the safety sentence reworded, provisional no longer an end state, a folder a save brings back journaled, State left to the drive, an unchanged save recording no stage, a refused list write refused in turn. Against the fakes and the simulated tenant; `npm run sitting` checks two of them; none run live | section below; spec amendments of 2026-11-17 |
+| 10 Profile defined lifecycles | Built 2026-11-17 against the fakes and the simulated tenant: the gates, the external kinds and the corrected kinds are profile data, `verify_publication` takes a kind, and two example profiles for a managed service provider ship. A client onboarding runs end to end on the simulated tenant. Not run live | `docs/superpowers/specs/2026-11-17-profile-defined-lifecycle-design.md`; section below |
 | 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9c and carries the unverified A3 and B1 probes, and is the item that slips first | same spec |
 | Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
 | CPA practice domain (multi-site scan and queries, grant issuer loop over a sites file, folder template taxonomy) | Not started; the phase after 9 | same spec |
@@ -197,11 +202,16 @@ warning and `inventory_tree` answered through the guard at 3 Graph requests. The
 deliberately not exercised live, since that would mean granting the server application a broad
 permission with admin consent; it is covered by unit tests only.
 
+**CLOSED 2026-11-17.** The version is read from `package.json` by `src/version.ts` and reported in
+the MCP handshake, the startup line and `GET /health`. The item read:
 **Report the server version in `/health` and the startup log (phase 5b).** From the same refresh:
 a peer server's users asked for a way to see which version is running (Lokka #52), because it
 was hardcoded rather than read from `package.json`. Worth doing with 5b's telemetry, once there
 is a deployment to ask; nothing to build before then.
 
+**CLOSED 2026-11-17.** A token request is abandoned after 15 seconds, in the provider, so startup
+logs a warning and the server starts, the path a failed token request already took. Covered by
+tests only. The item read:
 **Bound the startup identity check with a timeout (phase 5b).** Found 2026-09-24 by the token role
 guard's whole-branch review. `checkStartupIdentity` now asks Entra for a token before the port is
 bound, and it has no timeout of its own: it relies on the `fetch` defaults. A token endpoint that
@@ -305,11 +315,18 @@ expected name exactly and reports a case difference as not present. The artifact
 case a misnamed publication counts there as present. The Task 9 sitting measures it by uploading
 the publication under a name differing only by case before the correctly named one.
 
+**CLOSED 2026-11-17.** The append now raises an error naming the write Graph confirmed, and the
+tool reports that the write stands, that the journal lacks it, and that the call stopped there. The
+item read:
 **Carried from phase 9c, 2026-11-07: a journal append that throws after a confirmed write.** When
 Graph confirms a write and the store then fails to append its journal entry, the call reports the
 store's error through `describeToolFailure`, which does not say that the Graph write happened, and
 the journal lacks the entry.
 
+**RULED 2026-11-17 and built: a save that writes no file records no stage.** An identical re-save
+now writes nothing, the State column included, and says what State reads. The cost is recorded in
+the rulings section below: a State write that failed is no longer repaired by repeating the save.
+The item read:
 **Carried from the 9c sitting, 2026-11-08: an identical re-save moves State from CORRECTION back
 to DOSSIER.** An overwrite records stage `CORRECTION`. A later `save_assessment_artifact` with the
 same content takes the unchanged path, which treats any State other than the kind's own stage as
@@ -323,16 +340,111 @@ lowercase, `verify_publication` said absent while `get_assessment` read it prese
 `transition_assessment` completed the assessment. Artifact presence now requires the exact name the
 template renders, for every artifact kind.
 
+**RULED 2026-11-17 and built: the save stands, and the journal records the folder.** A save that
+creates a file reads the folders between the root and the file first, creates one that is absent
+with its own request, and journals it as `folder_created` on that request's 201. The item read:
 **Carried from the pre-EON campaign, 2026-11-09: a content PUT recreates a deleted parent folder
 silently.** With `Published` deleted, `save_assessment_artifact` for the executive summary answered
 `created` and `Published` existed again. The journal holds the file's entry and no `folder_created`
 entry for the folder, so the journal understates what the call wrote. Low risk, since the path is the
 server's own, but whether to refuse instead, or to journal the folder, needs a ruling.
 
+**RULED 2026-11-17: left as it is.** State is a marker for people and the drive is the evidence,
+so no tool validates State. Nothing was changed. The item read:
 **Carried from the pre-EON campaign, 2026-11-09: a hand-edited State does not stop `record_findings`.**
 With State set to a value no stage writes, `record_findings` proceeded, because the precondition
 reads the dossier on the drive rather than trusting State. A hand-set Status of Completed did stop a
 save. Whether State should be validated needs a ruling; the drive is what the tools trust.
+
+**RULED 2026-11-17: the claim is withdrawn, not the behavior.** The lifecycle safety sentence and
+the Decision Record no longer say a tool overwrites only a file it created. They say what the
+server can keep: it writes at paths it computes, and it changes an existing file or list item only
+under the ETag it just read. The item read:
+**Carried from the phase 9 code review, 2026-11-16: a save overwrites a file the server did not
+create.** `save_assessment_artifact` overwrites whatever file is at the artifact's path under the
+ETag it just read. It does not check that the server created that file, although the lifecycle
+safety sentence every such tool advertises says it overwrites only a file it created. The journal
+is the only record of what the server created, and without a table store it is lost on restart, so
+what the check reads, and what it does when the journal is empty, needs a ruling.
+
+**Carried from the phase 9 code review, 2026-11-16: list item updates send no `If-Match`.**
+`updateListItemFields` patches unconditionally although every caller holds the item's ETag, so two
+overlapping lifecycle calls on one assessment overwrite each other's status or State silently.
+Whether Graph honors `If-Match` on a list item `fields` PATCH has never been probed here, so the
+assumption gate puts a live probe before any fix. `record_findings` and `open_assessment` are
+serialized within the process; `save_assessment_artifact` and `transition_assessment` are not.
+
+**Narrowed 2026-11-17.** The three lifecycle tools that write to an open assessment now share one
+lock per assessment, so two of this server's own calls can no longer overwrite each other within
+the one process the hosting decision names. What stays open is the precondition itself: a person
+editing the item in the browser between a tool's read and its write is still overwritten, and that
+is what the `If-Match` probe is for.
+
+**Probe written 2026-11-17, not run.** `npm run probe:assessment` now carries four more steps, L4a
+to L4d, between the list steps and the drive steps. L4a patches the item's fields, at the address
+the server patches, under the eTag the create answered, which the id write has since made stale.
+L4b reads the item back, so what that write did is seen and not inferred. L4c repeats the write
+under the eTag just read. L4d sends the stale eTag to the item itself with the fields in the body,
+in case Graph enforces the precondition there and not on the fields address. A 412 at L4a means
+`updateListItemFields` can carry `If-Match` as it stands; a 200 at L4a with a 412 at L4d means the
+fix patches the item; a 200 at both means Graph offers no precondition on a list item and the
+remedy is a read after the write. No fix is designed until the run says which.
+
+**Probed 2026-11-17: Graph enforces it, on both addresses.** The stale fields PATCH answered 412
+`resourceModified` (L4a), the item read back unchanged (L4b), the PATCH under the eTag just read
+answered 200 (L4c), and the stale PATCH of the item itself answered 412 as well (L4d). The 200 at
+L4c carries `@odata.etag` with the item's new version, so a write refreshes its own precondition
+from its response, as a `driveItem` PATCH was measured to on 2026-09-19, and a tool that writes the
+item twice in one call needs no read between. So `updateListItemFields` can send `If-Match` where
+it already writes.
+
+**RULED 2026-11-17 and built: a refused write is refused in turn.** Every list item update goes
+under the eTag the item was read with, and `updateListItemFields` will not send one without. On a
+412 the tool does not read again and retry: the item changed under a decision the tool had made,
+and whether that decision still stands is the caller's to say. A transition, which has written
+nothing by then, answers with the structured refusal. A save, a findings call and an open may have
+written already, so each says what stands and what was not written. Against the fakes and the
+simulated tenant, which now answers a stale `If-Match` as the probe measured; not run live, and a
+live run cannot easily produce it, since it needs the item edited while a call is in flight.
+
+**RULED 2026-11-17 and built: provisional is not an end state.** `transition_assessment` reaches
+completed from in progress or from provisional, and `open_assessment` returns an assessment parked
+as provisional for the vendor and scope instead of creating a second. A save and a findings call
+still need in progress, which the rulings section below names as the edge of what was ruled. The
+item read:
+**Carried from the phase 9 code review, 2026-11-16: a provisional assessment cannot be completed.**
+`requireInProgress` refuses every tool once the status is provisional, and a later `open_assessment`
+for the same vendor and scope creates a second assessment. The spec does not say whether
+provisional is an end state. Needs a ruling.
+
+**CLOSED 2026-11-17, all three.** The id prefix and template are checked at load, the state read
+issues its drive reads together, and the registry's dispatcher is the only profile loader. The item
+read:
+**Carried from the phase 9 code review, 2026-11-16: three smaller findings, not fixed.** The
+assessment id prefix and template are not checked at profile load against the journal key's
+alphabet or SharePoint's name rules. `readAssessmentState` reads the root and every artifact one
+after another on every lifecycle call. `loadAnyProfile` in `src/domain/profile/library.ts` is a
+second profile dispatcher that only tests reach, so the assessment profile tests exercise a
+dispatcher the server never calls.
+
+**Carried from the 2026-11-17 upgrades: what Copilot Studio does with a refusal.** A refusal now
+carries its structure under `_meta` and its evidence as prose. Whether Copilot Studio validates
+structured content against a tool's output schema, as the MCP SDK client does, and whether it
+shows `_meta` or an error result's prose to the agent, has not been probed. The prose alone is
+enough for an agent that sees it. Plan 9d's first refused call is the check.
+
+**CLOSED 2026-11-17 by the sitting below, with three exceptions.** The campaign rerun and the
+sitting's own calls ran the readiness report, the findings and journal readback, the listing by
+status, the lock, the state read and the profile checks against the developer tenant, and a
+refusal reached a client that had listed the tools with its evidence. Three things the sitting did
+not reach stay covered by tests only: a journal append that fails after a confirmed write, a token
+request abandoned at 15 seconds, and a status listing that stops at 200. The item read:
+**Carried from the 2026-11-17 upgrades: nothing in them has met a tenant.** The readiness report,
+the findings and journal readback, the listing by status, the per-assessment lock, the concurrent
+state read and the stricter profile checks were run against the scripted fakes and the simulated
+tenant only. A campaign rerun on the developer tenant is their live check. The campaign client now
+lists the tools before calling them, as an agent host does, so that rerun also exercises the client
+side validation that found the refusal defect.
 
 **Carried from the pre-EON campaign, 2026-11-09: the open lock covers one process.** The per vendor
 lock that stops concurrent opens duplicating an assessment lives in the server process. It holds for
@@ -2479,6 +2591,300 @@ with the fixed server (main at `12bc570`), closed both.
 | s3, s5, s7, s8 | pass | Same as the first run. |
 
 The grant was restored to `read` afterwards (write to read confirmed by the grant probe) and the server stopped.
+
+## The phase 9 code review, 2026-11-16: ten defects read out of the source, seven fixed
+
+A review of the source changes from plan 9b through the campaign fixes (`e1ae380^1..88b898f`, `src`
+only), run on a stronger model than the reviews those plans had. It read the code and ran nothing.
+Every finding below was then confirmed by a test that failed before its fix, and none of the fixes
+has met a tenant.
+
+| Finding | State |
+|---|---|
+| `{vendor}` rendered raw into artifact paths: a name with a colon opened and then failed every save; a slash added a folder | Fixed: rendered through the folder name sanitizing; a `.` or `..` segment is refused |
+| `record_findings` and `transition_assessment` answered a mistyped id with a message about the profile's artifact kinds | Fixed: the structured refusal, no item matched |
+| Two overlapping `record_findings` calls could both create one finding key, after which every call refused | Fixed: serialized per assessment in the process |
+| A file whose name differs by case was called a folder by a save and not found by the preconditions | Fixed: the state names what the lookup answered |
+| The journal and the Findings rows were keyed by the id the caller typed | Fixed: keyed by the stored id |
+| The open lock's key was case sensitive | Fixed: lowercased |
+| A vendor name sanitizing to an existing vendor's folder got a second record and resumed the other vendor's assessment; the assessment took the caller's spelling as its Title | Fixed: refused, naming the record; the stored Title is used |
+| A save overwrites a file the server did not create | Carried above: needs a ruling |
+| List item updates send no `If-Match` | Carried above: needs a probe |
+| An identical re-save moves State backward | Already accepted in the 9c amendments and carried above since the 9c sitting; the review confirms it happens from FINDINGS too, not only from CORRECTION |
+
+The suite is at 3032 tests across 219 files. Each of the seven would have been reachable by the EON pilot's agent
+without any operator error: a vendor name with punctuation, a client retry, an id typed in another
+case.
+
+**The fixes reviewed, 2026-11-17.** A second review read the seven fixes before they were committed
+and found ten things wrong with them, each confirmed by a test that failed first, except the two
+that are prose. It ran nothing against a tenant either.
+
+| Finding | State |
+|---|---|
+| `{vendor}` run through the folder name sanitizing also lost a trailing dot and collapsed spaces, moving the artifact paths of an assessment already open for a name like `Acme Inc.` | Fixed: only the characters SharePoint refuses are removed |
+| The new `.` and `..` refusal threw in `open_assessment` after the vendor record, the item and the id were written; the profile schema still accepted a `.` segment; `. .` sanitized to `.` | Fixed: refused at load, the sanitizing leaves nothing of such a name, and open renders every path before its first write |
+| The folder lookup missed a vendor record with an empty folder column, which files under its sanitized Title | Fixed for a Title equal to the folder name; a Title that only sanitizes to it is still not found, and no filter expresses it |
+| `docs/SETUP.md` did not name the vendors folder name column among those to index | Fixed |
+| A vendor found by Title with no stored folder was filed under the caller's spelling | Fixed: filed under the stored Title, sanitized |
+| `read_assessment_artifact` returned a file whose name differs by case as the artifact | Fixed: refused, not downloaded |
+| Refusals, `read_assessment_artifact` and `verify_publication` still echoed the id as typed | Fixed: the stored id everywhere once the item is found |
+| The open lock was keyed on the name, and two vendor records storing one folder name raced past it | Fixed: a second lock on the resolved folder |
+| The expected file name was derived in four places and a dead fallback repeated in four tools | Fixed: one helper, and the id lookup returns a record that carries the id |
+| The spec amendment restated build status | Fixed: it points here |
+
+## The simulated tenant and the upgrades of 2026-11-17
+
+Built in one sitting with no tenant access: the grant issuer secret had lapsed, so nothing here
+could be run live, and nothing was. Each change was written test first. What the tests ran against
+is named in the last column, because it is the limit of what they show.
+
+| Change | What it does | Run against |
+|---|---|---|
+| The simulated tenant, `npm run sim` and `npm run sim:walkthrough` | The assessment tools end to end with no tenant: a stateful site, the real server over it, and routes that stand in for the publisher and the operator | Its own tests, each behavior through the server's real Graph helpers; `docs/SIMULATOR.md` lists what is measured and what is modeled |
+| Refusals under `_meta` | A lifecycle refusal reaches a client that has listed the tools as a tool error with its evidence. It reached such a client as a schema fault | A real MCP client over the real server and the simulated tenant |
+| One lock per assessment | A save, a findings call and a transition for one assessment no longer overlap | The simulated tenant, which interleaves requests; each test failed without the lock |
+| Concurrent state read | The root and every artifact path are read together | A count of the reads in flight |
+| Journal failure reported as what it follows | A failed journal append names the write Graph confirmed | The simulated tenant with a store that refuses one append |
+| One profile loader and stricter load checks | Seven misconfigurations that loaded and failed later are refused at startup | The profile tests, now through the loader the server uses |
+| Version, call record, bounded token request | `/health`, the handshake and the startup line carry the version; each call writes one line; a token request is abandoned after 15 seconds | Unit tests; the compiled build was run once to read the version |
+| `get_assessment` readiness | What each lifecycle tool's precondition finds, from the tool's own function | Twenty cells: five states by four tools, each tool called after its report |
+| `get_assessment` findings and journal readback | The recorded findings, the summary and every journal entry, on request | The scripted fake and the walkthrough |
+| `get_assessment` by status | Every assessment holding a status, across vendors, up to 200 with a flag when more exist | The scripted fake and the walkthrough |
+
+The refusal defect is the one finding of the night that changes what is known about the live
+system. It existed since plan 9b, survived the 9c sitting and both campaign runs, and would have
+been the first thing an agent host met: any refused stage answered with `-32602` and no evidence.
+It was invisible because the campaign's client calls tools without listing them, and the SDK
+client validates output only for tools it has listed. The campaign now lists them.
+
+A third review, of this sitting's own work, read ten more findings before anything was committed.
+All ten are fixed: the startup wait had been bounded by racing the token request, which left the
+request in flight and would have discarded a late token with the wrong roles, so the bound moved
+into the provider; the call record repeated the caller's profile id and assessment id, which can
+hold any text, and now records only the forms the server knows; the status listing had no bound;
+the trailing dot check missed a two character segment; `{vendor}` could end a segment; this file
+said the campaign listed the tools before it did; and the exact name rule and the refused
+character rule each had more than one copy.
+
+Four things here were decided without a ruling and are the operator's to overrule: a refusal's
+structure rides under `_meta["ironwright-mcp/refusal"]`; an id template without `{item}`, and a
+workspace template in which `{vendor}` ends a segment, are refused at load; `get_assessment` reads
+findings and journal entries only when `include` asks; and a status listing stops at 200.
+
+**One command for a live sitting, written 2026-11-17, not run live.** `npm run sitting` does in one
+run what the operator did by hand across two windows: it reissues the grant issuer when its
+credentials are not in the environment, widens the grant, runs the probe and the campaign, makes
+the calls that check the `get_assessment` additions and a refusal through a client that has listed
+the tools, stops the server under an open and retries it, and restores the grant to `read` whatever
+happened. The operator supplies two sign-ins, the word yes and the server application's secret,
+and the grant issuer's secret is read from the setup command's output into memory and never shown.
+The interrupted open, which the campaign plan left to a person, is here because the server being
+stopped is one this script started, and it is stopped outright, where Ctrl+C would have let the
+server drain the call. `npm run sitting -- --sim` runs the server steps over the simulated tenant.
+Its two live runs the same evening are the next section.
+
+## The live sitting of 2026-11-17: the review fixes and the upgrades on the developer tenant
+
+Run by the operator with `npm run sitting`, from `e9b5fa6` plus an uncommitted correction to the
+runner, against the IronwrightTest site under the `assessment-sitting` profile, with the server on
+127.0.0.1, writes enabled and inbound authentication off. The redacted results are in
+`docs/superpowers/specs/evidence/2026-11-17-sitting/report.md` and the probe's recordings in
+`docs/superpowers/specs/evidence/2026-11-17-list-if-match-probe/`, both read for redaction before
+they were kept.
+
+**Two runs. The first stopped at the server, and the fault was the runner's.** It reissued the
+grant issuer, widened the grant and ran the probe, then started the server with the profile folder
+and the write switch and nothing about inbound authentication, and the server refused to start
+without a key. Every earlier sitting had set `IW_INBOUND_AUTH=none` and `IW_ALLOW_ANONYMOUS=1` by
+hand; the runner had only ever started the simulator, which needs neither. It restored the grant
+to `read` on its way out, which is the one thing that run proved about the runner. The correction
+has two parts: the environment the runner gives the server is now checked by a test against the
+server's own configuration loaders, and the server is started before the sign-ins, so a server
+that will not start costs the operator nothing. This was the assumption gate's lesson again, at
+small scale: a runner proven against the stand-in had not met the thing it stood in for.
+
+**The second run answered every step.**
+
+| Step | Result |
+|---|---|
+| `If-Match` on a list item | Enforced. A stale fields PATCH answered 412 `resourceModified`, the item read back unchanged, a PATCH under the current eTag answered 200 carrying the new one, and a stale PATCH of the item itself answered 412. The carried item above has what follows from it |
+| Campaign | s2, s3, s4, s5, s7 and s8 pass; s1 and s6 measured as on 2026-11-09 |
+| `get_assessment` by status | 23 assessments in progress across vendors, the run's own among them, from one call |
+| `get_assessment` readback and readiness | One finding with its two paragraph observation, ten journal entries, and a readiness report saying a save, a findings call and a provisional transition would proceed and a completed one would not |
+| A refusal through a client that lists the tools | `transition_assessment` refused with its expected and observed states under `_meta`, and the client accepted it. This is the defect the simulator found, now seen fixed against the tenant |
+| Interrupted open | The server was stopped 1200 ms into an open. The repeat on a new server process answered the same assessment as already in progress, created its five folders, and the vendor has exactly one assessment |
+| Grant | Restored to `read` and read back |
+
+**What changed since the last campaign run, and is not a defect.** On 2026-11-09 six concurrent
+overwrites of one dossier ended with one overwrite and five refusals under the ETag. This run
+ended with six overwrites and no refusal, the final content one writer's. The lock per assessment
+is why: the six saves now run one after another, each reads the ETag the one before it left, and
+none is stale. The scenario's requirement, never a mixed file, holds either way. Two things follow
+that a consumer should know. The last writer wins among this server's own callers, where before
+the first did. And the calls queue: the last of the six answered after 21 seconds, most of it
+spent waiting its turn, which a client with a shorter timeout would abandon while the server
+carried on.
+
+**What the call record showed.** Thirty nine lines for thirty nine settled calls, 36 `ok` and 3
+`refused`, none carrying a vendor name, a path or a finding. The interrupted open wrote no line,
+because the process that would have written it was stopped; a call cut off this way is visible
+only as a client that got no answer. An open took a median of 3.7 seconds and up to 19 Graph
+requests, a save 2.2 seconds and 12 to 14.
+
+**What this sitting did not establish.**
+
+- The interrupted open was cut at one point, after the item and its id were written and before any
+  folder. A stop between the vendor record and the item, or between the item and its id, was not
+  produced; the delay is a flag on the runner.
+- Whether the interrupted open left a second vendor record. The tools found one assessment for the
+  vendor; the Vendors list itself was not read.
+- The journal across a restart. The store was in memory, so the resumed open's journal holds only
+  what the second process wrote, and the first process's entries for the item it created are gone.
+  This is the known cost of running without a table store, seen here for the first time.
+- A journal append failure, a token request that runs out its 15 seconds, and a status listing past
+  200, none of which a healthy run reaches.
+- Anything about Copilot Studio, inbound authentication or a public address.
+
+**Residue left in the tenant.** Probe items 21 and 22 in `IW Probe Assessments` and a folder under
+`IW-Probe` for each of the two runs; the campaign's seven vendors under the tag `11172355`;
+assessments up to `ASM-2026-00031`, the last two being the runner's `Sitting Check` and `Sitting
+Interrupt` vendors. Nothing was deleted. The grant issuer was deleted, purged and recreated twice;
+the one that remains has a seven day secret that nobody holds, since the runner read it into
+memory and let it go, so the next sitting reissues it the same way.
+
+The suite is at 3228 tests across 229 files.
+
+## The rulings of 2026-11-17, and what each changed
+
+Six questions the tests could measure and not decide were put to the operator with a
+recommendation each, and the operator took all six. Each was built test first the same evening.
+None has run against a tenant.
+
+| Ruling | What changed | Run against |
+|---|---|---|
+| A. A save overwrites a file the server did not create | Nothing in what the server does. The safety sentence every lifecycle tool carries and the Decision Record's amendment now say the server writes at paths it computes and changes an existing file or list item only under the ETag it just read | The contract test |
+| B. Provisional is not an end state | Completed is reached from in progress or provisional; `open_assessment` returns one parked as provisional, found by a second query sent only when nothing is in progress | The scripted fake, the simulated tenant end to end, and `npm run sitting -- --sim` |
+| C. A save recreates a deleted folder | The save stands, and the folder is no longer left to the content PUT to bring back. A create reads each folder between the root and the file, creates an absent one with its own request, and journals it on that request's 201. The result names it in `foldersCreated`, in a failure that follows as well as in a success | The scripted fake and the simulated tenant |
+| D. A hand edited State does not stop a tool | Nothing. The drive is the evidence | No change to test |
+| E. An unchanged save moved State backward | A save whose file already holds the content writes nothing and says what State reads | The scripted fake, the simulated tenant, and `npm run sitting -- --sim` |
+| F. A list item changed under a tool | Every list item update is sent under `If-Match`; a 412 is refused in turn, with no retry | The scripted fake, and the simulated tenant with the item edited between the read and the write |
+
+**What the rulings cost, said plainly.**
+
+- E removes a repair. The branch it changes was written to finish a save whose file had landed and
+  whose State write had not. It could not tell that case from a retry of a dossier already
+  corrected, and moved State backward in both. Now neither is touched, so a State write that fails
+  stays unrecorded until the next stage's write moves State on. F makes that case likelier than it
+  was, since a State write can now be refused. State is a marker for people, by ruling D, and no
+  tool reads it to decide anything.
+- F can leave a save half recorded. The file is written before the State update, on purpose, so
+  State never names a stage whose file a failed write did not produce. An item edited in between
+  therefore leaves a file that stands and a stage that is not recorded, reported as an error that
+  says exactly that.
+- C costs a create one more read for each folder between the root and the file, one in the
+  example profile, and one create request for a folder that is missing. An overwrite and an
+  unchanged save cost nothing more.
+- B costs an open that creates an assessment one more query.
+
+**The edge of what was ruled.** B lets a provisional assessment be completed and found. It does not
+let one be worked on: a save and a findings call still refuse it, because the ruling was about
+completion and nothing was asked about correcting a dossier or adding a finding while parked. If
+the pilot needs that, it is a seventh question. A provisional assessment also cannot be relabeled
+as provisional under another disposition.
+
+**Reviewed before it was committed.** An independent read of the change found eight things, and
+seven are fixed, each behind a test that failed first.
+
+| Finding | State |
+|---|---|
+| The folder was journaled on an inference: absent before the write, present after. A folder someone else restored in between was claimed, one whose read back failed was left out, and its entry followed the file's | Fixed: the save creates the folder itself and journals the 201 |
+| A file sitting where a folder above the artifact belongs counted as the folder being there | Fixed: refused before anything is written |
+| A folder the call created was named only in a success, though the journal held it on every later failure | Fixed: named in every result after it |
+| A State update refused with 412 did not say that repeating the save would not record the stage | Fixed: the message says so |
+| An item read without an eTag refused even a save that would have written nothing | Fixed: checked only where a write follows |
+| "Findings recorded" beside "Nothing was written" when no finding needed writing and the summary was refused | Fixed: says no finding needed writing |
+| Every create pays one read per folder above the file | Accepted, and named in the costs above; the reads now stop at the first absent folder |
+| A PATCH that Graph applied and then answered 502, 503 or 504 is retried by the client, and the retry answers 412 under its own `If-Match`, which every caller reports as an item someone else changed and nothing written | Ruled and fixed the same day, as its own change: see below |
+
+**RULED 2026-11-17 and built: a write under a precondition is sent once on a gateway status.** The
+operator took the recommendation. A request other than a read that carries `If-Match` is no longer
+replayed on 502 or 504; the status surfaces, and the tool's words say that a gateway status does
+not tell whether the write was applied and that what is there now should be read before repeating
+it. 429 and 503 are retried as before, and so is every read and every write with no precondition.
+This changes how the rename, move, custom plan and file save tools behave under a gateway error,
+all of which were verified live with the old rule; none has met a gateway error live under either.
+Covered by unit tests on the client. The item read:
+**Carried from the review of 2026-11-17: a retried conditional write can be misreported.** The
+Graph client retries a returned 429, 502, 503 or 504 on every verb, on the reasoning written
+beside it that a returned status is the server declining to act. For 429 that holds. For a
+gateway status it may not: a write can land and the answer be lost on the way back. With
+`If-Match` on the request the retry cannot apply twice, and answers 412, which every conditional
+write here reports as a change made by someone else with nothing written by this call. That has
+been true of renames, moves and file overwrites since phase 6a and is now true of list item
+updates too. Whether Graph ever answers a gateway status after committing has not been measured.
+The remedy would be to send a request that carries `If-Match` once on 502 and 504 and let the
+failure surface, keeping the retry for 429 and 503. It changes how every write tool verified live
+behaves under a gateway error, so it is the operator's to rule on, not a fix to slip in.
+
+**Not established.** None of the six has met a tenant. `npm run sitting` now carries two more
+steps, an identical save and an open of a parked assessment, so the next sitting checks E and the
+finding half of B live. Completing from provisional and the journaled folder both need the site
+changed between calls, which is the campaign's kind of work and is not in it yet. F's refusal
+needs the item edited while a call is in flight; the probe measured the 412 itself, and the path
+from that answer to the tool's words is covered by the fakes only.
+
+The suite is at 3283 tests across 229 files after the gateway ruling.
+
+## Phase 10, 2026-11-17: the workflow moves into the profile
+
+The operator said the pilot should cover as many needs of a managed service provider as the
+server can, and that the recommendations should be acted on without asking, except where an
+answer was truly needed. The design is in
+`docs/superpowers/specs/2026-11-17-profile-defined-lifecycle-design.md`. What was built is the
+first of its three moves.
+
+**What changed.** The assessment module no longer knows the words dossier and publication. Which
+artifact kinds gate findings, a provisional status and completion, which kinds are produced
+outside the server, and which are recorded as a correction when overwritten are settings under
+the profile's `lifecycle`, defaulting to the vendor risk workflow. `verify_publication` takes an
+optional `kind` for a profile that lists more than one external kind. Two example profiles ship
+beside the vendor risk one: a client onboarding and a security incident record.
+
+**What it was run against.** The module's existing tests, unchanged, against the example profile
+that sets none of the new settings, which is the evidence that the pilot's profile behaves as it
+did. The schema's refusals. And a client onboarding taken from open to completed through the real
+tool handlers on the simulated tenant, under the shipped example: findings refused until the
+intake exists, the signed handover refused as a kind the server does not write, the provisional
+status refused until the runbook exists, completion refused until someone else uploads the
+handover, then completed.
+
+**Decided without asking, and the operator's to overrule.** No tool or input field was renamed,
+so a client is still passed as `vendor`. The findings list keeps its four fields. A provisional
+assessment still cannot be saved to, which in the onboarding example means nothing more can be
+written while it awaits its handover.
+
+**Reviewed before it was committed.** An independent read found no defect in what the tools do
+and five things in what they say. Three are fixed: two descriptions still named the dossier and
+the publication as facts and not as defaults; gates that set one stage and not the others were
+refused with the word "Required" and now say the three are set together; and a collision between
+an external kind and a corrected list the profile never wrote did not say where that list came
+from. Two are left as they are. A save of an external kind against a profile id the registry
+does not know, or against a profile of another kind, now answers about the profile and no longer
+about the kind, which is the more useful answer. And a kind named twice in one gate is accepted
+and checked twice.
+
+The suite is at 3308 tests across 229 files.
+
+**What waits on the operator, and nothing else does.**
+
+- A live run under a second profile needs three more lists in the developer site: a clients list,
+  a cases list and an issues list, with the columns the example profile names. Creating them is a
+  step in the site, not in this repository.
+- One site per client is the second move and is not built. It rests on an assumption no probe has
+  made, one application holding grants on two sites, so a second site in the developer tenant
+  comes first.
+- Whether the tools should be renamed for a consumer that is not assessing vendors.
 
 ## The phase 6d live sitting, 2026-09-24: plans an operator describes
 

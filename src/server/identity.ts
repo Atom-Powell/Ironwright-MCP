@@ -10,6 +10,13 @@ import { UnexpectedTokenRolesError, type TokenProvider } from "../graph/token.js
  * and refusing to start on it would turn a third party's outage into a restart
  * loop, the failure GET /health is kept free of Graph to avoid. The guard in
  * front of the provider still checks the first token that does arrive.
+ *
+ * The wait is bounded by the provider, which abandons a token request that
+ * does not answer (TOKEN_REQUEST_TIMEOUT_MS in src/graph/token.ts). This
+ * function does not race the request itself. A race here would stop waiting
+ * while the request stayed in flight, and a token that arrived late carrying
+ * the wrong roles would then be discarded by a server already running, which
+ * is the one case the Decision Record says must never start.
  */
 export async function checkStartupIdentity(
   provider: TokenProvider,

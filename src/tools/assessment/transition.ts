@@ -4,11 +4,13 @@ import type { ToolContext } from "../context.js";
 import { describeToolFailure, type FailureSubject } from "../errors.js";
 import { getListItem, updateListItemFields, type ListItemRecord } from "../../graph/lists.js";
 import { isAssessmentProfile } from "../../domain/profile/library.js";
-import { allOf, fieldsFor, recordFromFields, requireArtifact, requireInProgress, requireRecord } from "../../domain/assessment/state.js";
+import { fieldsFor, recordFromFields, transitionPrecondition } from "../../domain/assessment/state.js";
 import { resolveAssessmentContext } from "./context.js";
 import { findAssessmentById, readAssessmentState } from "./read-state.js";
 import { appendJournal } from "./journal.js";
 import { refusalResult } from "./refusal.js";
+import { itemChangedRefusal, itemWithoutEtagText } from "./item-precondition.js";
+import { withAssessmentLock } from "./keyed-lock.js";
 
 export const TRANSITION_INPUT_CONSTRAINTS = "disposition is one of the profile's disposition labels and risk is one of its risk labels.";
 
@@ -17,7 +19,9 @@ export const TRANSITION_INPUT_SCHEMA = {
   assessmentId: z.string().min(1).describe('The id open_assessment returned, for example "ASM-2026-00002".'),
   target: z
     .enum(["completed", "provisional"])
-    .describe('The status to move to, for example "completed", which needs the dossier and the publication present, or "provisional", which needs only the dossier.'),
+    .describe(
+      'The status to move to, for example "completed", which is reached from in progress or from provisional and needs the artifacts the profile\'s completed gate names, by default the dossier and the publication, or "provisional", which is reached from in progress and needs those its provisional gate names, by default the dossier.',
+    ),
   disposition: z.string().min(1).describe('One of the profile\'s disposition labels, for example "Approved with conditions".'),
   risk: z.string().min(1).describe('One of the profile\'s risk labels for the overall risk, for example "Medium".'),
 } satisfies z.ZodRawShape;
@@ -61,6 +65,11 @@ function labelProblem(context: ToolContext, args: z.infer<typeof InputObject>): 
 
 export async function runTransitionAssessment(input: unknown, context: ToolContext): Promise<CallToolResult> {
   const args = InputObject.parse(input);
+  // Ordered with every other lifecycle write to this assessment; keyed-lock.ts says why.
+  return withAssessmentLock(args.profileId, args.assessmentId, () => transitionAssessment(args, context));
+}
+
+async function transitionAssessment(args: z.infer<typeof InputObject>, context: ToolContext): Promise<CallToolResult> {
   const subject: FailureSubject = { tool: TOOL, profileId: args.profileId };
   const before = context.graph.requests();
 
@@ -77,12 +86,14 @@ export async function runTransitionAssessment(input: unknown, context: ToolConte
 
     const record = await findAssessmentById(context.graph, ac, args.assessmentId);
     const state = await readAssessmentState(context.graph, ac, record);
+    // The id as the list stores it, which the journal is keyed by; the lookup can match another case.
+    const assessmentId = record?.assessmentId ?? args.assessmentId;
 
     // A retry of a transition that already landed is reported rather than written again, and is
     // checked before the preconditions because a completed assessment is no longer in progress.
     if (record !== undefined && record.status === label && record.disposition === args.disposition && record.risk === args.risk) {
       const output = {
-        assessmentId: args.assessmentId,
+        assessmentId,
         previousStatus: record.status,
         status: record.status,
         disposition: record.disposition,
@@ -92,26 +103,27 @@ export async function runTransitionAssessment(input: unknown, context: ToolConte
         graphRequests: context.graph.requests() - before,
       };
       const text =
-        `${args.assessmentId} already reads status "${label}", disposition "${args.disposition}" and risk "${args.risk}" on ${listName} item ${record.itemId}. ` +
+        `${assessmentId} already reads status "${label}", disposition "${args.disposition}" and risk "${args.risk}" on ${listName} item ${record.itemId}. ` +
         "Nothing was written.";
       return { structuredContent: output, content: [{ type: "text" as const, text }] };
     }
 
-    const check = allOf(
-      requireRecord(state, `${listName} where ${columns.assessmentId} is "${args.assessmentId}"`),
-      requireInProgress(state, ac.profile.lifecycle.status),
-      requireArtifact(state, "dossier"),
-      ...(args.target === "completed" ? [requireArtifact(state, "publication")] : []),
-    );
-    if (!check.ok) return refusalResult(TOOL, STAGE, args.assessmentId, check);
+    const check = transitionPrecondition(state, ac.profile.lifecycle, args.target, `${listName} where ${columns.assessmentId} is "${args.assessmentId}"`);
+    if (!check.ok) return refusalResult(TOOL, STAGE, assessmentId, check);
     const item = record!;
 
-    await updateListItemFields(context.graph, {
+    // The update is made only if the item is still the one the preconditions were read from. A
+    // person can change its status in the browser while this call reads the drive, and a write
+    // that landed anyway would record a transition decided on a state that no longer exists.
+    if (item.etag === undefined) return failure(`${itemWithoutEtagText(listName, item.itemId)} Nothing was written.`);
+    const updated = await updateListItemFields(context.graph, {
       siteId: ac.siteId,
       listName,
       itemId: item.itemId,
       fields: fieldsFor(columns, { status: label, disposition: args.disposition, risk: args.risk, state: STAGE }),
+      etag: item.etag,
     });
+    if (updated.kind === "precondition_failed") return refusalResult(TOOL, STAGE, assessmentId, itemChangedRefusal(listName, item.itemId, item.etag));
 
     // The journal entry waits for the read back only to carry its ETag: Graph's 2xx already said the
     // update happened, so a read back that fails or disagrees must not leave it unrecorded.
@@ -122,12 +134,13 @@ export async function runTransitionAssessment(input: unknown, context: ToolConte
     } catch (error) {
       readError = error;
     }
-    await appendJournal(context, ac, args.assessmentId, {
+    await appendJournal(context, ac, assessmentId, {
       stage: STAGE,
       operation: "list_item_updated",
       target: `${listName}/${item.itemId}`,
-      ...(item.etag !== undefined ? { etagBefore: item.etag } : {}),
-      ...(back?.eTag !== undefined ? { etagAfter: back.eTag } : {}),
+      etagBefore: item.etag,
+      // The read back's eTag when there is one, and otherwise the one the update itself answered.
+      ...((back?.eTag ?? updated.eTag) !== undefined ? { etagAfter: back?.eTag ?? updated.eTag } : {}),
     });
     if (readError !== undefined) throw readError;
 
@@ -144,7 +157,7 @@ export async function runTransitionAssessment(input: unknown, context: ToolConte
     }
 
     const output = {
-      assessmentId: args.assessmentId,
+      assessmentId,
       previousStatus: item.status,
       status: read.status,
       disposition: read.disposition,
@@ -154,7 +167,7 @@ export async function runTransitionAssessment(input: unknown, context: ToolConte
       graphRequests: context.graph.requests() - before,
     };
     const text =
-      `Moved ${args.assessmentId} from ${JSON.stringify(item.status ?? null)} to "${read.status}" with disposition "${read.disposition}", risk "${read.risk}" ` +
+      `Moved ${assessmentId} from ${JSON.stringify(item.status ?? null)} to "${read.status}" with disposition "${read.disposition}", risk "${read.risk}" ` +
       `and ${columns.state} "${read.state}", as read back from ${listName} item ${item.itemId}.`;
     return { structuredContent: output, content: [{ type: "text" as const, text }] };
   } catch (error) {

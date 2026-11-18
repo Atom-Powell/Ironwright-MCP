@@ -27,6 +27,10 @@ export interface ProbeContext {
   folderEtag?: string;
   fileEtag?: string;
   newEtag?: string;
+  /** The list item's eTag as its create answered it, stale once L2b has written the id back. */
+  listEtagAtCreate?: string;
+  /** The list item's eTag as the latest read answered it. */
+  listEtag?: string;
 }
 
 export interface ProbeRequest {
@@ -65,7 +69,7 @@ export interface ProbeRecord {
 
 const PROBE_ROOT = "IW-Probe";
 
-function need<K extends "siteId" | "driveId" | "itemId" | "fileEtag">(ctx: ProbeContext, key: K): NonNullable<ProbeContext[K]> {
+function need<K extends "siteId" | "driveId" | "itemId" | "fileEtag" | "listEtagAtCreate" | "listEtag">(ctx: ProbeContext, key: K): NonNullable<ProbeContext[K]> {
   const value = ctx[key];
   if (value === undefined) throw new Error(`step needs ${key}, which no earlier step captured`);
   return value as NonNullable<ProbeContext[K]>;
@@ -133,6 +137,20 @@ function json(method: ProbeRequest["method"], url: string, body: unknown, header
   return { method, url, headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) };
 }
 
+const STALE_FIELDS_STATUS = "Stale write on fields";
+
+// A 412 only shows a stale precondition was refused if the eTag sent is known
+// to differ from the item's current one, the same care F3b takes.
+function judgeStaleListWrite(res: ProbeResponse, ctx: ProbeContext): Verdict {
+  if (res.status === 412) {
+    return ctx.listEtag !== undefined && ctx.listEtag !== ctx.listEtagAtCreate
+      ? { kind: "pass" }
+      : { kind: "observed", note: "412 received but no later read captured a different eTag, so staleness was not established" };
+  }
+  if (res.status === 200) return { kind: "observed", note: "200: the stale If-Match was not enforced on this address" };
+  return { kind: "observed", note: `status ${received(res)}` };
+}
+
 export function probeSteps(): ProbeStep[] {
   return [
     {
@@ -185,6 +203,8 @@ export function probeSteps(): ProbeStep[] {
       capture: (res, ctx) => {
         const id = (parse(res.body) as { id?: unknown } | undefined)?.id;
         if (typeof id === "string") ctx.itemId = id;
+        const etag = etagOf(res.body);
+        if (etag !== undefined) ctx.listEtagAtCreate = etag;
       },
     },
     {
@@ -207,6 +227,10 @@ export function probeSteps(): ProbeStep[] {
         if (res.status !== 200) return { kind: "fail", because: `expected 200, received ${res.status}` };
         const fields = (parse(res.body) as { fields?: { AssessmentId?: unknown } } | undefined)?.fields;
         return fields?.AssessmentId === renderedId(ctx) ? { kind: "pass" } : { kind: "fail", because: "read back without the AssessmentId" };
+      },
+      capture: (res, ctx) => {
+        const etag = etagOf(res.body);
+        if (etag !== undefined) ctx.listEtag = etag;
       },
     },
     {
@@ -237,6 +261,51 @@ export function probeSteps(): ProbeStep[] {
         if (res.status === 200 && Array.isArray(items) && items.length === 1) return { kind: "pass" };
         return { kind: "observed", note: `status ${res.status}, ${graphErrorCodeFromBody(res.body) ?? "no error code"}` };
       },
+    },
+    // L4a to L4d measure whether a list item write can carry a precondition. The
+    // server patches a list item's fields with no If-Match, so a person editing
+    // the item between a tool's read and its write is overwritten. Whether Graph
+    // enforces If-Match there had never been asked. The stale eTag is the one the
+    // create answered, out of date since L2b wrote the id back. A 200 is recorded
+    // as observed rather than failed, because either answer decides the design.
+    {
+      id: "L4a",
+      assumption: "a fields PATCH under a stale If-Match is refused, at the address the server patches",
+      expected: "412; a 200 means the precondition is ignored there",
+      request: (ctx) => json("PATCH", listUrl(ctx, `/${need(ctx, "itemId")}/fields`), { Status: STALE_FIELDS_STATUS }, { "if-match": need(ctx, "listEtagAtCreate") }),
+      judge: judgeStaleListWrite,
+    },
+    {
+      id: "L4b",
+      assumption: "the item reads back without the stale write",
+      expected: "200 with Status unchanged by L4a",
+      request: (ctx) => ({ method: "GET", url: listUrl(ctx, `/${need(ctx, "itemId")}?$expand=fields`) }),
+      judge: (res) => {
+        if (res.status !== 200) return { kind: "fail", because: `expected 200, received ${received(res)}` };
+        const status = (parse(res.body) as { fields?: { Status?: unknown } } | undefined)?.fields?.Status;
+        return status === STALE_FIELDS_STATUS ? { kind: "observed", note: "the stale write landed: Status reads as L4a sent it" } : { kind: "pass" };
+      },
+      capture: (res, ctx) => {
+        const etag = etagOf(res.body);
+        if (etag !== undefined) ctx.listEtag = etag;
+      },
+    },
+    {
+      id: "L4c",
+      assumption: "a fields PATCH under the current If-Match succeeds",
+      expected: "200",
+      request: (ctx) => {
+        need(ctx, "listEtagAtCreate");
+        return json("PATCH", listUrl(ctx, `/${need(ctx, "itemId")}/fields`), { Status: "Current write on fields" }, { "if-match": need(ctx, "listEtag") });
+      },
+      judge: (res) => (res.status === 200 ? { kind: "pass" } : { kind: "observed", note: `status ${received(res)} for a write under the eTag just read` }),
+    },
+    {
+      id: "L4d",
+      assumption: "a PATCH of the item itself, fields in the body, is refused under a stale If-Match",
+      expected: "412; a 200 means the precondition is ignored there too",
+      request: (ctx) => json("PATCH", listUrl(ctx, `/${need(ctx, "itemId")}`), { fields: { Status: "Stale write on the item" } }, { "if-match": need(ctx, "listEtagAtCreate") }),
+      judge: judgeStaleListWrite,
     },
     {
       id: "F0",

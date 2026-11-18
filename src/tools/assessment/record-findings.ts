@@ -4,11 +4,13 @@ import type { ToolContext } from "../context.js";
 import { describeToolFailure, type FailureSubject } from "../errors.js";
 import { createListItem, odataString, queryListItems, updateListItemFields, type ListItemRecord } from "../../graph/lists.js";
 import { isAssessmentProfile } from "../../domain/profile/library.js";
-import { allOf, fieldsFor, requireArtifact, requireInProgress, requireRecord } from "../../domain/assessment/state.js";
+import { fieldsFor, findingsPrecondition } from "../../domain/assessment/state.js";
 import { resolveAssessmentContext } from "./context.js";
 import { findAssessmentById, readAssessmentState } from "./read-state.js";
 import { appendJournal } from "./journal.js";
 import { refusalResult } from "./refusal.js";
+import { itemChangedText, itemWithoutEtagText } from "./item-precondition.js";
+import { withAssessmentLock } from "./keyed-lock.js";
 
 export const RECORD_INPUT_CONSTRAINTS = "Every finding's risk is one of the profile's risk labels, and no two findings share a key.";
 
@@ -89,6 +91,14 @@ function inputProblem(context: ToolContext, args: z.infer<typeof InputObject>): 
 
 export async function runRecordFindings(input: unknown, context: ToolContext): Promise<CallToolResult> {
   const args = InputObject.parse(input);
+  // The read of the existing keys and the creates are separate Graph requests, the window
+  // keyed-lock.ts describes for open_assessment. Two overlapping calls, and a retry of a slow one
+  // is enough, would each create a key, and nothing deletes a finding, so every later call would
+  // refuse on the duplicate. The lock is the assessment's, shared with the other lifecycle tools.
+  return withAssessmentLock(args.profileId, args.assessmentId, () => recordFindings(args, context));
+}
+
+async function recordFindings(args: z.infer<typeof InputObject>, context: ToolContext): Promise<CallToolResult> {
   const subject: FailureSubject = { tool: TOOL, profileId: args.profileId };
   const before = context.graph.requests();
 
@@ -105,18 +115,16 @@ export async function runRecordFindings(input: unknown, context: ToolContext): P
 
     const record = await findAssessmentById(context.graph, ac, args.assessmentId);
     const state = await readAssessmentState(context.graph, ac, record);
-    const check = allOf(
-      requireRecord(state, `${assessments.name} where ${assessments.columns.assessmentId} is "${args.assessmentId}"`),
-      requireInProgress(state, ac.profile.lifecycle.status),
-      requireArtifact(state, "dossier"),
-    );
-    if (!check.ok) return refusalResult(TOOL, STAGE, args.assessmentId, check);
+    const check = findingsPrecondition(state, ac.profile.lifecycle, `${assessments.name} where ${assessments.columns.assessmentId} is "${args.assessmentId}"`);
+    if (!check.ok) return refusalResult(TOOL, STAGE, record?.assessmentId ?? args.assessmentId, check);
     const item = record!;
+    // The id as the list stores it, which is what findings are filed under and the journal is keyed by.
+    const assessmentId = item.assessmentId;
 
     const existing = await queryListItems(context.graph, {
       siteId: ac.siteId,
       listName: findingsList.name,
-      filter: `fields/${fc.assessmentId} eq ${odataString(args.assessmentId)}`,
+      filter: `fields/${fc.assessmentId} eq ${odataString(assessmentId)}`,
     });
     const byKey = new Map<string, ListItemRecord[]>();
     for (const row of existing) {
@@ -127,17 +135,30 @@ export async function runRecordFindings(input: unknown, context: ToolContext): P
     for (const [key, rows] of byKey) {
       if (rows.length > 1) {
         return failure(
-          `${rows.length} items in list "${findingsList.name}" carry the finding key "${key}" for ${args.assessmentId} (items ${rows.map((row) => row.id).join(", ")}); ` +
+          `${rows.length} items in list "${findingsList.name}" carry the finding key "${key}" for ${assessmentId} (items ${rows.map((row) => row.id).join(", ")}); ` +
             "the server will not choose between them. Nothing was written.",
         );
       }
     }
 
-    const outcomes: { key: string; itemId: string; outcome: Outcome }[] = [];
-    for (const finding of args.findings) {
+    // What each finding needs, decided before anything is written, so an update that could carry
+    // no precondition is refused while the call has still written nothing.
+    const planned = args.findings.map((finding) => {
       const values = { [fc.observation]: finding.observation, [fc.risk]: finding.risk, [fc.recommendation]: finding.recommendation };
       const prior = byKey.get(finding.key)?.[0];
-      if (prior !== undefined && firstMismatch(values, prior.fields) === undefined) {
+      const unchanged = prior !== undefined && firstMismatch(values, prior.fields) === undefined;
+      return { finding, values, prior, unchanged };
+    });
+    // A retry whose summary and stage were already recorded does not write the assessment item.
+    const summaryHeld = item.summary === args.summary && item.state === STAGE;
+    if (!summaryHeld && item.etag === undefined) return failure(`${itemWithoutEtagText(assessments.name, item.itemId)} Nothing was written.`);
+    for (const { prior, unchanged } of planned) {
+      if (prior !== undefined && !unchanged && prior.eTag === undefined) return failure(`${itemWithoutEtagText(findingsList.name, prior.id)} Nothing was written.`);
+    }
+
+    const outcomes: { key: string; itemId: string; outcome: Outcome }[] = [];
+    for (const { finding, values, prior, unchanged } of planned) {
+      if (prior !== undefined && unchanged) {
         outcomes.push({ key: finding.key, itemId: prior.id, outcome: "unchanged" });
         continue;
       }
@@ -147,20 +168,32 @@ export async function runRecordFindings(input: unknown, context: ToolContext): P
       if (prior !== undefined) {
         sent = values;
         itemId = prior.id;
-        answered = await updateListItemFields(context.graph, { siteId: ac.siteId, listName: findingsList.name, itemId, fields: sent });
-        await appendJournal(context, ac, args.assessmentId, {
+        const priorEtag = prior.eTag!;
+        const updated = await updateListItemFields(context.graph, { siteId: ac.siteId, listName: findingsList.name, itemId, fields: sent, etag: priorEtag });
+        if (updated.kind === "precondition_failed") {
+          const created = outcomes.filter((entry) => entry.outcome === "created").length;
+          const updatedBefore = outcomes.filter((entry) => entry.outcome === "updated").length;
+          const soFar =
+            created + updatedBefore === 0
+              ? "Nothing was written."
+              : `Before it this call wrote ${created} created, ${updatedBefore} updated; the journal records them. Nothing after it was written.`;
+          return failure(`Finding "${finding.key}" on ${findingsList.name} item ${itemId} was not updated: ${itemChangedText(findingsList.name, itemId, priorEtag)} ${soFar}`);
+        }
+        answered = updated.fields;
+        await appendJournal(context, ac, assessmentId, {
           stage: STAGE,
           operation: "list_item_updated",
           target: `${findingsList.name}/${itemId}`,
-          ...(prior.eTag !== undefined ? { etagBefore: prior.eTag } : {}),
+          etagBefore: priorEtag,
+          ...(updated.eTag !== undefined ? { etagAfter: updated.eTag } : {}),
         });
         outcomes.push({ key: finding.key, itemId, outcome: "updated" });
       } else {
-        sent = { Title: finding.key, [fc.assessmentId]: args.assessmentId, [fc.findingKey]: finding.key, ...values };
+        sent = { Title: finding.key, [fc.assessmentId]: assessmentId, [fc.findingKey]: finding.key, ...values };
         const created = await createListItem(context.graph, { siteId: ac.siteId, listName: findingsList.name, fields: sent });
         itemId = created.id;
         answered = created.fields;
-        await appendJournal(context, ac, args.assessmentId, {
+        await appendJournal(context, ac, assessmentId, {
           stage: STAGE,
           operation: "list_item_created",
           target: `${findingsList.name}/${itemId}`,
@@ -189,19 +222,30 @@ export async function runRecordFindings(input: unknown, context: ToolContext): P
 
     // A retry whose summary and stage were already recorded is reported rather than written again.
     let closing: string;
-    if (item.summary === args.summary && item.state === STAGE) {
+    if (summaryHeld) {
       closing =
         counts.created + counts.updated === 0
           ? `Every finding already held the values sent, and ${assessments.name} item ${item.itemId} already held this summary and stage ${STAGE}. Nothing was written.`
           : `${assessments.name} item ${item.itemId} already held this summary and stage ${STAGE}, so it was not written.`;
     } else {
       const sent = fieldsFor(assessments.columns, { summary: args.summary, state: STAGE });
-      const answered = await updateListItemFields(context.graph, { siteId: ac.siteId, listName: assessments.name, itemId: item.itemId, fields: sent });
-      await appendJournal(context, ac, args.assessmentId, {
+      const itemEtag = item.etag!;
+      const updated = await updateListItemFields(context.graph, { siteId: ac.siteId, listName: assessments.name, itemId: item.itemId, fields: sent, etag: itemEtag });
+      if (updated.kind === "precondition_failed") {
+        const changed = itemChangedText(assessments.name, item.itemId, itemEtag);
+        return failure(
+          counts.created + counts.updated === 0
+            ? `No finding needed writing (${tally}), and the summary and stage ${STAGE} were not recorded: ${changed} Nothing was written.`
+            : `Findings recorded (${tally}), but the summary and stage ${STAGE} were not recorded: ${changed} The journal records what was written.`,
+        );
+      }
+      const answered = updated.fields;
+      await appendJournal(context, ac, assessmentId, {
         stage: STAGE,
         operation: "list_item_updated",
         target: `${assessments.name}/${item.itemId}`,
-        ...(item.etag !== undefined ? { etagBefore: item.etag } : {}),
+        etagBefore: itemEtag,
+        ...(updated.eTag !== undefined ? { etagAfter: updated.eTag } : {}),
       });
       const mismatch = firstMismatch(sent, answered);
       if (mismatch !== undefined) {
@@ -214,14 +258,14 @@ export async function runRecordFindings(input: unknown, context: ToolContext): P
     }
 
     const output = {
-      assessmentId: args.assessmentId,
+      assessmentId,
       ...counts,
       findings: outcomes,
       correlationId: ac.correlationId,
       graphRequests: context.graph.requests() - before,
     };
     const written = counts.created + counts.updated > 0 ? " Each finding written was answered with the values sent." : "";
-    const text = `Findings for ${args.assessmentId}: ${tally}.${written} ${closing}`;
+    const text = `Findings for ${assessmentId}: ${tally}.${written} ${closing}`;
     return { structuredContent: output, content: [{ type: "text" as const, text }] };
   } catch (error) {
     console.error(`${TOOL} failed for profile "${args.profileId}"`, error);

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runOpenAssessment } from "../../../src/tools/assessment/open.js";
 import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, fileItem, listItem, resultText } from "./fake-graph.js";
-import { assessmentFields, assessmentsQuery, folderCreates, idWriteBack, readBacks, vendorsQuery, workspaceReads } from "./open-script.js";
+import { assessmentFields, assessmentsQuery, folderCreates, idWriteBack, provisionalQuery, readBacks, vendorFolderQuery, vendorsQuery, workspaceReads } from "./open-script.js";
 
 const PROFILE = "vendor-assessments";
 const INPUT = { profileId: PROFILE, vendor: "Acme Corp", scope: "Security" };
@@ -51,6 +51,7 @@ describe("open_assessment failures", () => {
       ...RESOLVE_DRIVE_SCRIPT,
       vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" })]),
       assessmentsQuery("Acme Corp", []),
+      provisionalQuery("Acme Corp", []),
       { method: "post", pathIncludes: "/lists/Assessments/items", response: listItem("2", assessmentFields("Acme Corp")) },
       ...idWriteBack("Acme Corp", "2", "ASM-2026-00002", "ASM-2026-99999"),
     ]);
@@ -66,6 +67,48 @@ describe("open_assessment failures", () => {
     expect(calls.some((call) => call.path.endsWith("/children"))).toBe(false);
     expect((await context.store.listJournal(PROFILE, "(unassigned)")).map((entry) => entry.operation)).toEqual(["list_item_created"]);
     expect((await context.store.listJournal(PROFILE, "ASM-2026-00002")).map((entry) => entry.operation)).toEqual(["list_item_updated"]);
+  });
+
+  // Measured 2026-11-17 (L4a). The item was created a moment before, and something changed it
+  // before the id could be written, so the id is not written over that change.
+  it("stops before any folder when the item changed before the id was written, and adds no journal entry for the id", async () => {
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" })]),
+      assessmentsQuery("Acme Corp", []),
+      provisionalQuery("Acme Corp", []),
+      { method: "post", pathIncludes: "/lists/Assessments/items", response: listItem("2", assessmentFields("Acme Corp")) },
+      { method: "patch", pathIncludes: "/lists/Assessments/items/2/fields", throws: { status: 412, code: "resourceModified" } },
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runOpenAssessment(INPUT, context);
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toBe(
+      'The assessment id "ASM-2026-00002" was not written: Assessments item 2 changed after this call read it: Graph answered 412 to If-Match "item-2,1". ' +
+        "No folder was created. The journal records what this call did write.",
+    );
+    expect(calls.some((call) => call.path.endsWith("/children"))).toBe(false);
+    expect((await context.store.listJournal(PROFILE, "(unassigned)")).map((entry) => entry.operation)).toEqual(["list_item_created"]);
+    expect(await context.store.listJournal(PROFILE, "ASM-2026-00002")).toEqual([]);
+  });
+
+  it("stops before any folder when the item to finish was read without an eTag", async () => {
+    const bare = { ...listItem("3", assessmentFields("Acme Corp")), eTag: undefined, "@odata.etag": undefined };
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" })]),
+      assessmentsQuery("Acme Corp", [bare]),
+    ]);
+
+    const result = await runOpenAssessment(INPUT, assessmentToolContext(graph));
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toBe(
+      "Assessments item 3 was read without an ETag, so no If-Match precondition could be sent. The assessment id was not written and no folder was created.",
+    );
+    expect(calls.filter((call) => call.method !== "get")).toEqual([]);
   });
 
   it("names the root path when the root does not read back after the creates", async () => {
@@ -126,5 +169,57 @@ describe("open_assessment failures", () => {
     expect(text).toContain("with 403 (accessDenied)");
     expect(text).toContain('while serving open_assessment for profile "vendor-assessments"');
     expect(text).toContain("This server does not infer a cause from the status.");
+  });
+
+  it("refuses a new vendor name whose folder another vendor record already uses, writing nothing", async () => {
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([], "Acme Corp."),
+      vendorFolderQuery("Acme Corp", [listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" })]),
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runOpenAssessment({ ...INPUT, vendor: "Acme Corp." }, context);
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toBe(
+      'The vendor name "Acme Corp." files under the folder "Acme Corp", which the vendor record "Acme Corp" (Vendors item 7) already uses. ' +
+        'If they are the same vendor, open under "Acme Corp". Nothing was written.',
+    );
+    expect(calls.filter((call) => call.method !== "get")).toEqual([]);
+    expect(await context.store.listJournal(PROFILE, "(vendor)")).toEqual([]);
+  });
+
+  it("refuses a new vendor name when a record with no stored folder already files under the same sanitized name", async () => {
+    // Vendors item 7 has no FolderName, so it files under its own Title, "Acme Corp". The folder
+    // column query cannot see it, which is why the Title is asked for as well.
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([], "Acme Corp."),
+      vendorFolderQuery("Acme Corp", []),
+      vendorsQuery([listItem("7", { Title: "Acme Corp" })], "Acme Corp"),
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runOpenAssessment({ ...INPUT, vendor: "Acme Corp." }, context);
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toBe(
+      'The vendor name "Acme Corp." files under the folder "Acme Corp", which the vendor record "Acme Corp" (Vendors item 7) already uses. ' +
+        'If they are the same vendor, open under "Acme Corp". Nothing was written.',
+    );
+    expect(calls.filter((call) => call.method !== "get")).toEqual([]);
+  });
+
+  it("refuses before any write when the vendor's stored folder cannot be rendered into a path", async () => {
+    const { graph, calls } = createScriptedGraph([...RESOLVE_DRIVE_SCRIPT, vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: ".." })])]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runOpenAssessment(INPUT, context);
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toContain('has a ".." segment');
+    expect(resultText(result)).toContain("Nothing was written.");
+    expect(calls.filter((call) => call.method !== "get")).toEqual([]);
   });
 });

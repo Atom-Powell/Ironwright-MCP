@@ -18,7 +18,7 @@ export const SAFETY_SENTENCES = {
   additiveWrite:
     "Not read-only: this tool creates missing items in the repository when confirmed. It defaults to a dry run and skips items that already exist.",
   lifecycle:
-    "Not read-only: this tool advances an assessment by one stage when its preconditions hold. It creates records and files only at paths the server computes, overwrites only files it created and only under an ETag precondition, refuses when the prior stage is not verified, and records every write in the assessment journal. It needs no confirm flag and is safe to retry: a stage already completed is reported, not repeated.",
+    "Not read-only: this tool advances an assessment by one stage when its preconditions hold. It creates records and files only at paths the server computes, changes an existing file or list item only under the ETag it just read, refuses when the prior stage is not verified, and records every write in the assessment journal. It needs no confirm flag and is safe to retry: a stage already completed is reported, not repeated.",
 } as const;
 
 export function requiredSentence(kind: ToolKind, destructive: boolean): string {

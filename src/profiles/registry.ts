@@ -88,14 +88,20 @@ export class AssessmentProfileError extends Error {
 }
 
 /**
- * Validates with the module that owns the profile's kind. An absent kind means
- * compliance, the default every profile written before kinds existed relies on.
+ * The one loader for a profile of any kind, and the one the server starts
+ * with: it validates with the module that owns the profile's kind. An absent
+ * kind means compliance, the default every profile written before kinds
+ * existed relies on.
+ *
+ * It lives here and not in the domain layer because choosing a module is the
+ * registry's job. A second dispatcher used to sit beside the library schema,
+ * reached only by tests, so the profile tests exercised a path the server
+ * never ran.
  */
-function loadThroughModule(contents: unknown, modules: readonly DomainModule[]): AnyProfile {
+export function loadAnyProfile(contents: unknown, modules: readonly DomainModule[] = ALL_MODULES): AnyProfile {
   const normalized = normalizeProfileSites(contents);
-  // Only an absent kind means compliance. `?? "compliance"` would also take a
-  // null, which loadAnyProfile refuses, and two dispatchers disagreeing on one
-  // input is a way for a profile to load through one path and not the other.
+  // Only an absent kind means compliance. `?? "compliance"` would also take a null, and a null kind
+  // is a mistake in the file, not a profile written before kinds existed.
   const declared = typeof normalized === "object" && normalized !== null ? (normalized as { kind?: unknown }).kind : undefined;
   const kind = declared === undefined ? "compliance" : declared;
   const module = moduleForKind(kind as string, modules);
@@ -174,7 +180,7 @@ export function createProfileRegistry(
   for (const entry of entries) {
     let profile: AnyProfile;
     try {
-      profile = loadThroughModule(entry.contents, modules);
+      profile = loadAnyProfile(entry.contents, modules);
     } catch (error) {
       if (!(error instanceof ProfileValidationError)) throw error;
       issues.push(`${entry.source}: ${error.issues.join("; ")}`);

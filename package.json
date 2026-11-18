@@ -20,7 +20,10 @@
     "probe:assessment:seed": "tsx scripts/assessment-probe/seed.ts",
     "probe:assessment:grant": "tsx scripts/assessment-probe/grant.ts",
     "probe:assessment": "tsx scripts/assessment-probe/main.ts",
-    "campaign": "tsx scripts/pre-eon/campaign.ts"
+    "campaign": "tsx scripts/pre-eon/campaign.ts",
+    "sitting": "tsx scripts/pre-eon/sitting.ts",
+    "sim": "tsx scripts/sim/main.ts",
+    "sim:walkthrough": "tsx scripts/sim/walkthrough-main.ts"
   },
   "repository": {
     "type": "git",

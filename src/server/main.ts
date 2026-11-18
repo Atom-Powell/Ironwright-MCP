@@ -12,6 +12,8 @@ import { ensureTables, tableStateStoreFromConnectionString } from "../store/tabl
 import { createScanCoordinator } from "../scan/coordinator.js";
 import type { StateStore } from "../store/types.js";
 import type { ToolContext } from "../tools/context.js";
+import { SERVER_NAME, formatToolCallRecord } from "../mcp/build-server.js";
+import { SERVER_VERSION } from "../version.js";
 
 async function main(): Promise<void> {
   const config = loadConfig(process.env);
@@ -58,7 +60,10 @@ async function main(): Promise<void> {
 
   const app = createApp({
     auth: inboundAuth,
-    serverFactory: () => buildServer({ allowWrites: config.allowWrites, context }),
+    version: SERVER_VERSION,
+    // One line per tool call on stdout, beside the startup line. Failures keep going to stderr
+    // with their detail; this line is the record that a call happened and how it ended.
+    serverFactory: () => buildServer({ allowWrites: config.allowWrites, context, onToolCall: (record) => console.log(formatToolCallRecord(record)) }),
   });
 
   const profileCount = profiles.ids().length;
@@ -84,7 +89,7 @@ async function main(): Promise<void> {
     if (!server.listening) return;
 
     console.log(
-      `listening on ${host === undefined ? "port " : `${host}:`}${config.port}, site ${grantedSiteUrl}, writes ${config.allowWrites ? "enabled" : "disabled"}, ` +
+      `${SERVER_NAME} ${SERVER_VERSION} listening on ${host === undefined ? "port " : `${host}:`}${config.port}, site ${grantedSiteUrl}, writes ${config.allowWrites ? "enabled" : "disabled"}, ` +
         `${profileCount} ${profileCount === 1 ? "profile" : "profiles"} from ${config.profileDir}, ` +
         `${storeKind} store, inbound auth ${inboundAuth.mode}`,
     );

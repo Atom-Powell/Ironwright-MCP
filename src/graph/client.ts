@@ -1,5 +1,5 @@
 import { GraphRequestError, GraphResponseTooLargeError } from "./errors.js";
-import { defaultRetryPolicy, isRetriableStatus, withRetry, type RetryPolicy } from "./retry.js";
+import { defaultRetryPolicy, isGatewayStatus, isRetriableStatus, withRetry, type RetryPolicy } from "./retry.js";
 import { TokenRequestError, UnexpectedTokenRolesError, type TokenProvider } from "./token.js";
 
 /**
@@ -153,10 +153,19 @@ export function createGraphClient(options: GraphClientOptions): GraphClient {
     // that names no request, and that fragment is what the operator reads.
     const label = url.startsWith(GRAPH_BASE) ? url.slice(GRAPH_BASE.length) : url;
 
+    // A write under a precondition is not replayed on a gateway status. Ruled 2026-11-17. The
+    // gateway does not say whether Graph applied the request, and If-Match makes a replay of one
+    // that did land answer 412, which every caller reports as an item someone else changed with
+    // nothing written by this call. That is the confident wrong answer the PATCH comment below
+    // refuses for a transport rejection, reached by a returned status. 429 and 503 are still
+    // retried: there the service itself said it did not act. Whether Graph ever answers 502 or
+    // 504 after committing has not been measured; the cost of assuming it cannot is the wrong
+    // report, and the cost of assuming it can is one error where a retry might have succeeded.
+    const conditionalWrite = requestOptions.method !== "GET" && Object.keys(requestOptions.headers ?? {}).some((name) => name.toLowerCase() === "if-match");
     const result = await withRetry(
       retry,
       () => send(url, requestOptions),
-      (value) => ({ retriable: isRetriableStatus(value.status), retryAfter: value.retryAfter }),
+      (value) => ({ retriable: isRetriableStatus(value.status) && !(conditionalWrite && isGatewayStatus(value.status)), retryAfter: value.retryAfter }),
       requestOptions.retryTransportErrors ? isRetriableTransportError : () => false,
     );
 

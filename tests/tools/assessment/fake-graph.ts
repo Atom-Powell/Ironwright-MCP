@@ -5,6 +5,7 @@ import { GraphRequestError } from "../../../src/graph/errors.js";
 import { createProfileRegistry } from "../../../src/profiles/registry.js";
 import type { ToolContext } from "../../../src/tools/context.js";
 import { createFakeToolContext } from "../fake-context.js";
+import { REFUSAL_META_KEY } from "../../../src/tools/assessment/refusal.js";
 import { F0_FOLDER_CREATED, F2A_FILE_CREATED, L2A_ITEM_CREATED } from "../../graph/fixtures/assessment-probe.js";
 
 export type ScriptedMethod = "get" | "post" | "patch" | "putBytes" | "getBytes";
@@ -148,4 +149,9 @@ export function assessmentToolContext(graph: GraphClient): ToolContext {
 
 export function resultText(result: CallToolResult): string {
   return result.content.map((entry) => ("text" in entry ? entry.text : "")).join(" ");
+}
+
+/** A refusal's structured form, which rides under `_meta` and never as structured content. */
+export function refusalOf(result: CallToolResult): Record<string, unknown> | undefined {
+  return (result._meta as Record<string, unknown> | undefined)?.[REFUSAL_META_KEY] as Record<string, unknown> | undefined;
 }

@@ -39,6 +39,8 @@ used for development.
   items, decisions needing a human, and an honest record of what is verified against a live
   tenant versus only against fakes.
 - `docs/SETUP.md` is the per-tenant operational procedure.
+- `docs/SIMULATOR.md` describes the simulated tenant: the assessment tools run end to end with no
+  tenant, and the table of which simulated behaviors were measured and which are modeled.
 - `docs/superpowers/plans/` holds executed implementation plans, kept as history.
 - `competitive-landscape-refresh-2026-09-24.md` is the current competitive picture: MCP
   marketplaces, adjacent products and user feedback, citation-audited. It corrects parts of the
@@ -80,7 +82,11 @@ etag fetch costs one per candidate, and an excluded item costs none. Amended 202
 `parentReference.path` written RAW, since Graph refuses a percent-encoded folder with the same
 generic 400 an absent folder gets; one PATCH moves and renames together; and every move sends
 `conflictBehavior: fail`, which makes 6b-1 `conflictBehavior`'s first caller. Under it, an
-occupied target name answers 409 `nameAlreadyExists` and nothing is replaced.
+occupied target name answers 409 `nameAlreadyExists` and nothing is replaced. Amended 2026-11-17
+by an operator ruling: a write that carries `If-Match` is sent once when the answer is 502 or 504.
+A gateway status does not say whether Graph applied the request, and a replay of one that landed
+is refused by its own precondition with 412, which reads as a change someone else made. 429 and
+503 are still retried.
 
 **Reading the workbook. Rewritten 2026-09-16 by a live tenant run; the previous entry is void.**
 The Graph Excel API is unreachable from this server. `/workbook/` calls are refused with 403
@@ -168,6 +174,15 @@ The code holds invariants and the profile holds every convention a customer woul
 theirs; no customer constant enters the code. Spec:
 `docs/superpowers/specs/2026-11-06-domain-platform-and-assessment-domain-design.md`.
 
+Amended 2026-11-17: the assessment module's workflow is itself profile data. The module had held
+one workflow's vocabulary, a dossier and a publication, which is a convention a customer would
+recognize as theirs. Which artifact kinds gate each stage, which are produced outside the server
+and which are corrected when overwritten are now settings of the profile, defaulting to vendor
+risk, so one module serves the record keeping of a managed service provider: a client onboarding
+or an incident record is a profile, not a module. The identity boundary does not move with it.
+What a service provider administers, as against what it records, stays out of reach by design.
+Spec: `docs/superpowers/specs/2026-11-17-profile-defined-lifecycle-design.md`.
+
 **Setup.** Two phases, because a live run proved Graph refuses a delegated token on the per-site
 grant endpoint even for a Global Administrator. A separate grant-issuer application holds
 `Sites.FullControl.All` and issues that grant with an app-only token, so the server's own
@@ -182,14 +197,22 @@ path rather than a separate one.
 Amended 2026-11-06: that rule governs every mutating tool over content the server did not create.
 A lifecycle tool, the fourth tool kind, is gated by state preconditions instead of a dry run: it
 refuses unless the prior stage is verified live in the lists and the drive, it creates records and
-files only at paths the server computes, it overwrites only a file it created and only under an
-ETag precondition, and it records every write in a per-assessment journal. One call per stage, no
+files only at paths the server computes, it changes an existing file or list item only under the
+ETag it just read, and it records every write in a per-assessment journal. One call per stage, no
 confirm flag, safe to retry because a completed stage is reported rather than repeated. The reason
 is a collision between the dry-run default and the assessment consumer's operating model, which
 says never ask permission between workflow stages; a confirm flag is the moment generative
 orchestration has been observed stopping to ask. The human review the dry run protected exists in
 that workflow at the Evidence Auditor and the published document. Rollback of lifecycle writes is
 held, because it would be this server's first delete.
+
+Amended 2026-11-17 by an operator ruling: the sentence above used to say a lifecycle tool
+"overwrites only a file it created". The server could not keep that. The only record of what it
+created is the journal, which is lost on restart without a table store, and a save has always
+overwritten whatever file sat at the artifact's computed path. What it can keep, and now says, is
+that the path is the server's own and that nothing changed since the tool's read is written over.
+The same day's probe showed Graph enforces `If-Match` on a list item's fields, so the ETag half of
+the rule now covers the assessment item and the findings as well as the files.
 
 ## Tool Set
 
@@ -207,17 +230,18 @@ held, because it would be this server's first delete.
 | `replicate_template` | write | Validates the source client internally before replicating |
 | `generate_custom_plan` | plan | Steps an operator describes, resolved against the index; no workbook needed |
 | `execute_custom_plan` | write | Dry run by default, ETag preconditions, reversal log; library-only profiles allowed |
-| `open_assessment` | lifecycle | Finds or creates the vendor, creates the assessment item, renders the id from the item id, creates the workspace; returns an open one instead of a second |
+| `open_assessment` | lifecycle | Finds or creates the vendor, creates the assessment item, renders the id from the item id, creates the workspace; returns one already in progress or provisional instead of a second |
 | `save_assessment_artifact` | lifecycle | Creates at the profile's path or overwrites under the ETag it just read; reads back; `publication` refused |
 | `read_assessment_artifact` | read | The persisted text and its hash, for the auditor |
 | `record_findings` | lifecycle | One item per finding, keyed so a retry updates; writes the summary |
-| `transition_assessment` | lifecycle | Completed needs dossier and publication present; provisional needs the dossier |
-| `verify_publication` | read | What is at the publication's canonical path |
-| `get_assessment` | read | Status, artifact presence and the journal summary, by id or by vendor |
+| `transition_assessment` | lifecycle | Completed needs dossier and publication present and is reached from in progress or provisional; provisional needs the dossier |
+| `verify_publication` | read | What is at the canonical path of an artifact produced outside the server, by default the publication |
+| `get_assessment` | read | By id: status, artifact presence, what each lifecycle tool's precondition finds and the journal summary, with the findings and journal entries on request. Or a listing by vendor or by status |
 
 A profile is `compliance` (the default: workbook, taxonomy, naming, deliverables), `library`
 (site and library only) or `assessment` (a site, a library, a workspace, three lists and the
-lifecycle labels). A library-only profile works with `inventory_tree`, `query_repository`'s
+lifecycle: its labels, and since phase 10 which artifact kinds gate each stage, which are produced
+outside the server and which are corrected when overwritten). A library-only profile works with `inventory_tree`, `query_repository`'s
 `empty_folders` question and the two custom plan tools, and the four tools that accept a library
 profile accept an assessment profile too; every other tool refuses a library profile before any
 Graph request, and `tests/tools/profile-kinds.test.ts` makes every tool declare which it is.
@@ -322,6 +346,12 @@ frozen at the end of `docs/OPEN-ITEMS.md`.
    and the grant, 9b the core (modules, site sets, inbound authentication, the lifecycle kind, the
    Graph operations, the journal), 9c the assessment module, 9d ingress and Copilot Studio contact.
    The CPA practice domain follows as its own phase once 9 is verified live.
+10. **Profile defined lifecycles**, added 2026-11-17 for the pilot at a managed service provider and
+   numbered last for the same reason 9 was. The assessment module's gates, its external kinds and
+   its corrected kinds become profile data, so the seven tools run a client onboarding or an
+   incident record as they run vendor risk, per
+   `docs/superpowers/specs/2026-11-17-profile-defined-lifecycle-design.md`. One site per client is
+   not in it: that is the multi-site work that follows 9, which a service provider now needs too.
 8. **Evaluation suite**, whose questions are already written in `docs/EVALUATION-QUESTIONS.md`, so
    that phase 3 had a concrete target rather than inventing its own test afterward.
 

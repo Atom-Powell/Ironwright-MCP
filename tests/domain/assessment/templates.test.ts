@@ -14,6 +14,19 @@ describe("renderWorkspaceTemplate", () => {
       }),
     ).toBe("Assessments/Acme Corp/ASM-2026-00002/Acme Corp");
   });
+
+  it("renders {vendor} without the characters SharePoint refuses in a name, so a display name cannot add a path segment", () => {
+    const render = (vendor: string): string => renderWorkspaceTemplate("Research/{vendor}_Research_Dossier.md", { vendor, vendorFolder: "V", assessmentId: "A-1" });
+    expect(render('Acme: Cloud "West"')).toBe("Research/Acme Cloud West_Research_Dossier.md");
+    expect(render("AC/DC")).toBe("Research/ACDC_Research_Dossier.md");
+    expect(render("x/../../y")).toBe("Research/x....y_Research_Dossier.md");
+  });
+
+  it("leaves a dot and the spacing of a display name alone, so a name SharePoint already accepts renders as it always did", () => {
+    const render = (vendor: string): string => renderWorkspaceTemplate("Research/{vendor}_Research_Dossier.md", { vendor, vendorFolder: "V", assessmentId: "A-1" });
+    expect(render("Acme Inc.")).toBe("Research/Acme Inc._Research_Dossier.md");
+    expect(render("Acme  Corp")).toBe("Research/Acme  Corp_Research_Dossier.md");
+  });
 });
 
 describe("renderAssessmentId", () => {
@@ -37,6 +50,10 @@ describe("sanitizeFolderName", () => {
   });
   it("returns an empty string when nothing survives", () => {
     expect(sanitizeFolderName('"*:<>?/\\|')).toBe("");
+  });
+  it("leaves nothing of a name made only of dots and spaces, which would otherwise render as a . segment", () => {
+    expect(sanitizeFolderName(". .")).toBe("");
+    expect(sanitizeFolderName("Acme Inc. .")).toBe("Acme Inc");
   });
 });
 

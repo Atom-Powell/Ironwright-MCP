@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { runOpenAssessment } from "../../../src/tools/assessment/open.js";
 import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, listItem, resultText } from "./fake-graph.js";
-import { assessmentFields, assessmentsQuery, firstOpenScript, folderCreates, idWriteBack, readBacks, workspaceReads, vendorsQuery } from "./open-script.js";
+import { assessmentFields, assessmentsQuery, firstOpenScript, folderCreates, idWriteBack, provisionalQuery, readBacks, workspaceReads, vendorFolderQuery, vendorsQuery } from "./open-script.js";
 
 const PROFILE = "vendor-assessments";
 const INPUT = { profileId: PROFILE, vendor: "Acme Corp", scope: "Security" };
@@ -90,6 +90,51 @@ describe("open_assessment", () => {
     expect(resultText(result)).toBe(
       "ASM-2026-00002 for Acme Corp (Security) is already open; nothing was written. Workspace Assessments/Acme Corp/ASM-2026-00002: root and 3 subfolders read as folders.",
     );
+  });
+
+  // Ruled 2026-11-17: provisional is not an end state. An assessment parked there is still the
+  // vendor's open assessment, and a second one for the same scope was how it used to be finished.
+  it("returns a provisional assessment for the vendor and scope instead of opening a second", async () => {
+    const parked = listItem("2", { ...assessmentFields("Acme Corp"), AssessmentId: "ASM-2026-00002", Status: "Provisional", State: "LIFECYCLE" });
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" })]),
+      assessmentsQuery("Acme Corp", []),
+      provisionalQuery("Acme Corp", [parked]),
+      ...workspaceReads("Acme Corp", "ASM-2026-00002"),
+    ]);
+
+    const result = await runOpenAssessment(INPUT, assessmentToolContext(graph));
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toMatchObject({ assessmentId: "ASM-2026-00002", created: false, resumed: false, status: "Provisional" });
+    expect(calls.filter((call) => call.method !== "get")).toEqual([]);
+    expect(resultText(result)).toBe(
+      'ASM-2026-00002 for Acme Corp (Security) is already open with status "Provisional"; nothing was written. ' +
+        "Workspace Assessments/Acme Corp/ASM-2026-00002: root and 3 subfolders read as folders.",
+    );
+  });
+
+  it("prefers the assessment in progress, and does not ask for a provisional one, when both exist", async () => {
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" })]),
+      assessmentsQuery("Acme Corp", [listItem("5", { ...assessmentFields("Acme Corp"), AssessmentId: "ASM-2026-00005" })]),
+      ...workspaceReads("Acme Corp", "ASM-2026-00005"),
+    ]);
+
+    const result = await runOpenAssessment(INPUT, assessmentToolContext(graph));
+
+    expect(result.structuredContent).toMatchObject({ assessmentId: "ASM-2026-00005", status: "In Progress" });
+    expect(calls.filter((call) => decodeURIComponent(call.path).includes("Status eq 'Provisional'"))).toEqual([]);
+  });
+
+  it("writes the id under the eTag the new item was created with", async () => {
+    const { graph, calls } = createScriptedGraph(firstOpenScript());
+
+    await runOpenAssessment(INPUT, assessmentToolContext(graph));
+
+    expect(calls.filter((call) => call.method === "patch").map((call) => call.headers)).toEqual([{ "if-match": '"item-2,1"' }]);
   });
 
   it("serializes two concurrent opens for one vendor, so the second finds what the first created", async () => {
@@ -213,6 +258,7 @@ describe("open_assessment", () => {
       ...RESOLVE_DRIVE_SCRIPT,
       vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: "ACME" })]),
       assessmentsQuery("ACME", []),
+      provisionalQuery("ACME", []),
       { method: "post", pathIncludes: "/lists/Assessments/items", response: listItem("2", assessmentFields("ACME")) },
       ...idWriteBack("ACME", "2", "ASM-2026-00002"),
       ...folderCreates("ACME", "ASM-2026-00002"),
@@ -227,5 +273,121 @@ describe("open_assessment", () => {
     expect((create?.body as { fields: Record<string, unknown> }).fields.VendorFolder).toBe("ACME");
     expect((result.structuredContent as Record<string, unknown>).workspaceRoot).toBe("Assessments/ACME/ASM-2026-00002");
     expect(calls.some((call) => call.method === "post" && call.path.includes("/lists/Vendors/"))).toBe(false);
+  });
+
+  it("serializes concurrent opens whose vendor names differ only by case, since SharePoint matches them as one vendor", async () => {
+    const { graph } = createScriptedGraph([
+      ...firstOpenScript(),
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" })], "acme corp"),
+      assessmentsQuery("Acme Corp", [listItem("2", { ...assessmentFields("Acme Corp"), AssessmentId: "ASM-2026-00002" })]),
+      ...workspaceReads("Acme Corp", "ASM-2026-00002"),
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const [first, second] = await Promise.all([runOpenAssessment(INPUT, context), runOpenAssessment({ ...INPUT, vendor: "acme corp" }, context)]);
+
+    expect(first.isError).toBeUndefined();
+    expect(second.isError).toBeUndefined();
+    expect((first.structuredContent as Record<string, unknown>).created).toBe(true);
+    expect((second.structuredContent as Record<string, unknown>).created).toBe(false);
+  });
+
+  it("titles a new assessment with the vendor record's stored name, not the caller's spelling of it", async () => {
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" })], "acme corp"),
+      assessmentsQuery("Acme Corp", []),
+      provisionalQuery("Acme Corp", []),
+      { method: "post", pathIncludes: "/lists/Assessments/items", response: listItem("2", assessmentFields("Acme Corp")) },
+      ...idWriteBack("Acme Corp", "2", "ASM-2026-00002"),
+      ...folderCreates("Acme Corp", "ASM-2026-00002"),
+      ...readBacks("Acme Corp", "ASM-2026-00002"),
+    ]);
+
+    const result = await runOpenAssessment({ ...INPUT, vendor: "acme corp" }, assessmentToolContext(graph));
+
+    expect(result.isError).toBeUndefined();
+    const created = calls.find((call) => call.method === "post" && call.path.includes("/lists/Assessments/items"))!;
+    expect((created.body as { fields: Record<string, unknown> }).fields.Title).toBe("Acme Corp");
+    expect((result.structuredContent as Record<string, unknown>).vendor).toBe("Acme Corp");
+  });
+
+  it("files a vendor with no stored folder under its stored name, not under the caller's spelling of it", async () => {
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([listItem("7", { Title: "Acme Corp" })], "ACME CORP"),
+      assessmentsQuery("Acme Corp", []),
+      provisionalQuery("Acme Corp", []),
+      { method: "post", pathIncludes: "/lists/Assessments/items", response: listItem("2", assessmentFields("Acme Corp")) },
+      ...idWriteBack("Acme Corp", "2", "ASM-2026-00002"),
+      ...folderCreates("Acme Corp", "ASM-2026-00002"),
+      ...readBacks("Acme Corp", "ASM-2026-00002"),
+    ]);
+
+    const result = await runOpenAssessment({ ...INPUT, vendor: "ACME CORP" }, assessmentToolContext(graph));
+
+    expect(result.isError).toBeUndefined();
+    const created = calls.find((call) => call.method === "post" && call.path.includes("/lists/Assessments/items"))!;
+    expect((created.body as { fields: Record<string, unknown> }).fields.VendorFolder).toBe("Acme Corp");
+    expect((result.structuredContent as Record<string, unknown>).workspaceRoot).toBe("Assessments/Acme Corp/ASM-2026-00002");
+  });
+
+  it("creates the vendor when the record holding the sanitized name as its Title files under another folder", async () => {
+    // "Acme Corp" is taken as a Title, but that record files under "ACME", so nothing files under
+    // "Acme Corp" yet and "Acme Corp." may take it.
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([], "Acme Corp."),
+      vendorFolderQuery("Acme Corp", []),
+      vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: "ACME" })], "Acme Corp"),
+      { method: "post", pathIncludes: "/lists/Vendors/items", response: listItem("8", { Title: "Acme Corp.", FolderName: "Acme Corp" }) },
+      assessmentsQuery("Acme Corp", []),
+      provisionalQuery("Acme Corp", []),
+      { method: "post", pathIncludes: "/lists/Assessments/items", response: listItem("2", assessmentFields("Acme Corp")) },
+      ...idWriteBack("Acme Corp", "2", "ASM-2026-00002"),
+      ...folderCreates("Acme Corp", "ASM-2026-00002"),
+      ...readBacks("Acme Corp", "ASM-2026-00002"),
+    ]);
+
+    const result = await runOpenAssessment({ ...INPUT, vendor: "Acme Corp." }, assessmentToolContext(graph));
+
+    expect(result.isError).toBeUndefined();
+    const vendor = calls.find((call) => call.method === "post" && call.path.includes("/lists/Vendors/items"))!;
+    expect((vendor.body as { fields: Record<string, unknown> }).fields).toEqual({ Title: "Acme Corp.", FolderName: "Acme Corp" });
+    expect(calls.filter((call) => call.method === "get" && call.path.includes("/lists/Vendors/items?"))).toHaveLength(3);
+  });
+
+  it("serializes concurrent opens for two vendor records that share one stored folder", async () => {
+    // The in progress lookup is by folder, so the two names race for one assessment although
+    // their names differ. The second call's lookup must come after the first call's create.
+    const stored = (title: string): unknown => listItem(title === "Acme Corp" ? "7" : "8", { Title: title, FolderName: "ACME" });
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([stored("Acme Corp")], "Acme Corp"),
+      vendorsQuery([stored("Acme Holdings")], "Acme Holdings"),
+      assessmentsQuery("ACME", []),
+      provisionalQuery("ACME", []),
+      { method: "post", pathIncludes: "/lists/Assessments/items", response: listItem("2", assessmentFields("ACME")) },
+      ...idWriteBack("ACME", "2", "ASM-2026-00002"),
+      ...folderCreates("ACME", "ASM-2026-00002"),
+      ...readBacks("ACME", "ASM-2026-00002"),
+      assessmentsQuery("ACME", [listItem("2", { ...assessmentFields("ACME"), AssessmentId: "ASM-2026-00002" })]),
+      ...workspaceReads("ACME", "ASM-2026-00002"),
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const results = await Promise.all([runOpenAssessment(INPUT, context), runOpenAssessment({ ...INPUT, vendor: "Acme Holdings" }, context)]);
+
+    expect(results.map((result) => result.isError)).toEqual([undefined, undefined]);
+    // The in progress lookups, one per call. The first call also asks for a provisional
+    // assessment on its way to creating one, which is not what this test orders.
+    const lookups = calls.flatMap((call, index) =>
+      call.method === "get" && call.path.includes("/lists/Assessments/items?") && decodeURIComponent(call.path).includes("Status eq 'In Progress'") ? [index] : [],
+    );
+    const create = calls.findIndex((call) => call.method === "post" && call.path.includes("/lists/Assessments/items"));
+    expect(lookups).toHaveLength(2);
+    expect(lookups[1]).toBeGreaterThan(create);
   });
 });

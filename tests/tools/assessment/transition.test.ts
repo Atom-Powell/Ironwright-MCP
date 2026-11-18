@@ -85,4 +85,54 @@ describe("transition_assessment", () => {
     expect(calls.filter((call) => call.method !== "get")).toEqual([]);
     expect(await context.store.listJournal(PROFILE, ID)).toEqual([]);
   });
+
+  it("sends the update under the eTag the item was read with", async () => {
+    const values = { Status: "Completed", Disposition: "Approved", Risk: "Low", State: "LIFECYCLE" };
+    const { graph, calls } = createScriptedGraph([
+      ...stateScript({ dossier: dossierItem('"d1"', 120), publication: PUBLICATION }),
+      ...patchAndReadBack(values),
+    ]);
+
+    await runTransitionAssessment(INPUT, assessmentToolContext(graph));
+
+    expect(calls.filter((call) => call.method === "patch").map((call) => call.headers)).toEqual([{ "if-match": '"item-2,1"' }]);
+  });
+
+  // Ruled 2026-11-17: provisional is not an end state. It waits on the publication, and an
+  // assessment that could never leave it forced a second assessment for the same work.
+  it("completes a provisional assessment once its publication is present", async () => {
+    const values = { Status: "Completed", Disposition: "Approved", Risk: "Low", State: "LIFECYCLE" };
+    const { graph, calls } = createScriptedGraph([
+      ...stateScript({
+        fields: { Status: "Provisional", Disposition: "Approved with conditions", Risk: "Medium", State: "LIFECYCLE" },
+        dossier: dossierItem('"d1"', 120),
+        publication: PUBLICATION,
+      }),
+      ...patchAndReadBack(values),
+    ]);
+
+    const result = await runTransitionAssessment(INPUT, assessmentToolContext(graph));
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toMatchObject({ transitioned: true, previousStatus: "Provisional", status: "Completed" });
+    expect(calls.filter((call) => call.method === "patch").map((call) => call.body)).toEqual([values]);
+    expect(resultText(result)).toContain('from "Provisional" to "Completed"');
+  });
+
+  it("journals and reports under the stored assessment id when the caller's spelling differs by case", async () => {
+    const typed = ID.toLowerCase();
+    const values = { Status: "Completed", Disposition: "Approved", Risk: "Low", State: "LIFECYCLE" };
+    const { graph } = createScriptedGraph([
+      ...stateScript({ typedId: typed, dossier: dossierItem('"d1"', 120), publication: PUBLICATION }),
+      ...patchAndReadBack(values),
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runTransitionAssessment({ ...INPUT, assessmentId: typed }, context);
+
+    expect(result.isError).toBeUndefined();
+    expect((result.structuredContent as Record<string, unknown>).assessmentId).toBe(ID);
+    expect(await context.store.listJournal(PROFILE, ID)).toHaveLength(1);
+    expect(await context.store.listJournal(PROFILE, typed)).toEqual([]);
+  });
 });

@@ -268,8 +268,8 @@ SharePoint and cannot be mapped: the module writes the vendor's display name the
 assessments, and the finding key on findings.
 
 The module filters list items on the assessment id, vendor folder, scope and status columns of the
-assessments list, the assessment id column of the findings list, and `Title` of the vendors list.
-Index each of those in the list settings. Every filtered query sends `Prefer:
+assessments list, the assessment id column of the findings list, and `Title` and the folder name
+column of the vendors list. Index each of those in the list settings. Every filtered query sends `Prefer:
 HonorNonIndexedQueriesWarningMayFailRandomly`, which lets a query on a non-indexed column succeed,
 but SharePoint may refuse such a query once the list passes its view threshold (measured
 2026-11-07). A refused filtered query surfaces as the Graph error, whose own message names the
@@ -281,6 +281,17 @@ server application's grant must hold `write` for them. Widen it with
 `npm run probe:assessment:grant -- --roles=write` and restore it with `--roles=read`. Saved
 artifact content is capped at 4 MiB, and the `publication` kind is never written by this server,
 only verified.
+
+The workflow itself is the profile's. Three optional settings under `lifecycle` say which
+artifact kinds each stage waits on (`gates`, with `findings`, `provisional` and `completed`), which
+kinds are produced outside the server (`external`) and which are recorded as a correction when
+overwritten (`corrected`). A profile that sets none gets the vendor risk workflow: findings and a
+provisional status wait on `dossier`, completion on `dossier` and `publication`, `publication` is
+external, and an overwritten `dossier` is a correction. The lists need not be about vendors at
+all. `examples/profiles/msp-client-onboarding.json` and `examples/profiles/msp-security-incident.json`
+run a client onboarding and an incident record on the same tools, with their own list names,
+column names, kinds and gates. The tool and field names do not change with the profile, so the
+party a case is about is passed as `vendor` whatever the lists call it.
 
 Provisioning the three lists from the profile is not built. An operator creates them by hand, or
 uses the probe's seed (`npm run probe:assessment:seed`, under `scripts/assessment-probe/`) as a
@@ -578,6 +589,36 @@ Until phase 4a wired the first tool, none of this was read by the server itself:
 `IW_PROFILE_DIR` at all. As of this branch the server requires these variables at startup and
 will not come up without them. See `src/server/config.ts` and `src/config.ts` for what is
 actually checked.
+
+### What the server logs and reports
+
+The startup line names the server and its version, read from `package.json`, beside the port, the
+site, the write setting, the profile count, the store and the inbound authentication mode.
+`GET /health` reports the same version, so which build is answering can be asked without a shell
+on the host. `/health` still reaches nothing: the version is a string the process already holds.
+
+Every tool call writes one line of JSON to stdout once it settles:
+
+```
+{"event":"tool_call","at":"2026-11-17T09:00:00.000Z","tool":"open_assessment","kind":"lifecycle","outcome":"ok","ms":412,"profileId":"vendor-assessments","assessmentId":"ASM-2026-00002","correlationId":"6f1c...","graphRequests":14}
+```
+
+`outcome` is `ok`, `refused` (a lifecycle precondition did not hold, which is the tool working),
+`error` (any other error result) or `threw`. An `error` is either a failure the tool caught, which
+it also wrote to stderr with its detail, or a result the tool composed itself, whose words went to
+the caller and are not logged. `correlationId` is the one on every journal entry the call wrote, so
+a log line leads to its journal entries.
+
+The line never carries what the caller sent or what the tool answered: an artifact's content, a
+vendor's name and a finding's text are the customer's, and a log is read by people the site's
+permissions never admitted. It carries two identifiers, each only as the server knows it: the
+profile id when it names a configured profile, and the assessment id when the tool's answer
+carries it. Neither is repeated from the request otherwise, because both fields accept any text.
+
+At startup the server asks Entra for one token so that a wrong permission stops it before the
+port is bound. A token request is abandoned after 15 seconds, at startup and on every later call.
+When that happens at startup, or the token cannot be obtained for any other reason, the server
+logs a warning and starts, and the check runs on the first Graph request.
 
 ### Ingress
 

@@ -1,8 +1,10 @@
 import { GraphRequestError } from "../graph/errors.js";
+import { isGatewayStatus } from "../graph/retry.js";
 import { LibraryNotFoundError } from "../graph/drive.js";
 import { TokenRequestError, UnexpectedTokenRolesError } from "../graph/token.js";
 import { WorkbookFileError, WorkbookMappingError, WorkbookUnreadableError } from "../workbook/errors.js";
 import { AssessmentProfileError, LibraryProfileError, UnknownProfileError } from "../profiles/registry.js";
+import { JournalAppendError } from "./assessment/journal.js";
 
 /**
  * What the failing call was about, for the messages that can name it. The site
@@ -43,6 +45,13 @@ export function describeToolFailure(error: unknown, subject: FailureSubject): st
   if (error instanceof UnknownProfileError) {
     // Already names the configured ids, which is the whole remedy.
     return error.message;
+  }
+
+  if (error instanceof JournalAppendError) {
+    // The error says what Graph confirmed and that the journal lacks it. What this mapper adds is
+    // the one thing only the failing call's own catch knows: the tool stopped there. Every
+    // lifecycle tool lets this error end the call, so nothing was written after it.
+    return `${subject.tool} stopped after a write it could not record: ${error.message} Nothing further was written by this call.`;
   }
 
   if (error instanceof LibraryProfileError) {
@@ -144,10 +153,14 @@ export function describeToolFailure(error: unknown, subject: FailureSubject): st
 
   if (error instanceof GraphRequestError) {
     const forWhom = subject.profileId === undefined ? subject.tool : `${subject.tool} for profile "${subject.profileId}"`;
+    // A gateway answered, not necessarily Graph, so a write may have landed behind it. The caller
+    // is told, because the natural reading of a failure is that nothing happened.
+    const unknownFate =
+      error.method !== "GET" && isGatewayStatus(error.status) ? " A gateway status does not say whether the write was applied, so read what is there now before repeating it." : "";
     return (
       `Microsoft Graph refused ${error.method} ${error.path} with ${error.status}` +
       `${error.code === undefined ? "" : ` (${error.code})`}, while serving ${forWhom}. ` +
-      "The full Graph response was written to the server log. This server does not infer a cause from the status."
+      `The full Graph response was written to the server log. This server does not infer a cause from the status.${unknownFate}`
     );
   }
 

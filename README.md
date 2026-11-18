@@ -21,6 +21,8 @@ writes nothing.
 - `docs/SETUP.md`: per-tenant Entra and SharePoint setup. The first run against a new tenant
   is `npm run setup -- --tenant=<id> --create-bootstrap`, a one-time step described there in
   full before the normal setup run.
+- `docs/SIMULATOR.md`: running the assessment tools end to end with no tenant, against a
+  simulated one, and what that does and does not prove.
 - `docs/superpowers/specs/`: design specifications
 - `docs/superpowers/plans/`: implementation plans
 
@@ -44,7 +46,17 @@ development only. `IW_INBOUND_AUTH` selects `apikey` (the default), `bearer` or 
 The server listens on port 3000 unless `PORT` says otherwise. MCP clients connect to `POST /mcp`,
 which speaks Streamable HTTP in stateless mode, so there is no session to establish and no SSE
 stream to open. `GET /health` is a separate route for container probes and answers
-`{"status":"ok"}`. A client running on the same machine connects to `http://localhost:3000/mcp`.
+`{"status":"ok","version":"..."}` with the version from `package.json`. A client running on the
+same machine connects to `http://localhost:3000/mcp`.
+
+To try the assessment tools with no tenant and no configuration at all, `npm run sim:walkthrough`
+takes one assessment from open to completed against a simulated tenant and prints every answer,
+and `npm run sim` leaves that server running on `http://127.0.0.1:3939/mcp` for any MCP client.
+`docs/SIMULATOR.md` says what the simulation is copied from and what it cannot show.
+
+The workflow those tools run is the profile's, not the code's. `examples/profiles/` holds three
+assessment profiles: vendor risk, a client onboarding and a security incident record. Set
+`SIM_PROFILE` to one of them and `npm run sim` serves that workflow on the same seven tools.
 
 Running from a build takes two commands rather than one, because `npm start` runs the compiled
 output and does not compile it. Run `npm run build:prod` first, then `npm start`. Use `build:prod`

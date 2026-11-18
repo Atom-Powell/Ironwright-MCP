@@ -15,7 +15,20 @@ export interface TokenProviderOptions {
   now?: () => number;
   /** Refresh this far before the stated expiry, so a token cannot expire in flight. */
   skewSeconds?: number;
+  /** How long one token request may take before it is abandoned. Defaults to TOKEN_REQUEST_TIMEOUT_MS. */
+  requestTimeoutMs?: number;
 }
+
+/**
+ * A token endpoint that accepts the connection and never answers would hold a
+ * request open for as long as fetch allows, which is minutes. At startup that
+ * outlasts a platform's startup probe, and while running every caller queues
+ * behind the one request in flight. The bound is here, on the request, not
+ * around a caller's wait for it: a caller that merely stopped waiting would
+ * leave the request in flight for the next caller to queue behind, and would
+ * never learn what a late answer said.
+ */
+export const TOKEN_REQUEST_TIMEOUT_MS = 15_000;
 
 /**
  * The body is carried but the credential never is. An operator pasting a failure
@@ -50,6 +63,7 @@ export function clientCredentialsTokenProvider(
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? (() => Date.now());
   const skewMs = (options.skewSeconds ?? 120) * 1000;
+  const requestTimeoutMs = options.requestTimeoutMs ?? TOKEN_REQUEST_TIMEOUT_MS;
   const endpoint = `https://login.microsoftonline.com/${credentials.tenantId}/oauth2/v2.0/token`;
 
   let cached: CachedToken | undefined;
@@ -66,13 +80,22 @@ export function clientCredentialsTokenProvider(
       scope: "https://graph.microsoft.com/.default",
     });
 
-    const response = await fetchImpl(endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body,
-    });
-
-    const text = await response.text();
+    const signal = AbortSignal.timeout(requestTimeoutMs);
+    let response: Response;
+    let text: string;
+    try {
+      response = await fetchImpl(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body,
+        signal,
+      });
+      // Inside the bound as well: headers can arrive and the body never finish.
+      text = await response.text();
+    } catch (error) {
+      if (signal.aborted) throw new Error(`The token endpoint did not answer within ${requestTimeoutMs} ms.`);
+      throw error;
+    }
     if (!response.ok) throw new TokenRequestError({ status: response.status, body: text });
 
     let parsed: unknown;
