@@ -9,6 +9,7 @@ import type { JournalEntry } from "../../store/types.js";
 import { resolveAssessmentContext } from "./context.js";
 import { findAssessmentById, findVendor, readAssessmentState } from "./read-state.js";
 import { ARTIFACT_PRESENCE_SHAPE, ASSESSMENT_SUMMARY_SHAPE, FINDING_READ_SHAPE, JOURNAL_ENTRY_SHAPE, JOURNAL_SUMMARY_SHAPE, READINESS_SHAPE } from "./output.js";
+import { inWords as joined } from "../../domain/words.js";
 
 export const GET_INPUT_CONSTRAINTS = "Exactly one of assessmentId, vendor or status is given, and include is given only with assessmentId.";
 
@@ -93,10 +94,6 @@ function journalSummary(entries: readonly JournalEntry[]): z.infer<z.ZodObject<t
   for (const entry of entries) byOperation[entry.operation] = (byOperation[entry.operation] ?? 0) + 1;
   // listJournal returns entries ascending by `at`, so the last is the latest.
   return { entries: entries.length, lastAt: entries.at(-1)?.at, byOperation };
-}
-
-function joined(names: readonly string[]): string {
-  return names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)!}`;
 }
 
 /**

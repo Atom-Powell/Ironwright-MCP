@@ -293,9 +293,21 @@ run a client onboarding and an incident record on the same tools, with their own
 column names, kinds and gates. The tool and field names do not change with the profile, so the
 party a case is about is passed as `vendor` whatever the lists call it.
 
-Provisioning the three lists from the profile is not built. An operator creates them by hand, or
-uses the probe's seed (`npm run probe:assessment:seed`, under `scripts/assessment-probe/`) as a
-pattern.
+`npm run department:setup -- --profile=<file>` prepares the site one assessment profile
+addresses. Under the grant issuer's token it creates the three lists the profile names where they
+are absent, reads each list's columns back, refusing in words when one the profile maps is
+missing, and then grants the server application on that site. The lists come first so that a list
+problem is found with the grant untouched. A list that already exists is not changed. It reads `IW_TENANT_ID`, `IW_BOOTSTRAP_CLIENT_ID`, `IW_BOOTSTRAP_CLIENT_SECRET` and
+`IW_CLIENT_ID`, and it is setup: it belongs on the operator's workstation with the setup command.
+`--dry-run` says what grant and lists are there and what a run would do, and changes nothing.
+`--roles=read` leaves the grant at read for a deployment that only reads; the default, `write`,
+is what the lifecycle tools need. The command fails unless Graph answers the roles asked for, and
+an argument that is not exactly one of the three is refused. For a
+deployment whose departments each keep a site, run it once per profile and list every site in
+`IW_SITE_URL`. Indexing the columns named above is still done in the list settings.
+
+The command has not been run against a tenant as a command. The grant and the list creation it
+is made of are the ones `npm run sitting` uses; `docs/OPEN-ITEMS.md` says which sitting ran them.
 
 ## The permission model
 
@@ -557,7 +569,14 @@ development build afterward puts the setup output back.
   application's own client-credentials identity, the same three values the normal setup run above
   prints as `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and `AZURE_CLIENT_SECRET`, and the same three
   `npm run scan` already reads under their `IW_` names, described below.
-- `IW_SITE_URL` is required. It is the same `--site` value you passed to the normal setup run
+- `IW_SITE_URL` is required, and may name more than one site, separated by commas, spaces or new
+  lines, when the server application has been granted on several: a site per department, for an
+  organization whose departments each keep their own. Each profile still addresses one site, so a
+  workflow per department is a profile per site and no tool changes. Every profile's site must be
+  among those listed. `describe_workbook`, the one tool that reads a site with no profile, reads
+  the first. The server application needs its own grant on each site; the setup command grants
+  one, and `scripts/pre-eon/department.ts` holds the request for another. For one site, the value
+  is the same `--site` value you passed to the normal setup run
   above, not one of the four values that run prints, since a site URL is not a secret and setup
   already had it as an input rather than an output. The server checks every profile's
   `siteUrl` of every entry in `sites` against this value at startup and refuses to start if any

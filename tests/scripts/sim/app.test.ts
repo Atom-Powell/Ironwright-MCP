@@ -30,7 +30,7 @@ describe("the simulated server", () => {
       await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`)));
       const names = (await client.listTools()).tools.map((tool) => tool.name).sort();
       expect(names).toEqual([
-        "get_assessment", "open_assessment", "read_assessment_artifact", "record_findings",
+        "describe_assessment_workflow", "get_assessment", "open_assessment", "read_assessment_artifact", "record_findings",
         "save_assessment_artifact", "transition_assessment", "verify_publication",
       ]);
     } finally {
@@ -82,7 +82,8 @@ describe("the walkthrough", () => {
     const output = lines.join("\n");
 
     expect(lines[0]).toBe(SIM_NOTICE);
-    expect(output).toContain("The server offers 7 tools");
+    expect(output).toContain("The server offers 8 tools");
+    expect(output).toContain('Workflow "vendor-assessments" on');
     expect(output).toContain("transition_assessment (refused)");
     expect(output).toContain('Moved ASM-');
     expect(output).toMatch(/The walkthrough finished: \d+ tool calls, every one answered as expected\./);

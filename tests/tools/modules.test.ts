@@ -26,9 +26,10 @@ describe("domain modules", () => {
     );
   });
 
-  it("gives the assessment module its seven tools in module order", () => {
+  it("gives the assessment module its eight tools in module order, the describing one first", () => {
     const assessment = ALL_MODULES.find((m) => m.kind === "assessment");
     expect(assessment?.tools.map((t) => t.name)).toEqual([
+      "describe_assessment_workflow",
       "open_assessment",
       "save_assessment_artifact",
       "read_assessment_artifact",

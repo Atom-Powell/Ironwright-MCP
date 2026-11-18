@@ -22,6 +22,7 @@
     "probe:assessment": "tsx scripts/assessment-probe/main.ts",
     "campaign": "tsx scripts/pre-eon/campaign.ts",
     "sitting": "tsx scripts/pre-eon/sitting.ts",
+    "department:setup": "tsx scripts/department-setup.ts",
     "sim": "tsx scripts/sim/main.ts",
     "sim:walkthrough": "tsx scripts/sim/walkthrough-main.ts"
   },

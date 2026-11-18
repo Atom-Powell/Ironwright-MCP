@@ -5,6 +5,7 @@ import type { Profile } from "../domain/profile/schema.js";
 import { isAssessmentProfile, isLibraryProfile, type AnyProfile } from "../domain/profile/library.js";
 import { normalizeProfileSites } from "../domain/profile/base.js";
 import { ALL_MODULES, moduleForKind, type DomainModule } from "../modules/index.js";
+import { inWords } from "../domain/words.js";
 
 /**
  * A profile directory this server cannot start with. Every problem found in
@@ -171,9 +172,11 @@ export interface ProfileRegistry {
  */
 export function createProfileRegistry(
   entries: readonly ProfileEntry[],
-  grantedSiteUrl: string,
+  grantedSiteUrl: string | readonly string[],
   modules: readonly DomainModule[] = ALL_MODULES,
 ): ProfileRegistry {
+  // One site for most deployments, several for one granted a site per department.
+  const granted = typeof grantedSiteUrl === "string" ? [grantedSiteUrl] : [...grantedSiteUrl];
   const issues: string[] = [];
   const byId = new Map<string, { profile: AnyProfile; source: string }>();
 
@@ -196,11 +199,11 @@ export function createProfileRegistry(
       continue;
     }
 
-    const foreign = profile.sites.findIndex((site) => !sameSite(site.siteUrl, grantedSiteUrl));
+    const foreign = profile.sites.findIndex((site) => !granted.some((grantedSite) => sameSite(site.siteUrl, grantedSite)));
     if (foreign >= 0) {
       issues.push(
         `${entry.source}: profile "${profile.profileId}" sites[${foreign}] names site ${profile.sites[foreign]!.siteUrl}, but this ` +
-          `server's Sites.Selected grant covers ${grantedSiteUrl}. A profile pointed at a site the grant does ` +
+          `server's Sites.Selected grant covers ${inWords(granted)}. A profile pointed at a site the grant does ` +
           "not cover would fail as a 403 on its first Graph call rather than at startup.",
       );
       continue;
@@ -249,7 +252,7 @@ export function createProfileRegistry(
  */
 export async function loadProfileDirectory(
   dir: string,
-  grantedSiteUrl: string,
+  grantedSiteUrl: string | readonly string[],
   modules: readonly DomainModule[] = ALL_MODULES,
 ): Promise<ProfileRegistry> {
   let names: string[];

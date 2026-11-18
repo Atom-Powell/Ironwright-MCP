@@ -46,6 +46,44 @@ Move 1 comes first because it is the only one that can be built and proven with 
 because a pilot on one operations site, with a folder per client, gets every workflow below from
 it alone.
 
+## Amendment, 2026-11-17: the sites are departments
+
+The operator settled what move 2 has to be for the pilot: the consumer keeps a SharePoint site per
+department, not per client. That makes it smaller than the move described above. A profile
+already addresses one site, and a department's workflow is one profile, so a site per department
+is a profile per site. No tool takes a new argument and no case has to say which site it belongs
+to: the profile id already does.
+
+What stood in the way was only the server's startup rule, which took one granted site and refused
+a profile on any other. `IW_SITE_URL` now lists every site the application is granted, and a
+profile's site must be among them. Nothing else in the server changed.
+
+A site per client, where one workflow spans many sites, is a different problem and is not
+solved by this: there a case would have to name its site. It is left where it was, for the
+consumer that needs it.
+
+The sitting runner stands each department up and runs it: for every other assessment profile in
+the profiles folder it grants the server application on that profile's site, creates the three
+lists the profile names where they are absent, checks each list has the columns the profile maps,
+and takes one case from open to completed through the running server by the profile's own gates.
+
+Two things followed from several workflows on one server, both built the same night.
+
+**The server says what it offers.** With one workflow, an agent's instructions could carry its
+profile id, its kinds and its labels. With one per department they cannot be trusted to, and a
+valid disposition could be learned only from a refusal. `describe_assessment_workflow` is a read
+tool that answers from the profiles loaded at startup: each assessment profile's id, site,
+library and lists, every artifact kind with whether the server saves it or it is produced
+elsewhere, which kinds each stage waits on, and the status, disposition and risk labels. It
+sends no Graph request and says nothing about the state of any case, which stays
+`get_assessment`'s. It is the eighth tool of the module and the only one that is not about one
+case.
+
+**Preparing a department's site is a command.** What the sitting runner did for the developer
+tenant, an operator needs for a real one: `npm run department:setup -- --profile=<file>` makes and
+checks the profile's lists and then grants the server application on its site, under the grant
+issuer's token. It is setup, so it stays off the server with the rest of setup.
+
 ## What a profile now says
 
 Three settings under `lifecycle`, each optional:
@@ -96,12 +134,17 @@ none, the tool says there is nothing to check.
 |---|---|---|
 | A profile that sets no gates behaves as it did | The pilot's vendor risk profile must not change under it | The module's existing tests run unchanged against the example profile, which sets none, and a test pins the defaults |
 | The seven tools need nothing from Graph they did not need before | Otherwise a probe would come first | Every Graph request in the change is one the 2026-11-07 probe, the sittings and the campaign have sent; the change adds none and only chooses which artifact paths a precondition reads |
-| A workflow with other lists, kinds and gates runs end to end | The claim of this design | A client onboarding run through the real tool handlers over the simulated tenant, from open to completed, under the shipped example profile |
-| One application can hold grants on several sites and the server can address each | Move 2 | Confirmed live in the second sitting of 2026-11-17 for two sites: 403 `accessDenied` on the second site before its grant; a grant created with the setup command's request; then a folder and a file written and the file read back under the same server token; the first site still resolving. Recorded in `evidence/2026-11-17-second-sitting/`. What it does not cover is a list on the second site, or any tool addressing it |
+| A workflow with other lists, kinds and gates runs end to end | The claim of this design | A client onboarding run through the real tool handlers over the simulated tenant, from open to completed, under the shipped example profile. Confirmed live on 2026-11-18: an onboarding profile and an incident profile each ran from open to completed on the developer tenant, on their own sites, with their own lists, kinds, gates and labels. Recorded in `evidence/2026-11-18-third-sitting/` |
+| A list created through Graph carries the column names asked for | A department's lists are created from its profile, and the tools write to those names | Confirmed live on 2026-11-18 as far as the columns being there under the names asked: nine lists on three sites passed the runner's column check, and every write the tools sent to those names was answered with the values sent. That the run created those lists, and did not find them, is implied and was not recorded: the runner's line saying which went to the terminal only. The runner still reads each list's columns back and refuses in words when one is missing |
+| `describe_assessment_workflow` needs nothing from Graph | A tool that read a tenant would need a probe first | It reads the profile registry and nothing else; its tests assert the Graph client received no request, and it answered on the real server started with made up credentials and four profiles on four sites, where no Graph token could be had |
+| The setup command sends only requests already measured | It runs against a customer's tenant | The grant is the request the two site probe sent live on 2026-11-17, and the update to read is the one every sitting ends with. The list creation and the columns read are the sitting runner's, which have not yet run live: the row on a list created through Graph says so, and the command reads the columns back for the same reason |
+| One application can hold grants on several sites and the server can address each | Move 2 | Confirmed live in the second sitting of 2026-11-17 for two sites: 403 `accessDenied` on the second site before its grant; a grant created with the setup command's request; then a folder and a file written and the file read back under the same server token; the first site still resolving. Recorded in `evidence/2026-11-17-second-sitting/`. That probe did not cover a list on another site or a tool addressing one. The sitting of 2026-11-18 did: the tools ran whole workflows on three further sites under the same token, five granted sites in all |
 
 ## Not established
 
-Nothing in this change has run against a tenant. The simulated tenant shows the server's steps
-compose under another profile; what Graph does was measured only for the paths the vendor risk
-profile takes, which are the same requests. A live run under a second profile needs three more
-lists in the developer site, which is an operator step.
+This section said, when the design was written, that nothing in it had run against a tenant. The
+sitting of 2026-11-18 changed that: three profiles ran live, two of them with their own gates.
+What is still not established is narrower. `describe_assessment_workflow` has not been called on
+a deployed server, and `npm run department:setup` has not been run as a command, though the grant
+and the list step it is made of ran inside the sitting runner. A site per client, one workflow
+across many sites, is not designed.

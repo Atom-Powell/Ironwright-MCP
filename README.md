@@ -56,7 +56,9 @@ and `npm run sim` leaves that server running on `http://127.0.0.1:3939/mcp` for 
 
 The workflow those tools run is the profile's, not the code's. `examples/profiles/` holds three
 assessment profiles: vendor risk, a client onboarding and a security incident record. Set
-`SIM_PROFILE` to one of them and `npm run sim` serves that workflow on the same seven tools.
+`SIM_PROFILE` to one of them and `npm run sim` serves that workflow on the same tools.
+`describe_assessment_workflow` answers, from the server itself, which workflows a deployment
+offers and what each one needs.
 
 Running from a build takes two commands rather than one, because `npm start` runs the compiled
 output and does not compile it. Run `npm run build:prod` first, then `npm start`. Use `build:prod`

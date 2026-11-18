@@ -16,7 +16,7 @@ interface ToolAnswer {
  * with the simulated tenant behind it. Prints what each tool answered, so a
  * person can read the whole exchange without a tenant, a grant or a secret.
  * Throws if a step answers other than the walkthrough expects, so it doubles
- * as a smoke test of the transport, the registry and the seven tools together.
+ * as a smoke test of the transport, the registry and the assessment tools together.
  */
 export async function runWalkthrough(write: (line: string) => void): Promise<void> {
   const deployment = createSimDeployment();
@@ -46,6 +46,9 @@ export async function runWalkthrough(write: (line: string) => void): Promise<voi
     await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`)));
     const listed = await client.listTools();
     write(`\nThe server offers ${listed.tools.length} tools: ${listed.tools.map((tool) => tool.name).join(", ")}.`);
+
+    write("\n   What this workflow is, asked of the server itself.");
+    await call("describe_assessment_workflow", { profileId });
 
     const opened = await call("open_assessment", { profileId, vendor: "Acme Corp", scope: "Security" });
     const assessmentId = opened.structuredContent?.assessmentId as string;

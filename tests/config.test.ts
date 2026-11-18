@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadGrantedSiteUrl, loadGraphCredentials, loadStoreConnectionString } from "../src/config.js";
+import { loadGrantedSiteUrl, loadGrantedSiteUrls, loadGraphCredentials, loadStoreConnectionString } from "../src/config.js";
 
 const ENV = {
   IW_TENANT_ID: "tenant-1",
@@ -10,6 +10,41 @@ const ENV = {
 describe("loadGraphCredentials", () => {
   it("reads all three values", () => {
     expect(loadGraphCredentials(ENV)).toEqual({ tenantId: "tenant-1", clientId: "client-1", clientSecret: "secret-1" });
+  });
+});
+
+// A deployment may be granted more than one site: a department each, for a consumer whose
+// departments each keep their own. One variable names them all.
+describe("loadGrantedSiteUrls", () => {
+  const OPS = "https://contoso.sharepoint.com/sites/Ops";
+  const DESK = "https://contoso.sharepoint.com/sites/ServiceDesk";
+
+  it("reads one site as a list of one", () => {
+    expect(loadGrantedSiteUrls({ IW_SITE_URL: OPS })).toEqual([OPS]);
+  });
+
+  it("reads several sites separated by commas, spaces or new lines, in the order given and once each", () => {
+    expect(loadGrantedSiteUrls({ IW_SITE_URL: `${OPS}, ${DESK}\n${OPS}` })).toEqual([OPS, DESK]);
+  });
+
+  it("refuses an entry that is not a URL, naming it and saying what the variable holds", () => {
+    expect(() => loadGrantedSiteUrls({ IW_SITE_URL: `${OPS}, ServiceDesk` })).toThrow(/IW_SITE_URL names "ServiceDesk", which is not a URL/);
+  });
+
+  it("refuses a value that holds separators and no site, as it refuses a missing one", () => {
+    expect(() => loadGrantedSiteUrls({ IW_SITE_URL: " , " })).toThrow(/Missing required environment variable: IW_SITE_URL/);
+  });
+
+  it("refuses an entry that is a URL of another scheme, since a site is reached over https", () => {
+    expect(() => loadGrantedSiteUrls({ IW_SITE_URL: "ftp://contoso.sharepoint.com/sites/Ops" })).toThrow(/which is not an http or https URL/);
+  });
+
+  it("refuses a missing value as the single form does", () => {
+    expect(() => loadGrantedSiteUrls({})).toThrow(/IW_SITE_URL/);
+  });
+
+  it("gives the first site to the one caller that needs a single site", () => {
+    expect(loadGrantedSiteUrl({ IW_SITE_URL: `${OPS} ${DESK}` })).toBe(OPS);
   });
 });
 

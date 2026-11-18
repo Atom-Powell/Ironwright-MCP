@@ -91,6 +91,44 @@ describe("the two site probe", () => {
     expect(issuer.calls.find((call) => call.method === "PATCH")!.body).toEqual({ roles: ["read"] });
   });
 
+  // The runner's clean up restores what it holds on record. A grant known only inside the
+  // probe would be left at write by an interrupt that cuts the probe off.
+  it("hands its grant to the caller while it stands at write, and says when it is back at read", async () => {
+    const stamp = "20261118T000000Z";
+    const server = scripted(serverRules(stamp, [refused("/sites/contoso.sharepoint.com:/sites/Second")]));
+    const issuer = scripted([
+      { method: "GET", includes: "/sites/contoso.sharepoint.com:/sites/Second", answers: [{ id: "site-2" }] },
+      { method: "GET", includes: "/sites/site-2/permissions", answers: [{ value: [] }] },
+      { method: "POST", includes: "/sites/site-2/permissions", answers: [{ id: "perm-9", roles: ["write"] }] },
+      { method: "PATCH", includes: "/sites/site-2/permissions/perm-9", answers: [{ id: "perm-9", roles: ["read"] }] },
+    ]);
+    const events: string[] = [];
+
+    await probeSecondSite({
+      ...inputs(server, issuer, stamp),
+      onGrant: (grant) => events.push(`granted ${grant.siteUrl} ${grant.siteId} ${grant.permissionId} after ${issuer.calls.filter((call) => call.method === "PATCH").length} restores`),
+      onRestored: (grant) => events.push(`restored ${grant.permissionId}`),
+    });
+
+    expect(events).toEqual([`granted ${SECOND} site-2 perm-9 after 0 restores`, "restored perm-9"]);
+  });
+
+  it("does not say the grant is back at read when the restore answered otherwise", async () => {
+    const stamp = "20261118T000000Z";
+    const server = scripted(serverRules(stamp, [refused("/sites/contoso.sharepoint.com:/sites/Second")]));
+    const issuer = scripted([
+      { method: "GET", includes: "/sites/contoso.sharepoint.com:/sites/Second", answers: [{ id: "site-2" }] },
+      { method: "GET", includes: "/sites/site-2/permissions", answers: [{ value: [] }] },
+      { method: "POST", includes: "/sites/site-2/permissions", answers: [{ id: "perm-9", roles: ["write"] }] },
+      { method: "PATCH", includes: "/sites/site-2/permissions/perm-9", answers: [{ id: "perm-9", roles: ["write"] }] },
+    ]);
+    const events: string[] = [];
+
+    await probeSecondSite({ ...inputs(server, issuer, stamp), onGrant: () => events.push("granted"), onRestored: () => events.push("restored") });
+
+    expect(events).toEqual(["granted"]);
+  });
+
   it("widens a grant an earlier run left at read, and says the site was already reachable", async () => {
     const stamp = "20261118T000000Z";
     const server = scripted(serverRules(stamp, []));

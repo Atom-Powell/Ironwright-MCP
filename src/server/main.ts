@@ -2,7 +2,7 @@ import { createApp } from "./app.js";
 import { installShutdown } from "./shutdown.js";
 import { loadConfig } from "./config.js";
 import { buildServer } from "../mcp/build-server.js";
-import { loadGraphCredentials, loadInboundAuth, loadGrantedSiteUrl, loadShutdownDeadlineMs, loadStoreConnectionString } from "../config.js";
+import { loadGraphCredentials, loadInboundAuth, loadGrantedSiteUrls, loadShutdownDeadlineMs, loadStoreConnectionString } from "../config.js";
 import { loadProfileDirectory } from "../profiles/registry.js";
 import { createGraphClient } from "../graph/client.js";
 import { clientCredentialsTokenProvider, requireExactRoles, SERVER_TOKEN_ROLES } from "../graph/token.js";
@@ -14,18 +14,21 @@ import type { StateStore } from "../store/types.js";
 import type { ToolContext } from "../tools/context.js";
 import { SERVER_NAME, formatToolCallRecord } from "../mcp/build-server.js";
 import { SERVER_VERSION } from "../version.js";
+import { inWords } from "../domain/words.js";
 
 async function main(): Promise<void> {
   const config = loadConfig(process.env);
   const credentials = loadGraphCredentials(process.env);
-  const grantedSiteUrl = loadGrantedSiteUrl(process.env);
+  const grantedSiteUrls = loadGrantedSiteUrls(process.env);
+  // The one caller that needs a single site, describe_workbook, is given the first.
+  const grantedSiteUrl = grantedSiteUrls[0]!;
   const connectionString = loadStoreConnectionString(process.env);
   const shutdownDeadlineMs = loadShutdownDeadlineMs(process.env);
   const inboundAuth = loadInboundAuth(process.env);
 
   // Everything that can fail on configuration fails here, before the port is
   // bound, so a container that cannot answer a call never reports itself healthy.
-  const profiles = await loadProfileDirectory(config.profileDir, grantedSiteUrl);
+  const profiles = await loadProfileDirectory(config.profileDir, grantedSiteUrls);
 
   let store: StateStore;
   let storeKind: "azure-table" | "in-memory";
@@ -89,7 +92,7 @@ async function main(): Promise<void> {
     if (!server.listening) return;
 
     console.log(
-      `${SERVER_NAME} ${SERVER_VERSION} listening on ${host === undefined ? "port " : `${host}:`}${config.port}, site ${grantedSiteUrl}, writes ${config.allowWrites ? "enabled" : "disabled"}, ` +
+      `${SERVER_NAME} ${SERVER_VERSION} listening on ${host === undefined ? "port " : `${host}:`}${config.port}, ${grantedSiteUrls.length === 1 ? `site ${grantedSiteUrl}` : `sites ${inWords(grantedSiteUrls)}`}, writes ${config.allowWrites ? "enabled" : "disabled"}, ` +
         `${profileCount} ${profileCount === 1 ? "profile" : "profiles"} from ${config.profileDir}, ` +
         `${storeKind} store, inbound auth ${inboundAuth.mode}`,
     );

@@ -10,7 +10,7 @@ import {
   serverEnvironment,
   summaryMarkdown,
 } from "../../../scripts/pre-eon/sitting-lib.js";
-import { loadGrantedSiteUrl, loadGraphCredentials, loadInboundAuth } from "../../../src/config.js";
+import { loadGrantedSiteUrl, loadGrantedSiteUrls, loadGraphCredentials, loadInboundAuth } from "../../../src/config.js";
 import { loadConfig } from "../../../src/server/config.js";
 import { describeBootstrapSuccess } from "../../../src/setup/cli.js";
 
@@ -135,6 +135,14 @@ describe("the environment the runner starts the server with", () => {
 
   it("asks for no inbound key because mode none binds loopback only, and says the operator meant it", () => {
     expect(serverEnvironment("live", 3000)).toMatchObject({ IW_INBOUND_AUTH: "none", IW_ALLOW_ANONYMOUS: "1" });
+  });
+
+  it("names every site the profiles use, which the server's loader reads back as that list", () => {
+    const sites = [identity.IW_SITE_URL, "https://contoso.sharepoint.com/sites/ServiceDesk"];
+    const env = { ...identity, ...serverEnvironment("live", 3000, sites) };
+
+    expect(loadGrantedSiteUrls(env)).toEqual(sites);
+    expect(loadGrantedSiteUrl(env)).toBe(identity.IW_SITE_URL);
   });
 
   it("gives the simulator only its port", () => {

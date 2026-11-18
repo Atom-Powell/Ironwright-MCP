@@ -35,6 +35,18 @@ export interface SecondSiteInputs {
   stamp: string;
   sleep: (ms: number) => Promise<void>;
   log: (line: string) => void;
+  /**
+   * Called once the grant stands at write, and again once Graph has answered that it is back at
+   * read. A caller that can be cut off holds the grant on its own record between the two.
+   */
+  onGrant?: (grant: SecondSiteGrant) => void;
+  onRestored?: (grant: SecondSiteGrant) => void;
+}
+
+export interface SecondSiteGrant {
+  siteUrl: string;
+  siteId: string;
+  permissionId: string;
 }
 
 const FOLDER = "IW-MultiSite";
@@ -126,6 +138,7 @@ export async function probeSecondSite(inputs: SecondSiteInputs): Promise<StepRes
       permissionId = created.id;
       add("grant on the second site", "pass", `created with roles ${rolesOf(created)}`);
     }
+    inputs.onGrant?.({ siteUrl: inputs.secondSiteUrl, siteId, permissionId });
   } catch (error) {
     add("grant on the second site", "fail", `the grant issuer could not grant the server application on the second site: ${describe(error)}`);
     return results;
@@ -189,6 +202,7 @@ export async function probeSecondSite(inputs: SecondSiteInputs): Promise<StepRes
     try {
       const restored = await inputs.issuer.patch<PermissionEntry>(`/sites/${siteId}/permissions/${permissionId}`, { roles: ["read"] });
       const roles = rolesOf(restored);
+      if (roles === "read") inputs.onRestored?.({ siteUrl: inputs.secondSiteUrl, siteId, permissionId });
       add("second site grant restored to read", roles === "read" ? "pass" : "fail", roles === "read" ? "roles after the update: read" : `THE GRANT ON THE SECOND SITE MAY STILL BE AT WRITE: the update answered roles ${roles}`);
     } catch (error) {
       add("second site grant restored to read", "fail", `THE GRANT ON THE SECOND SITE MAY STILL BE AT WRITE: the update failed with ${describe(error)}`);
