@@ -34,7 +34,8 @@
  * something already answers on the port, and it never stops a process it did
  * not start.
  *
- * Results: .superpowers/sitting/<stamp>/summary.md and one log per step.
+ * Results: .superpowers/sitting/<stamp>/summary.md, one log per step, and runner.log, which
+ * holds every line this script said.
  */
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -80,7 +81,12 @@ let server: ChildProcess | undefined;
 let grantWidened = false;
 
 function say(text: string): void {
-  console.log(`[sitting] ${redactSecrets(text, secrets)}`);
+  const line = `[sitting] ${redactSecrets(text, secrets)}`;
+  console.log(line);
+  // Kept beside the step logs as well. The third sitting's lines saying which lists it created
+  // went to the terminal only, and the terminal was gone when the run was written up.
+  if (existsSync(FOLDER)) appendFileSync(join(FOLDER, "runner.log"), `${line}
+`);
 }
 
 function record(result: StepResult): void {
