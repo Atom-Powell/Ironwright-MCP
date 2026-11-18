@@ -46,6 +46,7 @@ sections below say what was proven and what was not. Last updated 2026-11-17.
 | List item writes under `If-Match` | Probed live 2026-11-17: Graph refuses a stale fields PATCH with 412 and answers a current one with the new ETag. Every list item update has sent the precondition since the rulings of the same day, against the fakes and the simulated tenant; not run live | carried item below; `docs/superpowers/specs/evidence/2026-11-17-list-if-match-probe/` |
 | The six rulings of 2026-11-17 | Ruled by the operator and built the same day: the safety sentence reworded, provisional no longer an end state, a folder a save brings back journaled, State left to the drive, an unchanged save recording no stage, a refused list write refused in turn. Against the fakes and the simulated tenant; `npm run sitting` checks two of them; none run live | section below; spec amendments of 2026-11-17 |
 | 10 Profile defined lifecycles | Built 2026-11-17 against the fakes and the simulated tenant: the gates, the external kinds and the corrected kinds are profile data, `verify_publication` takes a kind, and two example profiles for a managed service provider ship. A client onboarding runs end to end on the simulated tenant. Not run live | `docs/superpowers/specs/2026-11-17-profile-defined-lifecycle-design.md`; section below |
+| Two site probe | Written 2026-11-17 and wired into `npm run sitting`; a second site, IronwrightTest2, exists in the developer tenant for it. Not run: it needs the grant issuer, which the next sitting reissues | `scripts/pre-eon/second-site.ts`; paragraph in the phase 10 section below |
 | 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9c and carries the unverified A3 and B1 probes, and is the item that slips first | same spec |
 | Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
 | CPA practice domain (multi-site scan and queries, grant issuer loop over a sites file, folder template taxonomy) | Not started; the phase after 9 | same spec |
@@ -2882,9 +2883,22 @@ The suite is at 3308 tests across 229 files.
   a cases list and an issues list, with the columns the example profile names. Creating them is a
   step in the site, not in this repository.
 - One site per client is the second move and is not built. It rests on an assumption no probe has
-  made, one application holding grants on two sites, so a second site in the developer tenant
-  comes first.
+  made, one application holding grants on two sites. The probe for it is now written and the site
+  for it exists; see the next paragraph. It runs with the next sitting.
 - Whether the tools should be renamed for a consumer that is not assessing vendors.
+
+**The two site probe, written 2026-11-17 and not yet run.** The operator created nothing by hand:
+with their permission a blank communication site, IronwrightTest2, was made in the developer
+tenant through the browser, chosen over a team site because it brings no Microsoft 365 group or
+mailbox with it. `scripts/pre-eon/second-site.ts` asks four things of it, and the sitting runner
+runs it last when a second site is named. Is the second site refused before it is granted. Can
+the grant issuer grant the server application on it, with the request the setup command sends
+for the first site. Does the server application then resolve the site, write a file in its
+library and read it back, under the same token. And does the first site still resolve under that
+token. It waits out the delay before a new grant takes effect, and it puts the grant back to
+`read` whatever it found. Its decisions are tested against scripted answers; nothing in it has
+met Graph. A pass is the evidence the Assumptions table of the phase 10 spec lacks for its last
+row, and nothing about one site per client is planned until then.
 
 ## The phase 6d live sitting, 2026-09-24: plans an operator describes
 
