@@ -647,6 +647,51 @@ owns is the durable path that needs no Azure subscription. Azure Container Apps 
 cloud deployment. Plan 9d carries the full procedure for each; this phase builds the inbound key
 all three rely on.
 
+#### The container image
+
+The image is the unit of deployment. `Dockerfile` builds it in two stages: the first compiles with
+`npm run build:prod`, which leaves out `src/setup`, and the second holds only `dist` and the
+production dependencies, running as the node image's unprivileged user on port 3000. Profiles are
+mounted at run time and named by `IW_PROFILE_DIR`; none is baked in, and `.dockerignore` keeps
+`profiles`, `.env` files and `.superpowers` out of the build context. CI builds the image on every
+change, starts it with made up credentials, and fails unless `/health` answers, a request to `/mcp`
+without the inbound key answers 401, and the process is not root. That CI job is the only place
+the image has been built: the development machine has no container runtime.
+
+#### Cloudflare Tunnel, verified 2026-11-18
+
+Run end to end against the developer tenant on 2026-11-18, with a Copilot Studio agent calling the
+server through it. The record of what each screen showed is in `docs/COPILOT-STUDIO-PROBE.md`.
+Whoever runs it needs a Cloudflare account holding the zone the hostname will live under, and the
+server's own machine.
+
+1. Install the connector: `winget install Cloudflare.cloudflared` (it asks for elevation).
+2. `cloudflared tunnel login`. A browser page lists the account's zones; choose one, then
+   **Authorize**. The origin certificate is written to `%USERPROFILE%\.cloudflared\cert.pem`. It can
+   create tunnels and DNS records in that zone, so treat it as a credential.
+3. `cloudflared tunnel create <tunnel-name>`. This writes the tunnel's own credentials file beside
+   the certificate.
+4. `cloudflared tunnel route dns <tunnel-name> <hostname>`. It creates the CNAME itself.
+5. Start the server with `IW_INBOUND_AUTH=apikey`, a fresh `IW_INBOUND_KEY` of at least the
+   minimum length, `IW_INBOUND_KEY_HEADER` if not `x-api-key`, and `PORT`.
+6. `cloudflared tunnel --no-autoupdate run --url http://127.0.0.1:<PORT> <tunnel-name>`, in a
+   terminal of its own that stays open. Four "Registered tunnel connection" lines mean it is up.
+7. In Copilot Studio, on the agent: **Tools**, **Add tool**, **Model Context Protocol**. Server URL
+   `https://<hostname>/mcp`; authentication **API key**, type **Header**, the header name from step 5.
+   **Create**, then on the tool card **Create new connection** with the key, then **Add and
+   configure**. Before the first call in the test pane, confirm the connection through **Open
+   connection manager** when the agent asks.
+
+What the hostname answers tells you which part is down: **530** means no tunnel is running, **502**
+means the tunnel is up and nothing listens on the port, **401** means the server is up and the
+request carried no key or the wrong one.
+
+The tunnel needs no inbound port and no firewall rule: the connector dials out. The server's inbound
+key is the only thing between the hostname and the tools, which is why the key is required in this
+mode and why `IW_INBOUND_AUTH=none` binds loopback only. A hostname under Ironwright's own domain
+fronts only what the operator runs, never a customer's server; a customer runs this procedure in
+their own Cloudflare account, or uses another of the three paths.
+
 ## Deployment configuration contract
 
 Phase 5a made the server deployable. Phase 5b is what actually deploys it, into Container Apps

@@ -35,7 +35,7 @@ sections below say what was proven and what was not. Last updated 2026-11-18.
 | 6b-2 Cross-library moves | Held: begins with a live probe; waits on the decision below | |
 | 6c `replicate_template` and folder creation | Held | |
 | `$batch` | Held: no caller yet whose measured cost justifies it | |
-| 7 Copilot Studio integration and governance | In progress: track 1 spec drafted (pre-probe) and probe server built; no Copilot Studio contact yet | `docs/superpowers/specs/2026-10-11-copilot-studio-integration-design.md` |
+| 7 Copilot Studio integration and governance | In progress. First contact 2026-11-18: a standard agent in the developer tenant reached the probe server, then the real server, over Cloudflare Tunnel on the operator's domain with the inbound key in a header; tool discovery, three probe calls, `describe_assessment_workflow` and an error result all observed. A read reached SharePoint through Copilot Studio the same afternoon: `get_assessment` listed the Technology Success site's assessments by status and returned the case the morning's sitting completed. Not yet: any write, publishing (the license allows testing only) | `docs/superpowers/specs/2026-10-11-copilot-studio-integration-design.md`; `docs/COPILOT-STUDIO-PROBE.md` |
 | 8 Evaluation suite | Not started; questions written in `docs/EVALUATION-QUESTIONS.md` | |
 | 9a Probes and the grant | Complete: probes L and F run live 2026-11-07, fifteen of seventeen steps as designed and the spec amended on the other two (`If-Match` on a content PUT does not guard an absent path; a filtered list query needs the non-indexed header); A3 and B1 stay unverified until 9d | `docs/superpowers/specs/evidence/2026-11-07-assessment-probe/`; sitting below; PR #24 |
 | 9b Core: modules, site sets, inbound authentication, lifecycle kind, journal | Complete against fakes, merged 2026-11-07; nothing in it has met a live tenant yet | PR #22, merged 2026-11-07 |
@@ -50,7 +50,7 @@ sections below say what was proven and what was not. Last updated 2026-11-18.
 | `describe_assessment_workflow` | Built 2026-11-17: a read tool that answers, from the loaded profiles and with no Graph request, which assessment workflows the server offers and what each needs. Unit tests and the simulated walkthrough; not called on a deployed server | paragraph in the department section below |
 | `npm run department:setup` | Built 2026-11-17: grants the server application on a profile's site, creates its lists and checks their columns, with a dry run. Tested against a scripted Graph client, and its refusals were run; it has not been run against a tenant as a command | `docs/SETUP.md`, the assessment profiles section |
 | A site per department | Built 2026-11-17: the server accepts several granted sites, each profile on one of them, and `npm run sitting` grants, provisions and runs every department profile it finds. Three department sites exist in the developer tenant, Technology Success, Service Desk and Professional Services, with a local profile each. Verified live 2026-11-18: one server under one token ran a case from open to completed on each of the three department sites, beside its own, and every grant was put back to read | sitting section below; `docs/superpowers/specs/evidence/2026-11-18-third-sitting/`; spec amendment of 2026-11-17 in `docs/superpowers/specs/2026-11-17-profile-defined-lifecycle-design.md`; `scripts/pre-eon/department.ts` |
-| 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9c and carries the unverified A3 and B1 probes, and is the item that slips first | same spec |
+| 9d Ingress and Copilot Studio contact | A3 and B1 answered on screen 2026-11-18: Copilot Studio offers None, API key (header or query, a name we choose) and OAuth 2.0, and accepts a Cloudflare hostname on an owned domain. The Cloudflare Tunnel path is set up for the developer server. Not yet documented as a procedure in `docs/SETUP.md`, and dev tunnels and Container Apps are untried | same spec |
 | Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
 | CPA practice domain (multi-site scan and queries, grant issuer loop over a sites file, folder template taxonomy) | Not started; the phase after 9 | same spec |
 
@@ -431,6 +431,7 @@ after another on every lifecycle call. `loadAnyProfile` in `src/domain/profile/l
 second profile dispatcher that only tests reach, so the assessment profile tests exercise a
 dispatcher the server never calls.
 
+**ANSWERED 2026-11-18 in part, by the first contact: an error result's prose reaches the agent, and the agent relayed it faithfully** (see `docs/COPILOT-STUDIO-PROBE.md`). Whether Copilot Studio reads `_meta` was not seen. The item read:
 **Carried from the 2026-11-17 upgrades: what Copilot Studio does with a refusal.** A refusal now
 carries its structure under `_meta` and its evidence as prose. Whether Copilot Studio validates
 structured content against a tool's output schema, as the MCP SDK client does, and whether it
