@@ -181,6 +181,105 @@ so a later reader should treat paths as hints and the dates as what matters.
 - **B5 is answered in part:** **Publish** is disabled for this agent, which matches Microsoft's
   statement that a trial license allows testing in the test pane but not publishing.
 
+## Observed on screen, 2026-11-18: Part B, and the real server's first call
+
+The same afternoon, the same agent (**Ironwright probe**, environment Ironwright Dev). Observed in
+the browser and in the probe server's trace, which records method names, argument shapes, status
+codes and user agents, never values or keys.
+
+### The ingress
+
+- **Cloudflare Tunnel on the operator's own domain.** `cloudflared` 2026.11.1, installed with
+  `winget install Cloudflare.cloudflared`. `cloudflared tunnel login` opens a page titled
+  "Authorize Cloudflare Tunnel", "Cloudflare Tunnel wishes to serve as an origin on one of your
+  zones"; choosing the zone opens "Authorize Tunnel for <zone>" with **Authorize** / **Cancel**, and
+  the origin certificate lands in `%USERPROFILE%\.cloudflared\cert.pem`. Then
+  `cloudflared tunnel create ironwright-mcp-dev`, `cloudflared tunnel route dns ironwright-mcp-dev
+  mcp-dev.ironwright.dev` (it adds the CNAME itself), and
+  `cloudflared tunnel --no-autoupdate run --url http://127.0.0.1:8787 ironwright-mcp-dev`. Four
+  "Registered tunnel connection" lines mean it is up.
+- With nothing listening on the port, the hostname answers **502**; with no tunnel running, **530**.
+  Both were seen, and the second is what Copilot Studio met first (below).
+- **Run the tunnel in its own terminal window.** A tunnel started from an agent session's
+  background shell was stopped by that host under memory pressure, which took the endpoint down
+  with no sign in Copilot Studio beyond a failed request.
+
+### B1: the URL is accepted
+
+- **Add tool, Model Context Protocol**, with Server URL `https://mcp-dev.ironwright.dev/mcp`,
+  authentication **API key**, type **Header**, header name `x-api-key`. **Create** turned the server
+  into a tool card named after the server, with its description, a **Connection** field reading
+  "Not connected", and **Add and configure** disabled until a connection exists.
+- The connection is where the key goes: the arrow beside **Not connected**, **Create new
+  connection**, paste the key, **Create**. A connection holds one key, so a new server with a new key
+  needs a **new** connection, not the old one.
+- A Cloudflare hostname on an owned domain is accepted as given. B1 is answered.
+
+### B2: discovery
+
+- Adding the tool made no request at all. The tool's page (the tool's name under **Tools** on the
+  Overview) showed "Connector request failed. Couldn't retrieve the requested items" under both
+  **Tools** and **Resources** while the tunnel was down. The **refresh** icon beside the Tools table's
+  "Description" heading asks again.
+- Once the tunnel was up, both probe tools were listed with their descriptions as sent, each with
+  its own toggle, and the table's master toggle on. **Resources** stayed in error: the probe server
+  offers none, and Copilot Studio shows an error rather than an empty list. The real server offers
+  none either, so the same error will show there and means nothing.
+- The tool's page also has **Details** (name, server, connection, "Available to"), **Inputs**
+  ("Optional inputs are available to add"), **Tools** and **Resources**, an **Enabled** switch and
+  **Save** at the top, and a tool selector next to the tool's name for moving between tools.
+- **What Copilot Studio sends.** Every request after the key was set carried user agent
+  `CopilotStudio` and the key. Two requests before it had a browser user agent and no key, and the
+  server answered both 401. Each use opens a fresh exchange (`initialize`,
+  `notifications/initialized`, `tools/list`, then `tools/call`) with no session carried between
+  calls, which matches this server's stateless design.
+
+### B3: orchestration
+
+| Asked in the test pane | Answer | Tool called |
+|---|---|---|
+| How many apples do we have in stock? | "We currently have 42 apples in stock at the main warehouse." | `get_fruit_stock`, sent `fruit` only; the server's schema supplied the default `warehouse` |
+| What is 30 degrees Celsius in Fahrenheit? | "30°C (Celsius) is equal to 86°F (Fahrenheit)." | `celsius_to_fahrenheit`, sent `celsius` as a number |
+| Who won the 1998 World Cup? | France, with the score and scorers | none; Web Search was on for the agent |
+
+- The test pane's activity view shows each step ("Executing tool action", "Processing tool result",
+  "Generated result") with the tool's **content** and **structuredContent** both visible, and an
+  **Execution summary** quoting the tool's description in full and the time taken. The probe tool's
+  description ends with a sentence that says it arrived untruncated, and it did.
+- Copilot Studio prefixes the tool's text content with a citation marker of the form
+  `[CIT:<guid>]`. It is harmless and worth knowing when reading the activity view.
+
+### The real server
+
+- The probe server was stopped and the real server started on the same port, behind the same
+  hostname, with all four local profiles, the inbound key in `x-api-key`, and writes off. It was
+  added as a second tool, **Ironwright MCP**, with a new connection; the probe tool was switched off
+  (its page, **Enabled** off, **Save**; the page then says "This tool has been turned off, and you
+  won't be able to test it").
+- Copilot Studio listed the server's tools with their descriptions, `describe_assessment_workflow`
+  among them.
+- **A connection must also be confirmed for the test session.** The first question was answered with
+  "Let's get you connected first, and then I can find that info for you. Open connection manager to
+  verify your credentials. Once the connection is ready, retry your request." with **Retry** and
+  **Cancel**. **Open connection manager** opens a user connections page in a new tab; after connecting
+  there, **Retry** ran the call. An administrator setting this up for a department will meet the same
+  step.
+- **"What assessment workflows does this server offer?"** called `describe_assessment_workflow`,
+  completed in 0.53 s, and the agent described all four workflows correctly: each site, what the
+  server saves, the external document, the statuses, the dispositions, the risk levels and what
+  completion waits on. Its closing overview of "available operations" was its own reading of the tool
+  descriptions, not a call.
+- **A refusal reached the agent intact.** "List the vendor risk assessments that are in progress for
+  Technology Success" called `get_assessment` with `status` "In Progress". The server answered with
+  `isError: true` and its own words, "Acquiring a Microsoft Graph token failed with 401. This is about
+  the server application's own client id and secret rather than about the site, the profile, or
+  whoever asked the question." The agent relayed exactly that: a credential problem with the server
+  application, not the user's permissions, and said it could not confirm how many assessments there
+  were rather than guessing. That answers the carried question of what Copilot Studio does with an
+  error result: it shows the prose to the agent, and the agent used it. The cause was the client
+  secret entered when the server was started, not the site or the grant; the sitting of the same
+  morning had used the same application successfully.
+
 ## Running the probe server
 
 The probe server is `scripts/copilot-probe/`. It exposes two dummy tools (`get_fruit_stock` and
