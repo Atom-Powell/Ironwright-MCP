@@ -47,6 +47,7 @@ sections below say what was proven and what was not. Last updated 2026-11-17.
 | The six rulings of 2026-11-17 | Ruled by the operator and built the same day: the safety sentence reworded, provisional no longer an end state, a folder a save brings back journaled, State left to the drive, an unchanged save recording no stage, a refused list write refused in turn. Verified live in the second sitting of 2026-11-17: B as far as open returning a parked assessment, C by the campaign's deleted folder, E, and F on every list write that landed. Not reached live: completing from provisional, F's refusal, and G, which needs a gateway error | sections below; `docs/superpowers/specs/evidence/2026-11-17-second-sitting/`; spec amendments of 2026-11-17 |
 | 10 Profile defined lifecycles | Built 2026-11-17 against the fakes and the simulated tenant: the gates, the external kinds and the corrected kinds are profile data, `verify_publication` takes a kind, and two example profiles for a managed service provider ship. A client onboarding runs end to end on the simulated tenant. The vendor risk profile, which sets none of it, ran the whole second sitting of 2026-11-17 live as before; a profile that does set it has not met a tenant | `docs/superpowers/specs/2026-11-17-profile-defined-lifecycle-design.md`; section below |
 | Two site probe | Passed live in the second sitting of 2026-11-17: the second site refused the server application before its grant, opened to it after, took a write and gave it back, and the first site still resolved under the same token. One site per client is no longer blocked on an assumption; it is not designed or built | `scripts/pre-eon/second-site.ts`; sitting section below; `docs/superpowers/specs/evidence/2026-11-17-second-sitting/` |
+| `describe_assessment_workflow` | Built 2026-11-17: a read tool that answers, from the loaded profiles and with no Graph request, which assessment workflows the server offers and what each needs. Unit tests and the simulated walkthrough; not called on a deployed server | paragraph in the department section below |
 | A site per department | Built 2026-11-17: the server accepts several granted sites, each profile on one of them, and `npm run sitting` grants, provisions and runs every department profile it finds. Three department sites exist in the developer tenant, Technology Success, Service Desk and Professional Services, with a local profile each. The server was started with all four profiles; the workflows have run on the simulated tenant only. Not run live | spec amendment of 2026-11-17 in `docs/superpowers/specs/2026-11-17-profile-defined-lifecycle-design.md`; `scripts/pre-eon/department.ts` |
 | 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9c and carries the unverified A3 and B1 probes, and is the item that slips first | same spec |
 | Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
@@ -2979,6 +2980,33 @@ its health check and listing its tools. Nothing here has met Graph: no list has 
 department site, no column name of the two new workflows has been tried, and no case has been
 opened there. The next sitting is that run, and it is also the first live completion from
 provisional and the first live run of a profile that sets its own gates.
+
+**A tool that says what the server offers.** `describe_assessment_workflow` was added the same
+night, because a workflow per department is more than an agent's instructions can be trusted to
+list. It answers from the loaded profiles, with no Graph request: each assessment profile's id,
+site, library and lists, every artifact kind with whether the server saves it or it is produced
+elsewhere, what each stage waits on, and the labels the other tools accept. It is a read tool,
+so the server now advertises twelve tools with writes off and twenty with them on. Its tests run
+it against a registry holding two workflows on two sites; it has not been called on a deployed
+server.
+
+**Reviewed before the next sitting.** An independent read of the department work found eight
+things, and all eight are fixed.
+
+| Finding | State |
+|---|---|
+| An interrupt during the department run started the clean up while the loop went on, so the next department's site could be widened after the grants were restored, and left at write | Fixed: an interrupt now stops the run at the next step, no grant is issued after it, a grant already sent is waited for, and only then is everything restored. A second interrupt cleans up at once and says what that can leave |
+| A grant Graph accepted but answered without an id was created, unrecorded, and reported as an ordinary failure | Fixed: the error says a grant may stand at write, and on which site |
+| The runner said a grant was widened without reading what Graph answered | Fixed: the answer is read, and a grant that did not come back as write stops that department |
+| `describe_workbook` still said it read the one site the server is granted | Fixed: it says the first, when several are granted |
+| An `IW_SITE_URL` holding only separators named no site and passed, and any URL scheme was accepted | Fixed: refused as missing, and a scheme other than http or https is refused |
+| A pass said completion had been refused for the missing kind when any refusal at all had been counted | Fixed: the refusal has to name the kind it was waiting on |
+| A findings gate waiting on a kind produced elsewhere was never satisfied | Fixed: each gate's kinds are saved or uploaded as the profile says |
+| A list check that failed did not say which lists had already been created | Fixed: the message names them |
+
+The interrupt handling is the one fix with no test of its own: it is in the runner's process
+handling, and what covers it is having been read twice. The first site's own grant is now marked
+for restoring before its widening is sent, for the same reason.
 
 ## The phase 6d live sitting, 2026-09-24: plans an operator describes
 

@@ -31,6 +31,14 @@ describe("loadGrantedSiteUrls", () => {
     expect(() => loadGrantedSiteUrls({ IW_SITE_URL: `${OPS}, ServiceDesk` })).toThrow(/IW_SITE_URL names "ServiceDesk", which is not a URL/);
   });
 
+  it("refuses a value that holds separators and no site, as it refuses a missing one", () => {
+    expect(() => loadGrantedSiteUrls({ IW_SITE_URL: " , " })).toThrow(/Missing required environment variable: IW_SITE_URL/);
+  });
+
+  it("refuses an entry that is a URL of another scheme, since a site is reached over https", () => {
+    expect(() => loadGrantedSiteUrls({ IW_SITE_URL: "ftp://contoso.sharepoint.com/sites/Ops" })).toThrow(/which is not an http or https URL/);
+  });
+
   it("refuses a missing value as the single form does", () => {
     expect(() => loadGrantedSiteUrls({})).toThrow(/IW_SITE_URL/);
   });

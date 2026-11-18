@@ -82,7 +82,11 @@ export async function grantWrite(issuer: Pick<GraphClient, "get" | "post" | "pat
     roles: ["write"],
     grantedToIdentities: [{ application: { id: clientId, displayName: "Ironwright MCP server application" } }],
   });
-  if (typeof created.id !== "string") throw new Error(`Graph answered the grant on ${siteUrl} without a permission id`);
+  // The grant exists by now. Without its id nothing here can restore it, and the caller has no
+  // record of it either, so the error itself has to carry the warning into the summary.
+  if (typeof created.id !== "string") {
+    throw new Error(`A GRANT MAY NOW STAND AT WRITE on ${siteUrl}: Graph accepted the grant and answered no permission id, so this run cannot put it back to read.`);
+  }
   return { siteUrl, siteId, permissionId: created.id, before: undefined, now: rolesOf(created) };
 }
 
@@ -161,7 +165,11 @@ export async function ensureLists(issuer: Pick<GraphClient, "get" | "post">, sit
     const have = (Array.isArray(listing.value) ? listing.value : []).flatMap((column) => (typeof (column as { name?: unknown }).name === "string" ? [(column as { name: string }).name] : []));
     const lacking = wanted.filter((name) => !have.includes(name));
     if (lacking.length > 0) {
-      throw new Error(`The list "${definition.displayName}" has no column named ${lacking.join(", ")}, which the profile maps. Its columns are ${have.join(", ")}.`);
+      const before = created.filter((name) => name !== definition.displayName);
+      throw new Error(
+        `The list "${definition.displayName}" has no column named ${lacking.join(", ")}, which the profile maps. Its columns are ${have.join(", ")}.` +
+          (before.length === 0 ? "" : ` Created before this: ${before.join(", ")}.`),
+      );
     }
   }
   return { created, existing };
@@ -210,24 +218,7 @@ export async function runProfileWorkflow(profile: WorkflowProfile, deps: Workflo
     written.push(kind);
     return undefined;
   };
-  for (const kind of gates.findings) {
-    const refused = await save(kind);
-    if (refused !== undefined) return fail(`save_assessment_artifact ${kind}`, refused);
-  }
-  const recorded = await deps.call("record_findings", {
-    ...base,
-    assessmentId: id,
-    summary: "One finding, written by the sitting runner.",
-    findings: [{ key: "P-1", observation: "A first line.\n\nA second paragraph.", risk, recommendation: "None needed." }],
-  });
-  if (recorded.isError) return fail("record_findings", recorded);
-
-  // A save is refused once the case is parked, so every kind the server writes goes in first.
-  for (const kind of [...gates.provisional, ...gates.completed]) {
-    const refused = await save(kind);
-    if (refused !== undefined) return fail(`save_assessment_artifact ${kind}`, refused);
-  }
-
+  // Hoisted so the findings gate can use it: a gate may wait on a kind produced elsewhere.
   const uploadExternal = async (kind: string): Promise<StepResult | undefined> => {
     const before = await deps.call("verify_publication", { ...base, assessmentId: id, kind });
     if (before.isError || typeof before.sc.path !== "string") return fail(`verify_publication ${kind}`, before);
@@ -236,23 +227,53 @@ export async function runProfileWorkflow(profile: WorkflowProfile, deps: Workflo
     const after = await deps.call("verify_publication", { ...base, assessmentId: id, kind });
     return after.isError || after.sc.present !== true ? fail(`verify_publication ${kind} after its upload`, after) : undefined;
   };
-  for (const kind of gates.provisional.filter((candidate) => external.includes(candidate))) {
-    const failed = await uploadExternal(kind);
-    if (failed !== undefined) return failed;
-  }
+  const uploaded: string[] = [];
+  /** Makes a gate's kinds present: saved when the server writes the kind, uploaded when it is produced elsewhere. */
+  const satisfy = async (kinds: readonly string[]): Promise<StepResult | undefined> => {
+    for (const kind of kinds) {
+      if (external.includes(kind)) {
+        if (uploaded.includes(kind)) continue;
+        const failed = await uploadExternal(kind);
+        if (failed !== undefined) return failed;
+        uploaded.push(kind);
+      } else {
+        const refused = await save(kind);
+        if (refused !== undefined) return fail(`save_assessment_artifact ${kind}`, refused);
+      }
+    }
+    return undefined;
+  };
+
+  const beforeFindings = await satisfy(gates.findings);
+  if (beforeFindings !== undefined) return beforeFindings;
+  const recorded = await deps.call("record_findings", {
+    ...base,
+    assessmentId: id,
+    summary: "One finding, written by the sitting runner.",
+    findings: [{ key: "P-1", observation: "A first line.\n\nA second paragraph.", risk, recommendation: "None needed." }],
+  });
+  if (recorded.isError) return fail("record_findings", recorded);
+
+  // A save is refused once the case is parked, so every kind the server writes goes in first,
+  // the completed gate's included. What the completed gate waits on from elsewhere is left absent.
+  const beforeParking = (await satisfy(gates.provisional)) ?? (await satisfy(gates.completed.filter((kind) => !external.includes(kind))));
+  if (beforeParking !== undefined) return beforeParking;
 
   const parked = await deps.call("transition_assessment", { ...base, assessmentId: id, target: "provisional", disposition, risk });
   if (parked.isError || parked.sc.status !== status.provisional) return fail("transition_assessment to provisional", parked);
 
-  const waiting = gates.completed.filter((kind) => external.includes(kind) && !gates.provisional.includes(kind));
+  const waiting = gates.completed.filter((kind) => external.includes(kind) && !uploaded.includes(kind));
   if (waiting.length > 0) {
     const early = await deps.call("transition_assessment", { ...base, assessmentId: id, target: "completed", disposition, risk });
     if (!early.isError) return fail("transition_assessment to completed", `it was not refused while ${waiting.join(", ")} was absent`);
+    // Refused is not enough: it has to be refused for the kind that is missing, or the pass
+    // below would claim a gate held that this call never saw hold.
+    if (!waiting.some((kind) => early.text.includes(`the ${kind} present`))) {
+      return fail("transition_assessment to completed", `it was refused, and not for the absent ${waiting.join(", ")}: ${early.text.slice(0, 300)}`);
+    }
   }
-  for (const kind of waiting) {
-    const failed = await uploadExternal(kind);
-    if (failed !== undefined) return failed;
-  }
+  const afterParking = await satisfy(waiting);
+  if (afterParking !== undefined) return afterParking;
 
   const done = await deps.call("transition_assessment", { ...base, assessmentId: id, target: "completed", disposition, risk });
   if (done.isError || done.sc.status !== status.completed || done.sc.previousStatus !== status.provisional) return fail("transition_assessment to completed", done);

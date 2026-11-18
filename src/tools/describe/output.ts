@@ -99,8 +99,8 @@ export const DESCRIBE_OUTPUT_SCHEMA = {
   siteUrl: z
     .string()
     .describe(
-      "The SharePoint site this call read, which is the one site this server's Sites.Selected grant covers. " +
-        "This tool takes no site argument and can reach no other.",
+      "The SharePoint site this call read: the site this server is granted, or the first of them when it is granted several. " +
+        "This tool takes no site argument, so it reads no other.",
     ),
   library: z.string().describe("The document library this call named."),
   workbookPath: z.string().describe("The library-relative path to the workbook this call named."),

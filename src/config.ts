@@ -77,11 +77,22 @@ export function loadGrantedSiteUrls(env: NodeJS.ProcessEnv): string[] {
     );
   }
   const urls = value.split(/[\s,]+/).filter((entry) => entry.length > 0);
+  // Separators and nothing between them is a value that names no site, which is a missing one.
+  if (urls.length === 0) {
+    throw new Error(
+      "Missing required environment variable: IW_SITE_URL. It holds separators and no site. This is the site the " +
+        "server's Sites.Selected grant covers, and npm run setup takes it as --site.",
+    );
+  }
   for (const url of urls) {
+    let parsed: URL;
     try {
-      new URL(url);
+      parsed = new URL(url);
     } catch {
       throw new Error(`IW_SITE_URL names "${url}", which is not a URL. It holds the site the server is granted, or several separated by commas or spaces.`);
+    }
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      throw new Error(`IW_SITE_URL names "${url}", which is not an http or https URL. It holds the site the server is granted, or several separated by commas or spaces.`);
     }
   }
   return [...new Set(urls)];

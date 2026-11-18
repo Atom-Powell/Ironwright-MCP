@@ -1,5 +1,7 @@
 // tests/scripts/pre-eon/department.test.ts
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it } from "vitest";
 import { ensureLists, grantWrite, listDefinitionsFor, restoreRead, runProfileWorkflow, type ToolAnswer, type WorkflowProfile } from "../../../scripts/pre-eon/department.js";
@@ -89,6 +91,16 @@ describe("a grant for the server application on a department's site", () => {
     expect(issuer.calls.filter((call) => call.method !== "GET")).toEqual([]);
   });
 
+  // The grant exists by then, and nothing holds the id to restore it with. The words have to
+  // say so, because the runner's summary is the only place the operator will learn of it.
+  it("says a grant may stand at write when Graph accepted the grant and answered no id", async () => {
+    const issuer = scripted([lookup, { method: "GET", includes: "/sites/site-1/permissions", answers: [{ value: [] }] }, { method: "POST", includes: "/sites/site-1/permissions", answers: [{ roles: ["write"] }] }]);
+
+    await expect(grantWrite(issuer.client, SITE, CLIENT)).rejects.toThrow(
+      `A GRANT MAY NOW STAND AT WRITE on ${SITE}: Graph accepted the grant and answered no permission id, so this run cannot put it back to read.`,
+    );
+  });
+
   it("is put back to read, answering the roles Graph says it holds", async () => {
     const issuer = scripted([{ method: "PATCH", includes: "/sites/site-1/permissions/p1", answers: [{ id: "p1", roles: ["read"] }] }]);
 
@@ -140,6 +152,21 @@ describe("the lists a profile names", () => {
     );
   });
 
+  it("says which lists it had already created when a later one lacks a column", async () => {
+    const definitions = listDefinitionsFor(loaded("msp-security-incident.json"));
+    const missing = new GraphRequestError({ method: "GET", path: "x", status: 404, body: JSON.stringify({ error: { code: "itemNotFound" } }) });
+    const rules = columnRules(definitions);
+    rules[1] = { method: "GET", includes: "/lists/Incidents/columns", answers: [{ value: [{ name: "Title" }] }] };
+    const issuer = scripted([
+      ...rules,
+      { method: "GET", includes: "/sites/site-1/lists/Clients", answers: [missing] },
+      { method: "GET", includes: "/sites/site-1/lists/Incidents", answers: [{ id: "l2" }] },
+      { method: "POST", includes: "/sites/site-1/lists", answers: [{ id: "new" }] },
+    ]);
+
+    await expect(ensureLists(issuer.client, "site-1", definitions)).rejects.toThrow(/The list "Incidents" has no column named .* Created before this: Clients\.$/);
+  });
+
   it("lets a failure that is not an absent list through, and creates nothing after it", async () => {
     const denied = new GraphRequestError({ method: "GET", path: "x", status: 403, body: JSON.stringify({ error: { code: "accessDenied" } }) });
     const issuer = scripted([{ method: "GET", includes: "/sites/site-1/lists/", answers: [denied] }]);
@@ -188,6 +215,51 @@ describe("a profile's whole workflow, driven by its own gates", () => {
     // Completion was tried before the external kind existed, and refused.
     expect(result.detail).toContain("completion refused until");
     expect(names.filter((name) => name === "transition_assessment")).toHaveLength(3);
+  });
+
+  it("uploads a kind produced elsewhere before findings when the findings gate waits on it", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "iw-department-"));
+    try {
+      const input = JSON.parse(readFileSync("examples/profiles/assessment-example.json", "utf8")) as { lifecycle: Record<string, unknown> };
+      input.lifecycle.gates = { findings: ["publication"], provisional: ["dossier"], completed: ["dossier", "publication"] };
+      const path = join(folder, "profile.json");
+      writeFileSync(path, JSON.stringify(input));
+      const d = createSimDeployment({ profilePath: path, now: () => new Date("2026-11-17T09:00:00.000Z") });
+      const names: string[] = [];
+
+      const result = await runProfileWorkflow(loadAnyProfile(input) as unknown as WorkflowProfile, {
+        call: async (name, args) => {
+          names.push(name);
+          return answerOf(await handlers[name]!(args, d.context));
+        },
+        upload: async (target, bytes) => d.sim.putFile(target, bytes),
+        tag: "T1",
+      });
+
+      expect(result.verdict, result.detail).toBe("pass");
+      // Nothing was left to refuse completion on, so the detail does not claim a refusal it never saw.
+      expect(result.detail).not.toContain("completion refused");
+      expect(names.indexOf("verify_publication")).toBeLessThan(names.indexOf("record_findings"));
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when completion is refused for a reason other than the kind it was waiting on", async () => {
+    const profile = loaded("msp-client-onboarding.json");
+    const result = await runProfileWorkflow(profile, {
+      call: async (name, args) => {
+        if (name === "open_assessment") return { isError: false, text: "", sc: { assessmentId: "ONB-1" } };
+        if (name === "transition_assessment" && args.target === "provisional") return { isError: false, text: "", sc: { status: "Awaiting Handover" } };
+        if (name === "transition_assessment") return { isError: true, text: 'The disposition "Onboarded" is not one.', sc: {} };
+        return { isError: false, text: "", sc: {} };
+      },
+      upload: async () => undefined,
+      tag: "T1",
+    });
+
+    expect(result.verdict).toBe("fail");
+    expect(result.detail).toBe('transition_assessment to completed: it was refused, and not for the absent handover: The disposition "Onboarded" is not one.');
   });
 
   it("stops at the first call that fails and says which", async () => {

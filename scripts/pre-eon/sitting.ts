@@ -531,6 +531,21 @@ function departmentProfiles(): WorkflowProfile[] {
 
 const departmentGrants: SiteGrant[] = [];
 let departmentIssuer: GraphClient | undefined;
+/**
+ * The grant request in flight, settled only once its grant is in departmentGrants. The clean up
+ * waits on it, so a grant Graph has accepted is never missing from the list that is restored.
+ */
+let grantInFlight: Promise<unknown> = Promise.resolve();
+
+/**
+ * Set by the operator's interrupt. The run stops at the next step boundary and issues no further
+ * grant; the clean up then runs over everything granted so far. An interrupt that cleaned up while
+ * the run carried on would restore one department's grant while the loop widened the next.
+ */
+let stopping = false;
+function checkpoint(): void {
+  if (stopping) throw new Error("Stopped at the interrupt, before the next step. What ran before it is above.");
+}
 
 /**
  * Each department's workflow on its own site: a grant for the server application there, the
@@ -551,14 +566,26 @@ async function runDepartments(): Promise<void> {
   const client = await connect();
   try {
     for (const department of departments) {
+      // No grant is issued after an interrupt. Checked here, with nothing awaited before the grant.
+      if (stopping) break;
       const step = `department workflow ${department.profileId}`;
       const site = department.sites[0]!;
       say(`Standing up ${department.profileId} on its own site.`);
       try {
-        const grant = await grantWrite(departmentIssuer, site.siteUrl, clientId);
-        departmentGrants.push(grant);
+        const granting = grantWrite(departmentIssuer, site.siteUrl, clientId).then((made) => {
+          departmentGrants.push(made);
+          return made;
+        });
+        grantInFlight = granting.catch(() => undefined);
+        const grant = await granting;
+        // What Graph answered, not what was asked for: a grant that did not come back as write is
+        // not called widened, and the workflow is not run against it.
+        if (!grant.now.split(",").includes("write")) {
+          record({ step, verdict: "fail", detail: `the grant on the site answered roles ${grant.now}, not write, so the workflow was not run` });
+          continue;
+        }
         const lists = await ensureLists(departmentIssuer, grant.siteId, listDefinitionsFor(department));
-        say(`grant ${grant.before === undefined ? "created" : `widened from ${grant.before}`}; lists created: ${lists.created.join(", ") || "none"}; already there: ${lists.existing.join(", ") || "none"}`);
+        say(`grant ${grant.before === undefined ? "created" : `widened from ${grant.before}`}, now ${grant.now}; lists created: ${lists.created.join(", ") || "none"}; already there: ${lists.existing.join(", ") || "none"}`);
 
         // A new grant is not always in effect at once, so a refusal is waited out before it is believed.
         let driveId: string | undefined;
@@ -600,6 +627,10 @@ async function runDepartments(): Promise<void> {
 }
 
 async function cleanUp(): Promise<void> {
+  // From here no further grant is issued, and one already sent is waited for, so the list below
+  // is every grant this run made.
+  stopping = true;
+  await grantInFlight;
   await stopServer();
   // Read at rest on every department's site, as on the first, whatever the run found.
   for (const grant of departmentGrants.splice(0)) {
@@ -655,15 +686,25 @@ async function main(): Promise<void> {
 
   if (!SIM) {
     await ensureGrantIssuer();
+    checkpoint();
+    // Set before the request and not after it: an interrupt that lands while the grant is being
+    // widened must still find it marked for restoring. Restoring a grant that never widened is
+    // a harmless write of read over read.
+    grantWidened = true;
     const widened = await runScript("grant-widen", "scripts/assessment-probe/grant.ts", ["--roles=write"]);
     if (widened.code !== 0) throw new Error("The grant could not be widened to write, so nothing further was run.");
-    grantWidened = true;
+    checkpoint();
     await runProbe();
+    checkpoint();
     await runCampaign();
   }
+  checkpoint();
   await runReadChecks(profile);
+  checkpoint();
   await runInterruptedOpen(profile);
+  checkpoint();
   if (!SIM) await runDepartments();
+  checkpoint();
   if (!SIM) await runSecondSite(profile);
 }
 
@@ -675,15 +716,26 @@ function finish(): Promise<void> {
   return cleaning;
 }
 
+const running = main().catch((error: unknown) => {
+  record({ step: "stopped early", verdict: "fail", detail: error instanceof Error ? error.message : String(error) });
+});
+
+let interrupts = 0;
 process.on("SIGINT", () => {
-  say("Interrupted. Stopping the server and restoring the grant before leaving.");
+  interrupts += 1;
+  stopping = true;
+  if (interrupts === 1) {
+    // The step in hand is let finish, so whatever it granted is recorded and its own clean up
+    // runs. Only then is the server stopped and every grant restored.
+    say("Interrupted. Finishing the step in hand, then stopping the server and restoring every grant. Press Ctrl+C again to clean up at once.");
+    void running.then(finish).finally(() => process.exit(130));
+    return;
+  }
+  say("Interrupted again. Cleaning up now. A step cut off this way may leave its own grant at write: read the summary, and run this again if it names one.");
   void finish().finally(() => process.exit(130));
 });
 
-main()
-  .catch((error: unknown) => {
-    record({ step: "stopped early", verdict: "fail", detail: error instanceof Error ? error.message : String(error) });
-  })
+running
   .then(finish)
   .then(() => {
     process.exitCode = results.some((result) => result.verdict === "fail") ? 1 : 0;
