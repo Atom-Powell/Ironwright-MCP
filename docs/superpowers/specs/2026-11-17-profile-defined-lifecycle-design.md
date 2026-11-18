@@ -97,7 +97,7 @@ none, the tool says there is nothing to check.
 | A profile that sets no gates behaves as it did | The pilot's vendor risk profile must not change under it | The module's existing tests run unchanged against the example profile, which sets none, and a test pins the defaults |
 | The seven tools need nothing from Graph they did not need before | Otherwise a probe would come first | Every Graph request in the change is one the 2026-11-07 probe, the sittings and the campaign have sent; the change adds none and only chooses which artifact paths a precondition reads |
 | A workflow with other lists, kinds and gates runs end to end | The claim of this design | A client onboarding run through the real tool handlers over the simulated tenant, from open to completed, under the shipped example profile |
-| One application can hold grants on several sites and the server can address each | Move 2 | None. Not built, and a probe comes before any plan for it |
+| One application can hold grants on several sites and the server can address each | Move 2 | Confirmed live in the second sitting of 2026-11-17 for two sites: 403 `accessDenied` on the second site before its grant; a grant created with the setup command's request; then a folder and a file written and the file read back under the same server token; the first site still resolving. Recorded in `evidence/2026-11-17-second-sitting/`. What it does not cover is a list on the second site, or any tool addressing it |
 
 ## Not established
 

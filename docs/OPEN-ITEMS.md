@@ -43,10 +43,10 @@ sections below say what was proven and what was not. Last updated 2026-11-17.
 | Pre-EON test campaign | First run 2026-11-09: 8 scenarios on the developer tenant, 2 defects found (concurrent opens duplicated an assessment; a misnamed publication completed an assessment), both fixed in PR #27. Rerun the same day on the fixed server: s2 and s4 pass, s3, s5, s7 and s8 pass, s1 and s6 measured as before. Third run 2026-11-17, through `npm run sitting` on the build carrying the review fixes and the upgrades: the same eight verdicts, and the interrupted open, run for the first time, passed. Still to run: throttling and token expiry, inbound auth over a public tunnel, Copilot Studio contact (plan 9d); plan `docs/superpowers/plans/2026-11-09-pre-eon-test-campaign.md` | `scripts/pre-eon/campaign.ts`; sitting below |
 | Phase 9 code review | 2026-11-16: ten defects read out of the 9b, 9c and campaign source; seven fixed against fakes, three wait on a ruling or a probe (see the carried items below). 2026-11-17: a review of those fixes read ten more findings, all fixed against fakes. Run live 2026-11-17 on the paths the campaign and the sitting's own calls take, with no defect found; a fix whose case those paths do not reach is still covered by tests only | section below; the sitting of 2026-11-17; spec amendments of 2026-11-16 |
 | Assessment module upgrades and the simulated tenant | 2026-11-17: a stateful simulated tenant with a local server and walkthrough; refusals carried under `_meta` after the first client that lists tools rejected them; one lock per assessment; concurrent state reads; honest journal failures; one profile loader with more refused at load; version reporting, a record of every tool call and a bounded startup wait; `get_assessment` readiness, findings and journal readback, and listing by status. Built against the scripted fakes and the simulated tenant. Verified live 2026-11-17: a refusal through a client that lists the tools, the lock per assessment, the state read, profile loading, the version in the startup line, the call record, and all three `get_assessment` additions. Not exercised live: a journal append failure, the token request bound, a status listing past 200 | sections below; `docs/SIMULATOR.md`; `docs/superpowers/specs/evidence/2026-11-17-sitting/`; spec amendments of 2026-11-17 |
-| List item writes under `If-Match` | Probed live 2026-11-17: Graph refuses a stale fields PATCH with 412 and answers a current one with the new ETag. Every list item update has sent the precondition since the rulings of the same day, against the fakes and the simulated tenant; not run live | carried item below; `docs/superpowers/specs/evidence/2026-11-17-list-if-match-probe/` |
-| The six rulings of 2026-11-17 | Ruled by the operator and built the same day: the safety sentence reworded, provisional no longer an end state, a folder a save brings back journaled, State left to the drive, an unchanged save recording no stage, a refused list write refused in turn. Against the fakes and the simulated tenant; `npm run sitting` checks two of them; none run live | section below; spec amendments of 2026-11-17 |
-| 10 Profile defined lifecycles | Built 2026-11-17 against the fakes and the simulated tenant: the gates, the external kinds and the corrected kinds are profile data, `verify_publication` takes a kind, and two example profiles for a managed service provider ship. A client onboarding runs end to end on the simulated tenant. Not run live | `docs/superpowers/specs/2026-11-17-profile-defined-lifecycle-design.md`; section below |
-| Two site probe | Written 2026-11-17 and wired into `npm run sitting`; a second site, IronwrightTest2, exists in the developer tenant for it. Not run: it needs the grant issuer, which the next sitting reissues | `scripts/pre-eon/second-site.ts`; paragraph in the phase 10 section below |
+| List item writes under `If-Match` | Probed live 2026-11-17: Graph refuses a stale fields PATCH with 412 and answers a current one with the new ETag. Every list item update has sent the precondition since the rulings of the same day, and the second sitting ran every one of them live with none refused. The refusal itself, an item edited while a call is in flight, is covered by the fakes and the simulated tenant only | carried item below; `docs/superpowers/specs/evidence/2026-11-17-list-if-match-probe/` |
+| The six rulings of 2026-11-17 | Ruled by the operator and built the same day: the safety sentence reworded, provisional no longer an end state, a folder a save brings back journaled, State left to the drive, an unchanged save recording no stage, a refused list write refused in turn. Verified live in the second sitting of 2026-11-17: B as far as open returning a parked assessment, C by the campaign's deleted folder, E, and F on every list write that landed. Not reached live: completing from provisional, F's refusal, and G, which needs a gateway error | sections below; `docs/superpowers/specs/evidence/2026-11-17-second-sitting/`; spec amendments of 2026-11-17 |
+| 10 Profile defined lifecycles | Built 2026-11-17 against the fakes and the simulated tenant: the gates, the external kinds and the corrected kinds are profile data, `verify_publication` takes a kind, and two example profiles for a managed service provider ship. A client onboarding runs end to end on the simulated tenant. The vendor risk profile, which sets none of it, ran the whole second sitting of 2026-11-17 live as before; a profile that does set it has not met a tenant | `docs/superpowers/specs/2026-11-17-profile-defined-lifecycle-design.md`; section below |
+| Two site probe | Passed live in the second sitting of 2026-11-17: the second site refused the server application before its grant, opened to it after, took a write and gave it back, and the first site still resolved under the same token. One site per client is no longer blocked on an assumption; it is not designed or built | `scripts/pre-eon/second-site.ts`; sitting section below; `docs/superpowers/specs/evidence/2026-11-17-second-sitting/` |
 | 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9c and carries the unverified A3 and B1 probes, and is the item that slips first | same spec |
 | Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
 | CPA practice domain (multi-site scan and queries, grant issuer loop over a sites file, folder template taxonomy) | Not started; the phase after 9 | same spec |
@@ -2899,6 +2899,57 @@ token. It waits out the delay before a new grant takes effect, and it puts the g
 `read` whatever it found. Its decisions are tested against scripted answers; nothing in it has
 met Graph. A pass is the evidence the Assumptions table of the phase 10 spec lacks for its last
 row, and nothing about one site per client is planned until then.
+
+## The second live sitting of 2026-11-17: the rulings, the profile change and two sites
+
+Run by the operator with `npm run sitting` from `3b21f58`, which is main at `4768069` plus the two
+site probe, the same evening as the first, starting 04:23 UTC on the 18th. Fourteen steps, every
+one as expected. The redacted results are in
+`docs/superpowers/specs/evidence/2026-11-17-second-sitting/report.md`.
+
+**What it repeated.** The list precondition probe answered each step as before. The campaign gave
+the same eight verdicts. The three `get_assessment` additions and the refusal through a client
+that lists the tools passed again.
+
+**What it showed for the first time.**
+
+| Step | Result | What it is evidence for |
+|---|---|---|
+| The campaign's deleted `Published` folder | The save answered created and said it had created the folder first | Ruling C: the save's own create request answered 201 against the tenant |
+| An identical save after findings | Answered unchanged, and State still read FINDINGS | Ruling E |
+| A provisional transition, then an open for the same vendor and scope | The open answered the parked assessment with status Provisional and wrote nothing | Ruling B, as far as finding it. The second query for a provisional assessment ran live |
+| Every list item update in the run | Sent under `If-Match` and answered 200 | Ruling F where nothing changed under the tool. The open's id write, each State update, the findings summary and both transitions are among them |
+| The interrupted open | Stopped 1200 ms in. The repeat found the item with no id, wrote the id and created five folders; one assessment for the vendor | A second cut point: the first sitting's was after the id, this one's before it |
+| The second site before any grant | 403 `accessDenied` to the server application | The boundary, measured against a real second site |
+| A grant issued on the second site | 201, roles write, with the request the setup command sends | The grant issuer loop a site per client will need |
+| The server application on the second site | Resolved it, created a folder, wrote a file and read back the 63 bytes it sent, under the same token | One application, two sites |
+| The first site under the same token | Still resolved | Granting a second site does not disturb the first |
+| Both grants | Restored to `read` and read back | |
+
+The whole run was under the vendor risk profile, which sets none of the phase 10 settings, so it
+is also the live evidence that a profile leaving the gates at their defaults behaves as it did.
+
+**The call record.** Forty three lines for forty three settled calls, 40 `ok` and 3 `refused`,
+none carrying a vendor name. The longest save waited 10.7 seconds, about half the first sitting's
+21, queued behind the lock in the same scenario; the difference was not investigated.
+
+**What this sitting did not establish.**
+
+- Completing an assessment from provisional. It was parked and found, not completed, because
+  completion needs a publication uploaded between calls.
+- Ruling F's refusal. No item changed under a tool, so no 412 was produced.
+- Ruling G. Graph answered no gateway status.
+- A profile that sets its own gates. The onboarding and incident examples have run only on the
+  simulated tenant; a live run needs three more lists in the site.
+- Anything about a second site beyond one file in its default library: no list on it was read or
+  written, and no profile addressed it. The probe shows the permission model holds for two sites,
+  not that the server's tools work across them, which nothing has been built to do.
+
+**Residue left in the tenant.** In the first site: probe item 32 and its folder, the campaign's
+seven vendors under the tag `11180454`, and assessments up to `ASM-2026-00041`. In the second
+site, IronwrightTest2: a folder `IW-MultiSite` holding one file, and a permission entry for the
+server application at `read`. Nothing was deleted. The grant issuer was reissued once more and
+its secret was again read into memory and let go.
 
 ## The phase 6d live sitting, 2026-09-24: plans an operator describes
 

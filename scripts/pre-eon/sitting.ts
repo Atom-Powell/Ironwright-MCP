@@ -355,7 +355,9 @@ async function ensureGrantIssuer(): Promise<void> {
 }
 
 async function runProbe(): Promise<void> {
-  const out = `docs/superpowers/specs/evidence/${new Date().toISOString().slice(0, 10)}-list-if-match-probe`;
+  // Beside the sitting's other results, not under docs: the repository keeps one recording of
+  // the probe, and a sitting that only repeats it should not add a folder to be committed.
+  const out = join(FOLDER, "probe-evidence");
   const probe = await runScript("probe", "scripts/assessment-probe/main.ts", [`--out=${out}`], { IW_PROBE_LIBRARY: process.env.IW_PROBE_LIBRARY?.trim() || "Documents" });
   record(judgeListPrecondition(parseProbeLines(probe.text)));
 }
