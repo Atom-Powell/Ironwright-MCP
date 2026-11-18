@@ -39,9 +39,10 @@ describe("write gate over the wire", () => {
 
     // The count, not only the names: a write tool that slipped through under a
     // name nobody thought to assert on would pass every check below.
-    expect(names).toHaveLength(11);
+    expect(names).toHaveLength(12);
     expect(names).toContain("reconcile_workbook_vs_repository");
     expect(names).toContain("get_assessment");
+    expect(names).toContain("describe_assessment_workflow");
     // A lifecycle tool writes, so the gate withholds it with the write tools.
     expect(names).not.toContain("open_assessment");
     expect(names).not.toContain("save_assessment_artifact");
@@ -90,7 +91,7 @@ describe("write gate over the wire", () => {
   it("advertises write tools when writes are enabled", async () => {
     const names = await listToolNames(await startServer(true));
 
-    expect(names).toHaveLength(19);
+    expect(names).toHaveLength(20);
     expect(names).toContain("open_assessment");
     expect(names).toContain("save_assessment_artifact");
     expect(names).toContain("record_findings");

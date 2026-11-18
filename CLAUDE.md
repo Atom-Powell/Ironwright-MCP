@@ -230,6 +230,7 @@ the rule now covers the assessment item and the findings as well as the files.
 | `replicate_template` | write | Validates the source client internally before replicating |
 | `generate_custom_plan` | plan | Steps an operator describes, resolved against the index; no workbook needed |
 | `execute_custom_plan` | write | Dry run by default, ETag preconditions, reversal log; library-only profiles allowed |
+| `describe_assessment_workflow` | read | Which assessment workflows the server offers and what each is: its site, lists, artifact kinds, gates and labels. Answered from the loaded profiles, with no Graph request |
 | `open_assessment` | lifecycle | Finds or creates the vendor, creates the assessment item, renders the id from the item id, creates the workspace; returns one already in progress or provisional instead of a second |
 | `save_assessment_artifact` | lifecycle | Creates at the profile's path or overwrites under the ETag it just read; reads back; `publication` refused |
 | `read_assessment_artifact` | read | The persisted text and its hash, for the auditor |
@@ -249,7 +250,7 @@ Graph request, and `tests/tools/profile-kinds.test.ts` makes every tool declare 
 There are three kinds, not two. A plan generator writes a plan, so `readOnlyHint` is false for
 it. Calling one read-only would be exactly the decorative annotation this project exists to
 avoid. The fourth kind, `lifecycle`, is described in the Write-tool design amendment above; it is
-built in the assessment module and its seven tools are in the table above.
+built in the assessment module, whose tools are in the table above.
 
 Every tool carries a Zod input schema with real constraints and worked examples, an
 `outputSchema` with `structuredContent`, all four annotations set explicitly, and a description

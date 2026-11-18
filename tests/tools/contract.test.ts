@@ -119,6 +119,7 @@ const EXPECTED_TOOL_NAMES = [
   "generate_custom_plan",
   "execute_custom_plan",
   "replicate_template",
+  "describe_assessment_workflow",
   "open_assessment",
   "get_assessment",
   "save_assessment_artifact",
