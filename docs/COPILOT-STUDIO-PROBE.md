@@ -73,6 +73,114 @@ labeled as documentation and not observed on a screen:
 Planning consequence for plan 9d: assume an API key in a single header, assume no Cloudflare
 Access layer, and treat the data policy question as a likely approval item.
 
+## Observed on screen, 2026-11-18: the license is there, and A1 and A3 are answered
+
+Everything in this section was seen on a screen in the developer tenant on 2026-11-18, signed in as
+its Global Administrator. Labels are copied as the screen showed them. Where a label was read off a
+small screenshot and could be slightly off, it says so. Copilot Studio's interface changes often,
+so a later reader should treat paths as hints and the dates as what matters.
+
+### A1: getting in
+
+- **No trial was taken.** The sign-up link on Microsoft Learn's "Get access to Copilot Studio" page
+  (`learn.microsoft.com/en-us/microsoft-copilot-studio/requirements-licensing-subscriptions`,
+  section "Sign up for a Copilot Studio trial", the link "sign-up page") opened
+  `signup.microsoft.com` already signed in, and answered: "You already have a license for Microsoft
+  Copilot Studio." No card, no Azure subscription and no terms screen were asked for. Its one
+  button, "Get Started", opened Copilot Studio. Where the license came from was not checked; the
+  9 November refusal said a license was missing, so something changed in between.
+- **Use the Learn page's link, not the product page.** The product page offers a free Azure
+  account, which the no-Azure rule excludes. That was the dead end of 9 November.
+
+### Environments
+
+- Copilot Studio opened in an environment named **Admin**, type **Developer**: a personal developer
+  environment it made for the account. Do not build there.
+- The switcher is the **environment button at the bottom of the left rail** (its tooltip reads
+  "Switch environment (current: ...)"). It has a search box, a filter by environment type, and
+  groups: **Current environment**, **Pinned**, **Recently used**, and **All environments**.
+- Environments seen: **Admin** (Developer), **Default Directory (default)** (Default, pinned), and
+  **Ironwright Dev** (Developer). **Ironwright Dev** is the one to use: it is the environment made
+  on 9 November, with Dataverse.
+
+### Home
+
+- Greeting "Hey Admin, ready to ...", a banner "Welcome to the new Copilot Studio. Build smarter
+  processes with credit-powered capabilities."
+- Three tiles: **Agent** ("Create an agent to take actions and answer questions"), **Workflow**
+  ("Automate multi-step processes with triggers, actions ..."), **App (preview)** ("Build a custom
+  app with screens, data, and logic").
+- Below them, **Explore what else is possible with agents** ("Build a standard agent, create an
+  agent flow, or create a Customer Conversation agent"). It opens a page with:
+  - **Customer conversation agent**, marked **Uses Copilot Credits**.
+  - Under "Build with standard orchestration": **Agent** (Standard), "Create a rule-based
+    conversational agent with predefined tools and flows", and **Agent flows** (Standard),
+    "Automate a multi-step process with steps you define". Their hidden help text reads "This agent
+    uses standard orchestration. Included with your ..." (cut off).
+- **A transient refusal.** The first time, both standard options were disabled with "Can't check
+  the license for this build option. Select Try again to check it." **Try again** cleared it at
+  once. Someone meeting this for the first time should not read it as a missing license.
+- The left rail on Home: Home, Agents, Workflows, Apps (Preview), and at the bottom the environment
+  switcher and the account menu.
+
+### Creating an agent
+
+- Choosing **Agent** (Standard) opens **Name your agent**: one required field, "Name is required to
+  create a new agent", a collapsed **Agent settings (Optional)**, and **Create** / **Cancel**.
+- The agent made: **Ironwright probe**, in Ironwright Dev, on 2026-11-18. It took about ten seconds
+  to provision. While it did, a banner read "This feature isn't available until your agent has
+  finished setting up."
+
+### The agent's page
+
+- **Top tabs:** Overview, Knowledge, Tools, Agents, Topics, Activity, Evaluation, Monitor, Channels.
+  Top right: a search icon, **Publish** (disabled on this license), **Settings**, a "more" menu,
+  and a **Test** button.
+- **Overview, top to bottom:** "Select your agent's model" (a dropdown; the model's label was read as
+  a GPT "Chat Latest" option dated November 2025, small text, unconfirmed), **Instructions** with
+  **Edit**, **Knowledge** with **Add knowledge**, **Web Search** ("Enable your agent to search all
+  public websites"), **Tools** with **Add tool**, **Triggers** with **Add trigger**, **Agents**
+  ("Connect your agent with another agent, dedicated to handling steps of your workflow") with
+  **Add agent**, **Topics** with **Add topic**, and **Suggested prompts**.
+- **Test your agent** is a pane on the right. It opened with "Hello, I'm Ironwright probe. How can I
+  help?" and has a chat mode toggle. Its footer: "You're testing your agent's real responses and
+  capabilities." This pane is where tool calls can be tried without publishing.
+
+### A3: the Add tool dialog
+
+- **Path:** the agent's Overview, **Tools**, **Add tool**. (The Tools tab at the top has its own.)
+- The dialog is titled **Add tool**, "Let your agent do more", with a search box.
+- **Create new:** **Agent flow**, **Prompt**, **Model Context Protocol**, **Computer use**, and
+  **See all**.
+- Filter chips: **All**, **Connector**, **Prompt**, **Flow**, and a **REST API** chip (read off a
+  small screenshot).
+- Connectors on the first page included Office 365 Outlook, Microsoft Teams, Excel Online
+  (Business), SharePoint, Microsoft Dataverse, Office 365 Users, OneDrive for Business and Planner,
+  with a few more below (ServiceNow and Azure DevOps among them, read off a small screenshot). The
+  first-party **SharePoint** connector sits right beside where this server would be added, which is
+  the comparison a reviewer will make.
+- **Model Context Protocol** opens **Add a Model Context Protocol server**:
+  - **Server name** (required)
+  - **Server description** (required), "Describes the purpose of the server"
+  - **Server URL** (required), placeholder "Streamable endpoint", with the note "Enter the complete
+    server path to continue"
+  - **Authentication**: **None**, **API key**, **OAuth 2.0**
+  - With **API key**: **Type**, either **Header** or **Query**, then **Header name** (required)
+  - **Create** stays disabled until the required fields are filled. **Back** returns to Add tool.
+- **What this settles.** Copilot Studio can send a key in one header whose name we choose. The
+  server's inbound key mode reads a key from a configured header, so it fits with no server change.
+  There is still no "bearer" choice, and no way seen to send a second fixed header.
+- Nothing was saved. The agent has no tools yet.
+
+### Still open from Part A
+
+- **A2.** Where credits are shown was not looked for. The Customer conversation agent is labeled as
+  using Copilot Credits; the standard agent made here is not.
+- **A4.** No text about transport, tool limits or data policy was seen on these screens beyond
+  "Streamable endpoint".
+- **B5 is answered in part:** **Publish** is disabled for this agent, which matches Microsoft's
+  statement that a trial license allows testing in the test pane but not publishing.
+
 ## Running the probe server
 
 The probe server is `scripts/copilot-probe/`. It exposes two dummy tools (`get_fruit_stock` and
