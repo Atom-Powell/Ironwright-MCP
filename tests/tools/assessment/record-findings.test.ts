@@ -87,6 +87,26 @@ describe("record_findings", () => {
     expect(journal[0]!.etagBefore).toBe('"item-12,1"');
   });
 
+  it("sends each update under the eTag its item was read with, and journals the eTag each answered", async () => {
+    const { graph, calls } = createScriptedGraph([
+      ...WITH_DOSSIER,
+      findingsQuery([listItem("11", rowOf(F1)), listItem("12", rowOf({ ...F2, observation: "An older observation." }))]),
+      { method: "patch", pathIncludes: "/lists/Findings/items/12/fields", response: { "@odata.etag": '"item-12,2"', ...rowOf(F2) } },
+      { method: "patch", pathIncludes: "/lists/Assessments/items/2/fields", response: { "@odata.etag": '"item-2,2"', ...stateFields(), Summary: SUMMARY, State: "FINDINGS" } },
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runRecordFindings(INPUT, context);
+
+    expect(result.isError).toBeUndefined();
+    expect(calls.filter((call) => call.method === "patch").map((call) => call.headers)).toEqual([{ "if-match": '"item-12,1"' }, { "if-match": '"item-2,1"' }]);
+    const journal = await context.store.listJournal(PROFILE, ID);
+    expect(journal.map((entry) => [entry.target, entry.etagBefore, entry.etagAfter])).toEqual([
+      ["Findings/12", '"item-12,1"', '"item-12,2"'],
+      ["Assessments/2", '"item-2,1"', '"item-2,2"'],
+    ]);
+  });
+
   it("updates a changed finding without rewriting a summary and stage the item already holds", async () => {
     const { graph, calls } = createScriptedGraph([
       ...stateScript({ fields: { Summary: SUMMARY, State: "FINDINGS" }, dossier: dossierItem('"d1"', 120) }),

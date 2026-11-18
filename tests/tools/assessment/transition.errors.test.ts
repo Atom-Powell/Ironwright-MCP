@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TRANSITION_INPUT_CONSTRAINTS, runTransitionAssessment } from "../../../src/tools/assessment/transition.js";
-import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, listItem, refusalOf, resultText } from "./fake-graph.js";
-import { DOSSIER_PATH, ID, PROFILE, PUBLICATION_PATH, assessmentByIdQuery, dossierItem, publicationItem, stateFields, stateScript } from "./state-script.js";
+import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, folderItem, listItem, refusalOf, resultText } from "./fake-graph.js";
+import { DOSSIER_PATH, ID, PROFILE, PUBLICATION_PATH, ROOT, SUMMARY_PATH, assessmentByIdQuery, dossierItem, itemRead, publicationItem, stateFields, stateScript } from "./state-script.js";
 
 const INPUT = { profileId: PROFILE, assessmentId: ID, target: "completed", disposition: "Approved", risk: "Low" };
 const COMPLETED = { Status: "Completed", Disposition: "Approved", Risk: "Low", State: "LIFECYCLE" };
@@ -142,6 +142,82 @@ describe("transition_assessment failures", () => {
     expect(result.isError).toBe(true);
     const journal = await context.store.listJournal(PROFILE, ID);
     expect(journal.map((entry) => entry.operation)).toEqual(["list_item_updated"]);
+  });
+
+  // Measured 2026-11-17 (L4a): Graph answers a fields PATCH under a stale eTag with 412 and writes
+  // nothing. Someone changed the item after this call read it, so what the call decided on is gone.
+  it("refuses when the item changed after it was read, with the 412 as its evidence and no journal entry", async () => {
+    const { graph } = createScriptedGraph([
+      ...stateScript({ dossier: dossierItem('"d1"', 120), publication: publicationItem('"p1"', 48213) }),
+      { method: "patch", pathIncludes: "/lists/Assessments/items/2/fields", throws: { status: 412, code: "resourceModified" } },
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runTransitionAssessment(INPUT, context);
+
+    expect(result.isError).toBe(true);
+    expect(refusalOf(result)).toMatchObject({
+      refused: true,
+      tool: "transition_assessment",
+      stage: "LIFECYCLE",
+      assessmentId: ID,
+      expected: "Assessments item 2 unchanged since this call read it",
+      observed: 'the item changed: Graph answered 412 to If-Match "item-2,1"',
+      evidence: [{ source: "list", target: "Assessments item 2", found: 'changed since it was read with eTag "item-2,1"' }],
+    });
+    expect(resultText(result)).toContain("Nothing was written.");
+    expect(await context.store.listJournal(PROFILE, ID)).toEqual([]);
+  });
+
+  it("refuses an item read without an eTag, since the update could carry no precondition", async () => {
+    const bare = { ...listItem("2", stateFields()), eTag: undefined, "@odata.etag": undefined };
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      assessmentByIdQuery([bare]),
+      itemRead(ROOT, folderItem(ID)),
+      itemRead(DOSSIER_PATH, dossierItem('"d1"', 120)),
+      itemRead(SUMMARY_PATH, undefined),
+      itemRead(PUBLICATION_PATH, publicationItem('"p1"', 48213)),
+    ]);
+
+    const result = await runTransitionAssessment(INPUT, assessmentToolContext(graph));
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toBe("Assessments item 2 was read without an ETag, so no If-Match precondition could be sent. Nothing was written.");
+    expect(calls.filter((call) => call.method !== "get")).toEqual([]);
+  });
+
+  it("refuses to complete a provisional assessment whose publication is absent, naming the publication and not the status", async () => {
+    const { graph, calls } = createScriptedGraph(
+      stateScript({ fields: { Status: "Provisional", Disposition: "Approved with conditions", Risk: "Medium", State: "LIFECYCLE" }, dossier: dossierItem('"d1"', 120) }),
+    );
+
+    const result = await runTransitionAssessment(INPUT, assessmentToolContext(graph));
+
+    expect(result.isError).toBe(true);
+    expect(refusalOf(result)).toMatchObject({ refused: true, evidence: [{ source: "drive", target: PUBLICATION_PATH, found: "not found" }] });
+    expect(calls.filter((call) => call.method !== "get")).toEqual([]);
+  });
+
+  it("refuses to complete a completed assessment under other labels, naming both statuses it would have accepted", async () => {
+    const { graph } = createScriptedGraph(stateScript({ fields: COMPLETED, dossier: dossierItem('"d1"', 120), publication: publicationItem('"p1"', 48213) }));
+
+    const result = await runTransitionAssessment({ ...INPUT, disposition: "Rejected" }, assessmentToolContext(graph));
+
+    expect(result.isError).toBe(true);
+    expect(refusalOf(result)).toMatchObject({ expected: 'status "In Progress" or "Provisional"', observed: 'status "Completed"' });
+  });
+
+  it("still refuses to relabel a provisional assessment as provisional: only completion leaves that status", async () => {
+    const { graph, calls } = createScriptedGraph(
+      stateScript({ fields: { Status: "Provisional", Disposition: "Approved with conditions", Risk: "Medium", State: "LIFECYCLE" }, dossier: dossierItem('"d1"', 120) }),
+    );
+
+    const result = await runTransitionAssessment({ ...INPUT, target: "provisional", disposition: "Rejected", risk: "High" }, assessmentToolContext(graph));
+
+    expect(result.isError).toBe(true);
+    expect(refusalOf(result)).toMatchObject({ expected: 'status "In Progress"', observed: 'status "Provisional"' });
+    expect(calls.filter((call) => call.method !== "get")).toEqual([]);
   });
 
   it("refuses an assessment id no item carries with the structured refusal, not a failure blaming the profile", async () => {

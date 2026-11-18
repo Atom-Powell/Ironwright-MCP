@@ -67,7 +67,7 @@ describe("preconditions", () => {
 });
 
 describe("the lifecycle preconditions, one definition per tool", () => {
-  const LABELS = { inProgress: "In Progress" };
+  const LABELS = { inProgress: "In Progress", provisional: "Provisional" };
   const DOSSIER = "Assessments/ProbeVendor/PRB-1/Research/d.md";
   const PUBLICATION = "Assessments/ProbeVendor/PRB-1/Published/p.docx";
   const artifact = (kind: string, path: string, present: boolean): AssessmentState["artifacts"][number] => ({ kind, path, present, eTag: present ? "e" : undefined, size: present ? 3 : undefined });
@@ -92,6 +92,29 @@ describe("the lifecycle preconditions, one definition per tool", () => {
       evidence: [{ source: "drive", target: PUBLICATION, found: "not found" }],
     });
     expect(transitionPrecondition(withArtifacts(true, true), LABELS, "completed", "the list").ok).toBe(true);
+  });
+
+  // Ruled 2026-11-17: provisional is not an end state.
+  it("completion is reached from provisional as well as from in progress, and nothing else is", () => {
+    const parked = withArtifacts(true, true);
+    parked.record!.status = "Provisional";
+
+    expect(transitionPrecondition(parked, LABELS, "completed", "the list").ok).toBe(true);
+    expect(transitionPrecondition(parked, LABELS, "provisional", "the list")).toMatchObject({ ok: false, expected: 'status "In Progress"', observed: 'status "Provisional"' });
+    expect(savePrecondition(parked, LABELS, "the list")).toMatchObject({ ok: false, expected: 'status "In Progress"' });
+    expect(findingsPrecondition(parked, LABELS, "the list")).toMatchObject({ ok: false, expected: 'status "In Progress"' });
+
+    const done = withArtifacts(true, true);
+    done.record!.status = "Completed";
+    expect(transitionPrecondition(done, LABELS, "completed", "the list")).toMatchObject({ ok: false, expected: 'status "In Progress" or "Provisional"', observed: 'status "Completed"' });
+  });
+
+  it("a provisional assessment without its publication is refused for the publication, not for its status", () => {
+    const parked = withArtifacts(true, false);
+    parked.record!.status = "Provisional";
+
+    expect(transitionPrecondition(parked, LABELS, "completed", "the list")).toMatchObject({ ok: false, expected: "the publication present at its canonical path" });
+    expect(lifecycleReadiness(parked, LABELS, "the list").map((entry) => entry.ready)).toEqual([false, false, false, false]);
   });
 
   it("lifecycleReadiness reports each tool from those same preconditions, with the evidence of a refusal", () => {

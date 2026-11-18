@@ -76,12 +76,40 @@ describe("the simulated tenant: lists, as probes L1 to L3 measured them on 2026-
     const site = { siteId: sim.siteId, listName: "Assessments" };
     const created = await createListItem(sim.graph, { ...site, fields: { Title: "Acme Corp", Status: "In Progress" } });
 
-    const fields = await updateListItemFields(sim.graph, { ...site, itemId: created.id, fields: { Status: "Completed" } });
-    expect(fields).toMatchObject({ id: "1", Title: "Acme Corp", Status: "Completed" });
+    const updated = await updateListItemFields(sim.graph, { ...site, itemId: created.id, fields: { Status: "Completed" }, etag: created.eTag! });
+    if (updated.kind !== "updated") throw new Error("expected the update to land");
+    expect(updated.fields).toMatchObject({ id: "1", Title: "Acme Corp", Status: "Completed" });
+    // L4c, 2026-11-17: the answer carries the item's eTag after the write.
+    expect(updated.eTag).toMatch(/,2"$/);
 
     const back = await getListItem(sim.graph, { ...site, itemId: created.id });
-    expect(back?.eTag).toMatch(/,2"$/);
+    expect(back?.eTag).toBe(updated.eTag);
     expect(back?.fields.Status).toBe("Completed");
+  });
+
+  it("refuses a fields update under a stale ETag with 412 resourceModified and leaves the item as it was (L4a, L4b, 2026-11-17)", async () => {
+    const sim = tenant();
+    const site = { siteId: sim.siteId, listName: "Assessments" };
+    const created = await createListItem(sim.graph, { ...site, fields: { Title: "Acme Corp", Status: "In Progress" } });
+    sim.setListItemFields("Assessments", created.id, { Status: "Edited by hand" });
+
+    expect(await updateListItemFields(sim.graph, { ...site, itemId: created.id, fields: { Status: "Completed" }, etag: created.eTag! })).toEqual({ kind: "precondition_failed" });
+    await expect(sim.graph.patch(`/sites/${sim.siteId}/lists/Assessments/items/${created.id}/fields`, { Status: "Completed" }, { "if-match": created.eTag! })).rejects.toMatchObject({
+      status: 412,
+      code: "resourceModified",
+    });
+
+    const back = await getListItem(sim.graph, { ...site, itemId: created.id });
+    expect(back?.fields.Status).toBe("Edited by hand");
+    expect(back?.eTag).toMatch(/,2"$/);
+  });
+
+  it("still takes a fields update that carries no precondition, as the 2026-11-07 probe sent it (L2b)", async () => {
+    const sim = tenant();
+    const created = await createListItem(sim.graph, { siteId: sim.siteId, listName: "Assessments", fields: { Title: "Acme Corp", Status: "In Progress" } });
+
+    const answered = await sim.graph.patch<Record<string, unknown>>(`/sites/${sim.siteId}/lists/Assessments/items/${created.id}/fields`, { Status: "Completed" });
+    expect(answered.Status).toBe("Completed");
   });
 
   it("keeps a multi line value exactly as sent (the 9c sitting, 2026-11-08)", async () => {

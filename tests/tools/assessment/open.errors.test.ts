@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runOpenAssessment } from "../../../src/tools/assessment/open.js";
 import { RESOLVE_DRIVE_SCRIPT, assessmentToolContext, createScriptedGraph, fileItem, listItem, resultText } from "./fake-graph.js";
-import { assessmentFields, assessmentsQuery, folderCreates, idWriteBack, readBacks, vendorFolderQuery, vendorsQuery, workspaceReads } from "./open-script.js";
+import { assessmentFields, assessmentsQuery, folderCreates, idWriteBack, provisionalQuery, readBacks, vendorFolderQuery, vendorsQuery, workspaceReads } from "./open-script.js";
 
 const PROFILE = "vendor-assessments";
 const INPUT = { profileId: PROFILE, vendor: "Acme Corp", scope: "Security" };
@@ -51,6 +51,7 @@ describe("open_assessment failures", () => {
       ...RESOLVE_DRIVE_SCRIPT,
       vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" })]),
       assessmentsQuery("Acme Corp", []),
+      provisionalQuery("Acme Corp", []),
       { method: "post", pathIncludes: "/lists/Assessments/items", response: listItem("2", assessmentFields("Acme Corp")) },
       ...idWriteBack("Acme Corp", "2", "ASM-2026-00002", "ASM-2026-99999"),
     ]);
@@ -66,6 +67,48 @@ describe("open_assessment failures", () => {
     expect(calls.some((call) => call.path.endsWith("/children"))).toBe(false);
     expect((await context.store.listJournal(PROFILE, "(unassigned)")).map((entry) => entry.operation)).toEqual(["list_item_created"]);
     expect((await context.store.listJournal(PROFILE, "ASM-2026-00002")).map((entry) => entry.operation)).toEqual(["list_item_updated"]);
+  });
+
+  // Measured 2026-11-17 (L4a). The item was created a moment before, and something changed it
+  // before the id could be written, so the id is not written over that change.
+  it("stops before any folder when the item changed before the id was written, and adds no journal entry for the id", async () => {
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" })]),
+      assessmentsQuery("Acme Corp", []),
+      provisionalQuery("Acme Corp", []),
+      { method: "post", pathIncludes: "/lists/Assessments/items", response: listItem("2", assessmentFields("Acme Corp")) },
+      { method: "patch", pathIncludes: "/lists/Assessments/items/2/fields", throws: { status: 412, code: "resourceModified" } },
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runOpenAssessment(INPUT, context);
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toBe(
+      'The assessment id "ASM-2026-00002" was not written: Assessments item 2 changed after this call read it: Graph answered 412 to If-Match "item-2,1". ' +
+        "No folder was created. The journal records what this call did write.",
+    );
+    expect(calls.some((call) => call.path.endsWith("/children"))).toBe(false);
+    expect((await context.store.listJournal(PROFILE, "(unassigned)")).map((entry) => entry.operation)).toEqual(["list_item_created"]);
+    expect(await context.store.listJournal(PROFILE, "ASM-2026-00002")).toEqual([]);
+  });
+
+  it("stops before any folder when the item to finish was read without an eTag", async () => {
+    const bare = { ...listItem("3", assessmentFields("Acme Corp")), eTag: undefined, "@odata.etag": undefined };
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" })]),
+      assessmentsQuery("Acme Corp", [bare]),
+    ]);
+
+    const result = await runOpenAssessment(INPUT, assessmentToolContext(graph));
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toBe(
+      "Assessments item 3 was read without an ETag, so no If-Match precondition could be sent. The assessment id was not written and no folder was created.",
+    );
+    expect(calls.filter((call) => call.method !== "get")).toEqual([]);
   });
 
   it("names the root path when the root does not read back after the creates", async () => {

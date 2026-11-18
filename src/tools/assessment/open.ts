@@ -7,7 +7,8 @@ import { createListItem, getListItem, updateListItemFields } from "../../graph/l
 import { renderAssessmentId, sanitizeFolderName } from "../../domain/assessment/templates.js";
 import { fieldsFor, recordFromFields } from "../../domain/assessment/state.js";
 import { resolveAssessmentContext } from "./context.js";
-import { findInProgressAssessment, findVendor, findVendorByFolder, workspacePaths } from "./read-state.js";
+import { findOpenAssessment, findVendor, findVendorByFolder, workspacePaths } from "./read-state.js";
+import { itemChangedText, itemWithoutEtagText } from "./item-precondition.js";
 import { appendJournal } from "./journal.js";
 import { ASSESSMENT_SUMMARY_SHAPE } from "./output.js";
 import { withKeyedLock } from "./keyed-lock.js";
@@ -115,8 +116,9 @@ async function openAssessment(args: z.infer<typeof InputObject>, context: ToolCo
         vendorCreated = true;
       }
 
-      // Retry rule: an assessment already in progress for this vendor and scope is returned, not duplicated.
-      let record = await findInProgressAssessment(context.graph, ac, folder, args.scope);
+      // Retry rule: an assessment already open for this vendor and scope, in progress or parked as
+      // provisional, is returned, not duplicated.
+      let record = await findOpenAssessment(context.graph, ac, folder, args.scope);
       let created = false;
       if (record === undefined) {
         const item = await createListItem(context.graph, {
@@ -132,8 +134,33 @@ async function openAssessment(args: z.infer<typeof InputObject>, context: ToolCo
       // The id is rendered from the item id and written back before any folder exists.
       if (record.assessmentId === undefined) {
         const rendered = renderAssessmentId(ac.profile.assessmentId.template, { prefix: ac.profile.assessmentId.prefix, itemId: Number(record.itemId), now: ac.now });
-        await updateListItemFields(context.graph, { siteId: ac.siteId, listName: lists.assessments.name, itemId: record.itemId, fields: fieldsFor(columns, { assessmentId: rendered }) });
-        await appendJournal(context, ac, rendered, { stage: STAGE, operation: "list_item_updated", target: `${lists.assessments.name}/${record.itemId}`, etagBefore: record.etag });
+        // Written only onto the item as this call created or found it. The eTag is the create's
+        // own answer or the query's, and an item changed since then is not written over.
+        const itemEtag = record.etag;
+        if (itemEtag === undefined) {
+          const wrote = created || vendorCreated ? " The journal records what this call did write." : "";
+          return {
+            isError: true,
+            content: [{ type: "text" as const, text: `${itemWithoutEtagText(lists.assessments.name, record.itemId)} The assessment id was not written and no folder was created.${wrote}` }],
+          };
+        }
+        const idWrite = await updateListItemFields(context.graph, { siteId: ac.siteId, listName: lists.assessments.name, itemId: record.itemId, fields: fieldsFor(columns, { assessmentId: rendered }), etag: itemEtag });
+        if (idWrite.kind === "precondition_failed") {
+          const wrote = created || vendorCreated ? " The journal records what this call did write." : "";
+          return {
+            isError: true,
+            content: [
+              { type: "text" as const, text: `The assessment id "${rendered}" was not written: ${itemChangedText(lists.assessments.name, record.itemId, itemEtag)} No folder was created.${wrote}` },
+            ],
+          };
+        }
+        await appendJournal(context, ac, rendered, {
+          stage: STAGE,
+          operation: "list_item_updated",
+          target: `${lists.assessments.name}/${record.itemId}`,
+          etagBefore: itemEtag,
+          ...(idWrite.eTag !== undefined ? { etagAfter: idWrite.eTag } : {}),
+        });
         const back = await getListItem(context.graph, { siteId: ac.siteId, listName: lists.assessments.name, itemId: record.itemId });
         const readBack = back === undefined ? undefined : recordFromFields(back.fields, back.id, back.eTag, columns);
         if (readBack?.assessmentId !== rendered) {
@@ -217,11 +244,13 @@ async function openAssessment(args: z.infer<typeof InputObject>, context: ToolCo
         graphRequests: context.graph.requests() - before,
       };
       const subfolderCount = `${paths.subfolders.length} ${paths.subfolders.length === 1 ? "subfolder" : "subfolders"}`;
+      // An assessment found parked as provisional is named as that; one in progress reads as before.
+      const parked = !created && output.status !== labels.inProgress;
       const text = created
         ? `Opened ${output.assessmentId} for ${output.vendor} (${output.scope}): item ${output.itemId} in ${lists.assessments.name}, workspace ${paths.root}, root and ${subfolderCount} read back.`
         : resumed
-          ? `Resumed ${output.assessmentId} for ${output.vendor} (${output.scope}), which was already in progress: this call ${writes.join(" and ")}. Workspace ${paths.root}: root and ${subfolderCount} read back.`
-          : `${output.assessmentId} for ${output.vendor} (${output.scope}) is already open; nothing was written. Workspace ${paths.root}: root and ${subfolderCount} read as folders.`;
+          ? `Resumed ${output.assessmentId} for ${output.vendor} (${output.scope}), which was already ${parked ? `open with status "${output.status}"` : "in progress"}: this call ${writes.join(" and ")}. Workspace ${paths.root}: root and ${subfolderCount} read back.`
+          : `${output.assessmentId} for ${output.vendor} (${output.scope}) is already open${parked ? ` with status "${output.status}"` : ""}; nothing was written. Workspace ${paths.root}: root and ${subfolderCount} read as folders.`;
       return { structuredContent: output, content: [{ type: "text" as const, text }] };
     });
   } catch (error) {

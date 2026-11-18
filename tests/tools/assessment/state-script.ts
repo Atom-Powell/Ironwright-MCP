@@ -40,6 +40,9 @@ export interface StateOptions {
   dossier?: unknown;
   summary?: unknown;
   publication?: unknown;
+  /** The two subfolders a create looks for before it writes under them; each defaults to present. */
+  researchPresent?: boolean;
+  publishedPresent?: boolean;
 }
 
 /**
@@ -55,6 +58,10 @@ export function stateScript(options: StateOptions = {}): ScriptEntry[] {
     itemRead(DOSSIER_PATH, options.dossier),
     itemRead(SUMMARY_PATH, options.summary),
     itemRead(PUBLICATION_PATH, options.publication),
+    // Read only by a save that creates a file, which looks for the folders between the root and
+    // the file first. Scripted for every state so a create needs no script of its own for them.
+    itemRead(`${ROOT}/Research`, options.researchPresent === false ? undefined : folderItem("Research")),
+    itemRead(`${ROOT}/Published`, options.publishedPresent === false ? undefined : folderItem("Published")),
   ];
 }
 

@@ -215,6 +215,87 @@ describe("overlapping lifecycle calls on one assessment", () => {
     expect(d.sim.listItems("Assessments")[0]!.fields).toMatchObject({ Status: "Provisional", State: "LIFECYCLE" });
   });
 
+  // The six rulings of 2026-11-17, each run through the real handlers over state that persists.
+
+  it("refuses a transition, and keeps a person's edit, when the item is changed between the tool's read and its write", async () => {
+    const d = deployment();
+    const id = await opened(d);
+    structured(await runSaveAssessmentArtifact({ profileId: PROFILE, assessmentId: id, kind: "dossier", content: "x" }, d.context));
+    d.sim.putFile(`Assessments/Acme Corp/${id}/Published/Acme Corp_${id}_Risk_Assessment.docx`, bytes("docx"));
+
+    // A person edits the item in the browser after the tool has read it and before it writes.
+    let edited = false;
+    const graph: typeof d.sim.graph = {
+      ...d.sim.graph,
+      patch: async <T>(path: string, body: unknown, headers?: Record<string, string>): Promise<T> => {
+        if (!edited) {
+          edited = true;
+          d.sim.setListItemFields("Assessments", "1", { Disposition: "Rejected" });
+        }
+        return d.sim.graph.patch<T>(path, body, headers);
+      },
+    };
+
+    const result = await runTransitionAssessment({ profileId: PROFILE, assessmentId: id, target: "completed", disposition: "Approved", risk: "Low" }, { ...d.context, graph });
+
+    expect(result.isError).toBe(true);
+    expect(text(result)).toContain("expected Assessments item 1 unchanged since this call read it, observed the item changed: Graph answered 412 to If-Match");
+    expect(text(result)).toContain("Nothing was written.");
+    expect(d.sim.listItems("Assessments")[0]!.fields).toMatchObject({ Status: "In Progress", Disposition: "Rejected" });
+
+    // The caller decides again on what is there now, and the same call then lands.
+    const again = structured(await runTransitionAssessment({ profileId: PROFILE, assessmentId: id, target: "completed", disposition: "Approved", risk: "Low" }, d.context));
+    expect(again).toMatchObject({ transitioned: true, status: "Completed", disposition: "Approved" });
+  });
+
+  it("returns a provisional assessment on open and completes it once the publication exists, with one item throughout", async () => {
+    const d = deployment();
+    const id = await opened(d);
+    structured(await runSaveAssessmentArtifact({ profileId: PROFILE, assessmentId: id, kind: "dossier", content: "x" }, d.context));
+    structured(await runTransitionAssessment({ profileId: PROFILE, assessmentId: id, target: "provisional", disposition: "Approved with conditions", risk: "Medium" }, d.context));
+
+    const reopened = structured(await runOpenAssessment({ profileId: PROFILE, vendor: "Acme Corp", scope: "Security" }, d.context));
+    expect(reopened).toMatchObject({ assessmentId: id, created: false, status: "Provisional" });
+
+    const early = await runTransitionAssessment({ profileId: PROFILE, assessmentId: id, target: "completed", disposition: "Approved", risk: "Low" }, d.context);
+    expect(early.isError).toBe(true);
+    expect(text(early)).toContain("expected the publication present at its canonical path");
+
+    d.sim.putFile(`Assessments/Acme Corp/${id}/Published/Acme Corp_${id}_Risk_Assessment.docx`, bytes("docx"));
+    const done = structured(await runTransitionAssessment({ profileId: PROFILE, assessmentId: id, target: "completed", disposition: "Approved", risk: "Low" }, d.context));
+    expect(done).toMatchObject({ transitioned: true, previousStatus: "Provisional", status: "Completed" });
+    expect(d.sim.listItems("Assessments")).toHaveLength(1);
+  });
+
+  it("leaves State at FINDINGS when the dossier is saved again unchanged", async () => {
+    const d = deployment();
+    const id = await opened(d);
+    structured(await runSaveAssessmentArtifact({ profileId: PROFILE, assessmentId: id, kind: "dossier", content: "the dossier" }, d.context));
+    structured(await runRecordFindings({ profileId: PROFILE, assessmentId: id, findings: FINDINGS, summary: "Two findings." }, d.context));
+    const from = d.sim.calls.length;
+
+    const again = structured(await runSaveAssessmentArtifact({ profileId: PROFILE, assessmentId: id, kind: "dossier", content: "the dossier" }, d.context));
+
+    expect(again.operation).toBe("unchanged");
+    expect(writesSince(d, from)).toEqual([]);
+    expect(d.sim.listItems("Assessments")[0]!.fields.State).toBe("FINDINGS");
+  });
+
+  it("journals the Published folder when a save brings it back after it was deleted", async () => {
+    const d = deployment();
+    const id = await opened(d);
+    structured(await runSaveAssessmentArtifact({ profileId: PROFILE, assessmentId: id, kind: "dossier", content: "x" }, d.context));
+    const published = `Assessments/Acme Corp/${id}/Published`;
+    d.sim.removeItem(published);
+
+    const saved = structured(await runSaveAssessmentArtifact({ profileId: PROFILE, assessmentId: id, kind: "executive_summary", content: "Summary." }, d.context));
+
+    expect(saved).toMatchObject({ operation: "created", foldersCreated: [published] });
+    expect(d.sim.tree().some((node) => node.path === published && node.kind === "folder")).toBe(true);
+    const journal = await d.context.store.listJournal(PROFILE, id);
+    expect(journal.filter((entry) => entry.operation === "folder_created" && entry.stage === "EXECUTIVE_SUMMARY").map((entry) => entry.target)).toEqual([published]);
+  });
+
   it("orders a save and a record_findings call for one assessment typed in two cases", async () => {
     const d = deployment();
     const id = await opened(d);

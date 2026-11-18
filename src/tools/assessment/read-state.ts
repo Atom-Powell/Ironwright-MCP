@@ -119,23 +119,37 @@ export async function findAssessmentById(graph: Pick<GraphClient, "get">, ac: As
   return { ...record, assessmentId: record.assessmentId ?? assessmentId };
 }
 
-export async function findInProgressAssessment(
+/**
+ * The vendor's open assessment for a scope: the one in progress, or failing
+ * that one parked as provisional. Ruled 2026-11-17: provisional is not an end
+ * state, so an assessment waiting there is returned, not duplicated.
+ *
+ * Two queries and not one filter with `or`. Each is the three clause shape
+ * the 2026-11-07 probe and every sitting since have sent; an `or` across a
+ * column has not been sent to this list, and the second query costs one
+ * request only on the way to creating an assessment.
+ */
+export async function findOpenAssessment(
   graph: Pick<GraphClient, "get">,
   ac: AssessmentContext,
   vendorFolder: string,
   scope: string,
 ): Promise<AssessmentRecord | undefined> {
   const columns = ac.profile.lists.assessments.columns;
-  const filter =
-    `fields/${columns.vendorFolder} eq ${odataString(vendorFolder)} and ` +
-    `fields/${columns.scope} eq ${odataString(scope)} and ` +
-    `fields/${columns.status} eq ${odataString(ac.profile.lifecycle.status.inProgress)}`;
-  const items = await queryListItems(graph, { ...assessmentsList(ac), filter });
-  // The oldest open one is picked because it is the one a retry meant. A newer duplicate is not
-  // reported here; it stays in the list for an operator to see.
-  const sorted = [...items].sort((a, b) => Number(a.id) - Number(b.id));
-  const item = sorted[0];
-  return item === undefined ? undefined : recordFromFields(item.fields, item.id, item.eTag, columns);
+  const labels = ac.profile.lifecycle.status;
+  for (const status of [labels.inProgress, labels.provisional]) {
+    const filter =
+      `fields/${columns.vendorFolder} eq ${odataString(vendorFolder)} and ` +
+      `fields/${columns.scope} eq ${odataString(scope)} and ` +
+      `fields/${columns.status} eq ${odataString(status)}`;
+    const items = await queryListItems(graph, { ...assessmentsList(ac), filter });
+    // The oldest one is picked because it is the one a retry meant. A newer duplicate is not
+    // reported here; it stays in the list for an operator to see.
+    const sorted = [...items].sort((a, b) => Number(a.id) - Number(b.id));
+    const item = sorted[0];
+    if (item !== undefined) return recordFromFields(item.fields, item.id, item.eTag, columns);
+  }
+  return undefined;
 }
 
 export type ArtifactLookup = { present: true; item: DriveItemFacts } | { present: false; occupant?: { name: string; isFolder: boolean } };

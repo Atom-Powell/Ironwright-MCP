@@ -43,7 +43,8 @@ sections below say what was proven and what was not. Last updated 2026-11-17.
 | Pre-EON test campaign | First run 2026-11-09: 8 scenarios on the developer tenant, 2 defects found (concurrent opens duplicated an assessment; a misnamed publication completed an assessment), both fixed in PR #27. Rerun the same day on the fixed server: s2 and s4 pass, s3, s5, s7 and s8 pass, s1 and s6 measured as before. Third run 2026-11-17, through `npm run sitting` on the build carrying the review fixes and the upgrades: the same eight verdicts, and the interrupted open, run for the first time, passed. Still to run: throttling and token expiry, inbound auth over a public tunnel, Copilot Studio contact (plan 9d); plan `docs/superpowers/plans/2026-11-09-pre-eon-test-campaign.md` | `scripts/pre-eon/campaign.ts`; sitting below |
 | Phase 9 code review | 2026-11-16: ten defects read out of the 9b, 9c and campaign source; seven fixed against fakes, three wait on a ruling or a probe (see the carried items below). 2026-11-17: a review of those fixes read ten more findings, all fixed against fakes. Run live 2026-11-17 on the paths the campaign and the sitting's own calls take, with no defect found; a fix whose case those paths do not reach is still covered by tests only | section below; the sitting of 2026-11-17; spec amendments of 2026-11-16 |
 | Assessment module upgrades and the simulated tenant | 2026-11-17: a stateful simulated tenant with a local server and walkthrough; refusals carried under `_meta` after the first client that lists tools rejected them; one lock per assessment; concurrent state reads; honest journal failures; one profile loader with more refused at load; version reporting, a record of every tool call and a bounded startup wait; `get_assessment` readiness, findings and journal readback, and listing by status. Built against the scripted fakes and the simulated tenant. Verified live 2026-11-17: a refusal through a client that lists the tools, the lock per assessment, the state read, profile loading, the version in the startup line, the call record, and all three `get_assessment` additions. Not exercised live: a journal append failure, the token request bound, a status listing past 200 | sections below; `docs/SIMULATOR.md`; `docs/superpowers/specs/evidence/2026-11-17-sitting/`; spec amendments of 2026-11-17 |
-| List item writes under `If-Match` | Probed live 2026-11-17: Graph refuses a stale fields PATCH with 412 and answers a current one with the new ETag. The server does not send the precondition yet; the fix is not written | carried item below; `docs/superpowers/specs/evidence/2026-11-17-list-if-match-probe/` |
+| List item writes under `If-Match` | Probed live 2026-11-17: Graph refuses a stale fields PATCH with 412 and answers a current one with the new ETag. Every list item update has sent the precondition since the rulings of the same day, against the fakes and the simulated tenant; not run live | carried item below; `docs/superpowers/specs/evidence/2026-11-17-list-if-match-probe/` |
+| The six rulings of 2026-11-17 | Ruled by the operator and built the same day: the safety sentence reworded, provisional no longer an end state, a folder a save brings back journaled, State left to the drive, an unchanged save recording no stage, a refused list write refused in turn. Against the fakes and the simulated tenant; `npm run sitting` checks two of them; none run live | section below; spec amendments of 2026-11-17 |
 | 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9c and carries the unverified A3 and B1 probes, and is the item that slips first | same spec |
 | Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
 | CPA practice domain (multi-site scan and queries, grant issuer loop over a sites file, folder template taxonomy) | Not started; the phase after 9 | same spec |
@@ -321,6 +322,10 @@ Graph confirms a write and the store then fails to append its journal entry, the
 store's error through `describeToolFailure`, which does not say that the Graph write happened, and
 the journal lacks the entry.
 
+**RULED 2026-11-17 and built: a save that writes no file records no stage.** An identical re-save
+now writes nothing, the State column included, and says what State reads. The cost is recorded in
+the rulings section below: a State write that failed is no longer repaired by repeating the save.
+The item read:
 **Carried from the 9c sitting, 2026-11-08: an identical re-save moves State from CORRECTION back
 to DOSSIER.** An overwrite records stage `CORRECTION`. A later `save_assessment_artifact` with the
 same content takes the unchanged path, which treats any State other than the kind's own stage as
@@ -334,17 +339,26 @@ lowercase, `verify_publication` said absent while `get_assessment` read it prese
 `transition_assessment` completed the assessment. Artifact presence now requires the exact name the
 template renders, for every artifact kind.
 
+**RULED 2026-11-17 and built: the save stands, and the journal records the folder.** A save that
+creates a file reads the folders between the root and the file first, creates one that is absent
+with its own request, and journals it as `folder_created` on that request's 201. The item read:
 **Carried from the pre-EON campaign, 2026-11-09: a content PUT recreates a deleted parent folder
 silently.** With `Published` deleted, `save_assessment_artifact` for the executive summary answered
 `created` and `Published` existed again. The journal holds the file's entry and no `folder_created`
 entry for the folder, so the journal understates what the call wrote. Low risk, since the path is the
 server's own, but whether to refuse instead, or to journal the folder, needs a ruling.
 
+**RULED 2026-11-17: left as it is.** State is a marker for people and the drive is the evidence,
+so no tool validates State. Nothing was changed. The item read:
 **Carried from the pre-EON campaign, 2026-11-09: a hand-edited State does not stop `record_findings`.**
 With State set to a value no stage writes, `record_findings` proceeded, because the precondition
 reads the dossier on the drive rather than trusting State. A hand-set Status of Completed did stop a
 save. Whether State should be validated needs a ruling; the drive is what the tools trust.
 
+**RULED 2026-11-17: the claim is withdrawn, not the behavior.** The lifecycle safety sentence and
+the Decision Record no longer say a tool overwrites only a file it created. They say what the
+server can keep: it writes at paths it computes, and it changes an existing file or list item only
+under the ETag it just read. The item read:
 **Carried from the phase 9 code review, 2026-11-16: a save overwrites a file the server did not
 create.** `save_assessment_artifact` overwrites whatever file is at the artifact's path under the
 ETag it just read. It does not check that the server created that file, although the lifecycle
@@ -381,11 +395,22 @@ answered 200 (L4c), and the stale PATCH of the item itself answered 412 as well 
 L4c carries `@odata.etag` with the item's new version, so a write refreshes its own precondition
 from its response, as a `driveItem` PATCH was measured to on 2026-09-19, and a tool that writes the
 item twice in one call needs no read between. So `updateListItemFields` can send `If-Match` where
-it already writes. What is not decided is what a lifecycle tool does with the 412: refuse with the
-evidence, as a save does when its file changed under it, or read again and retry once. That is a
-design choice for the operator before any code. Until then the defect stands as narrowed above: a
-person editing the item between a tool's read and its write is overwritten.
+it already writes.
 
+**RULED 2026-11-17 and built: a refused write is refused in turn.** Every list item update goes
+under the eTag the item was read with, and `updateListItemFields` will not send one without. On a
+412 the tool does not read again and retry: the item changed under a decision the tool had made,
+and whether that decision still stands is the caller's to say. A transition, which has written
+nothing by then, answers with the structured refusal. A save, a findings call and an open may have
+written already, so each says what stands and what was not written. Against the fakes and the
+simulated tenant, which now answers a stale `If-Match` as the probe measured; not run live, and a
+live run cannot easily produce it, since it needs the item edited while a call is in flight.
+
+**RULED 2026-11-17 and built: provisional is not an end state.** `transition_assessment` reaches
+completed from in progress or from provisional, and `open_assessment` returns an assessment parked
+as provisional for the vendor and scope instead of creating a second. A save and a findings call
+still need in progress, which the rulings section below names as the edge of what was ruled. The
+item read:
 **Carried from the phase 9 code review, 2026-11-16: a provisional assessment cannot be completed.**
 `requireInProgress` refuses every tool once the status is provisional, and a later `open_assessment`
 for the same vendor and scope creates a second assessment. The spec does not say whether
@@ -2728,6 +2753,79 @@ the one that remains has a seven day secret that nobody holds, since the runner 
 memory and let it go, so the next sitting reissues it the same way.
 
 The suite is at 3228 tests across 229 files.
+
+## The rulings of 2026-11-17, and what each changed
+
+Six questions the tests could measure and not decide were put to the operator with a
+recommendation each, and the operator took all six. Each was built test first the same evening.
+None has run against a tenant.
+
+| Ruling | What changed | Run against |
+|---|---|---|
+| A. A save overwrites a file the server did not create | Nothing in what the server does. The safety sentence every lifecycle tool carries and the Decision Record's amendment now say the server writes at paths it computes and changes an existing file or list item only under the ETag it just read | The contract test |
+| B. Provisional is not an end state | Completed is reached from in progress or provisional; `open_assessment` returns one parked as provisional, found by a second query sent only when nothing is in progress | The scripted fake, the simulated tenant end to end, and `npm run sitting -- --sim` |
+| C. A save recreates a deleted folder | The save stands, and the folder is no longer left to the content PUT to bring back. A create reads each folder between the root and the file, creates an absent one with its own request, and journals it on that request's 201. The result names it in `foldersCreated`, in a failure that follows as well as in a success | The scripted fake and the simulated tenant |
+| D. A hand edited State does not stop a tool | Nothing. The drive is the evidence | No change to test |
+| E. An unchanged save moved State backward | A save whose file already holds the content writes nothing and says what State reads | The scripted fake, the simulated tenant, and `npm run sitting -- --sim` |
+| F. A list item changed under a tool | Every list item update is sent under `If-Match`; a 412 is refused in turn, with no retry | The scripted fake, and the simulated tenant with the item edited between the read and the write |
+
+**What the rulings cost, said plainly.**
+
+- E removes a repair. The branch it changes was written to finish a save whose file had landed and
+  whose State write had not. It could not tell that case from a retry of a dossier already
+  corrected, and moved State backward in both. Now neither is touched, so a State write that fails
+  stays unrecorded until the next stage's write moves State on. F makes that case likelier than it
+  was, since a State write can now be refused. State is a marker for people, by ruling D, and no
+  tool reads it to decide anything.
+- F can leave a save half recorded. The file is written before the State update, on purpose, so
+  State never names a stage whose file a failed write did not produce. An item edited in between
+  therefore leaves a file that stands and a stage that is not recorded, reported as an error that
+  says exactly that.
+- C costs a create one more read for each folder between the root and the file, one in the
+  example profile, and one create request for a folder that is missing. An overwrite and an
+  unchanged save cost nothing more.
+- B costs an open that creates an assessment one more query.
+
+**The edge of what was ruled.** B lets a provisional assessment be completed and found. It does not
+let one be worked on: a save and a findings call still refuse it, because the ruling was about
+completion and nothing was asked about correcting a dossier or adding a finding while parked. If
+the pilot needs that, it is a seventh question. A provisional assessment also cannot be relabeled
+as provisional under another disposition.
+
+**Reviewed before it was committed.** An independent read of the change found eight things, and
+seven are fixed, each behind a test that failed first.
+
+| Finding | State |
+|---|---|
+| The folder was journaled on an inference: absent before the write, present after. A folder someone else restored in between was claimed, one whose read back failed was left out, and its entry followed the file's | Fixed: the save creates the folder itself and journals the 201 |
+| A file sitting where a folder above the artifact belongs counted as the folder being there | Fixed: refused before anything is written |
+| A folder the call created was named only in a success, though the journal held it on every later failure | Fixed: named in every result after it |
+| A State update refused with 412 did not say that repeating the save would not record the stage | Fixed: the message says so |
+| An item read without an eTag refused even a save that would have written nothing | Fixed: checked only where a write follows |
+| "Findings recorded" beside "Nothing was written" when no finding needed writing and the summary was refused | Fixed: says no finding needed writing |
+| Every create pays one read per folder above the file | Accepted, and named in the costs above; the reads now stop at the first absent folder |
+| A PATCH that Graph applied and then answered 502, 503 or 504 is retried by the client, and the retry answers 412 under its own `If-Match`, which every caller reports as an item someone else changed and nothing written | Carried below: it is the client's standing retry rule and older than this change |
+
+**Carried from the review of 2026-11-17: a retried conditional write can be misreported.** The
+Graph client retries a returned 429, 502, 503 or 504 on every verb, on the reasoning written
+beside it that a returned status is the server declining to act. For 429 that holds. For a
+gateway status it may not: a write can land and the answer be lost on the way back. With
+`If-Match` on the request the retry cannot apply twice, and answers 412, which every conditional
+write here reports as a change made by someone else with nothing written by this call. That has
+been true of renames, moves and file overwrites since phase 6a and is now true of list item
+updates too. Whether Graph ever answers a gateway status after committing has not been measured.
+The remedy would be to send a request that carries `If-Match` once on 502 and 504 and let the
+failure surface, keeping the retry for 429 and 503. It changes how every write tool verified live
+behaves under a gateway error, so it is the operator's to rule on, not a fix to slip in.
+
+**Not established.** None of the six has met a tenant. `npm run sitting` now carries two more
+steps, an identical save and an open of a parked assessment, so the next sitting checks E and the
+finding half of B live. Completing from provisional and the journaled folder both need the site
+changed between calls, which is the campaign's kind of work and is not in it yet. F's refusal
+needs the item edited while a call is in flight; the probe measured the 412 itself, and the path
+from that answer to the tool's words is covered by the fakes only.
+
+The suite is at 3272 tests across 229 files.
 
 ## The phase 6d live sitting, 2026-09-24: plans an operator describes
 

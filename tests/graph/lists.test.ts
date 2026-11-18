@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createListItem, getListItem, listItemsPath, odataString, queryListItems, updateListItemFields } from "../../src/graph/lists.js";
+import { GraphRequestError } from "../../src/graph/errors.js";
 import { L1B_ITEM_READ, L1_ITEMS_PAGE, L2A_ITEM_CREATED, L2B_FIELDS_UPDATED, L3B_FILTERED_PAGE } from "./fixtures/assessment-probe.js";
 
 const PATH = "/sites/site-1/lists/IW%20Probe%20Assessments/items";
@@ -19,9 +20,11 @@ function recordingClient(responses: unknown[]) {
       calls.push({ verb: "post", path, body });
       return answer<T>();
     },
-    patch: async <T>(path: string, body?: unknown): Promise<T> => {
-      calls.push({ verb: "patch", path, body });
-      return answer<T>();
+    patch: async <T>(path: string, body?: unknown, headers?: Record<string, string>): Promise<T> => {
+      calls.push({ verb: "patch", path, body, ...(headers === undefined ? {} : { headers }) });
+      const response = answer<unknown>();
+      if (response instanceof Error) throw response;
+      return response as T;
     },
   };
 }
@@ -84,12 +87,34 @@ describe("createListItem", () => {
 });
 
 describe("updateListItemFields", () => {
-  it("patches the fields and returns the whole fields object", async () => {
-    const client = recordingClient([L2B_FIELDS_UPDATED]);
-    const fields = { Status: "In Progress" };
-    const result = await updateListItemFields(client, { siteId: "site-1", listName: LIST, itemId: "2", fields });
+  const args = { siteId: "site-1", listName: LIST, itemId: "2", fields: { Status: "In Progress" }, etag: '"abc,1"' };
 
-    expect(client.calls[0]).toMatchObject({ verb: "patch", path: `${PATH}/2/fields`, body: fields });
-    expect(result.AssessmentId).toBe("PRB-20261107T203924Z-00002");
+  it("patches the fields under the eTag given and returns them with the item's new eTag", async () => {
+    const client = recordingClient([L2B_FIELDS_UPDATED]);
+    const result = await updateListItemFields(client, args);
+
+    expect(client.calls[0]).toMatchObject({ verb: "patch", path: `${PATH}/2/fields`, body: args.fields, headers: { "if-match": '"abc,1"' } });
+    // Measured 2026-11-17 (L4c) and already in the 2026-11-07 recording: the answer carries the
+    // item's eTag after the write, so a second write in one call needs no read between.
+    expect(result).toMatchObject({ kind: "updated", eTag: '"<guid>,2"' });
+    if (result.kind !== "updated") throw new Error("expected an update");
+    expect(result.fields.AssessmentId).toBe("PRB-20261107T203924Z-00002");
+  });
+
+  it("reports a 412 as a precondition that failed, the answer L4a measured for a stale eTag", async () => {
+    const refused = new GraphRequestError({ method: "PATCH", path: `${PATH}/2/fields`, status: 412, body: JSON.stringify({ error: { code: "resourceModified", message: "The resource has changed since the caller last read it; usually an eTag mismatch" } }) });
+    const client = recordingClient([refused]);
+    expect(await updateListItemFields(client, args)).toEqual({ kind: "precondition_failed" });
+  });
+
+  it("lets every other failure through as the error it is", async () => {
+    const denied = new GraphRequestError({ method: "PATCH", path: `${PATH}/2/fields`, status: 403, body: JSON.stringify({ error: { code: "accessDenied" } }) });
+    const client = recordingClient([denied]);
+    await expect(updateListItemFields(client, args)).rejects.toBe(denied);
+  });
+
+  it("answers with no eTag when Graph's answer carries none, and does not invent one", async () => {
+    const client = recordingClient([{ Status: "In Progress" }]);
+    expect(await updateListItemFields(client, args)).toEqual({ kind: "updated", fields: { Status: "In Progress" }, eTag: undefined });
   });
 });

@@ -103,12 +103,36 @@ export async function createListItem(
   return recordOf(item, args.listName);
 }
 
-/** Measured 2026-11-07 (L2b): the response is the whole fields object after the update. */
+export type UpdateListItemOutcome =
+  | { kind: "updated"; fields: Record<string, unknown>; eTag: string | undefined }
+  /** The item changed after the eTag sent was read. Nothing was written. */
+  | { kind: "precondition_failed" };
+
+/**
+ * Updates an item's fields only if the item is still the version the caller
+ * read. The eTag is required, not optional: an update with no precondition
+ * overwrites whatever a person changed in the browser since the read, and a
+ * caller that holds no eTag has to say so itself instead of writing blind.
+ *
+ * Measured 2026-11-07 (L2b): the response is the whole fields object after the
+ * update. Measured 2026-11-17 (L4a to L4d): a stale `If-Match` answers 412
+ * `resourceModified` and writes nothing, and the answer to a write that lands
+ * carries the item's new eTag as `@odata.etag`, so a second write in one call
+ * takes its precondition from the first one's answer.
+ */
 export async function updateListItemFields(
   client: Pick<GraphClient, "patch">,
-  args: { siteId: string; listName: string; itemId: string; fields: Record<string, unknown> },
-): Promise<Record<string, unknown>> {
-  const fields = await client.patch<unknown>(`${listItemsPath(args.siteId, args.listName)}/${encodeURIComponent(args.itemId)}/fields`, args.fields);
+  args: { siteId: string; listName: string; itemId: string; fields: Record<string, unknown>; etag: string },
+): Promise<UpdateListItemOutcome> {
+  let fields: unknown;
+  try {
+    fields = await client.patch<unknown>(`${listItemsPath(args.siteId, args.listName)}/${encodeURIComponent(args.itemId)}/fields`, args.fields, { "if-match": args.etag });
+  } catch (error) {
+    if (error instanceof GraphRequestError && error.status === 412) return { kind: "precondition_failed" };
+    throw error;
+  }
   if (typeof fields !== "object" || fields === null) throw new Error(`Graph answered the fields update on list "${args.listName}" item ${args.itemId} without a fields object.`);
-  return fields as Record<string, unknown>;
+  const answered = fields as Record<string, unknown>;
+  const eTag = answered["@odata.etag"];
+  return { kind: "updated", fields: answered, eTag: typeof eTag === "string" ? eTag : undefined };
 }

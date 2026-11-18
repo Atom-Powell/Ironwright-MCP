@@ -259,7 +259,9 @@ describe("get_assessment", () => {
     );
   });
 
-  it("says once why nothing would proceed for an assessment that is completed", async () => {
+  // Two reasons since 2026-11-17, not one: completion is reached from provisional as well as
+  // from in progress, so that tool expects something the other three do not.
+  it("says why nothing would proceed for an assessment that is completed, grouping the tools by what each expected", async () => {
     const script = dossierOnly();
     script[2] = { method: "get", pathIncludes: ["/lists/Assessments/items?", `AssessmentId eq '${ID}'`], headersInclude: NON_INDEXED_QUERY_HEADER, response: page([listItem("2", { ...PROBE_FIELDS, Status: "Completed" })]) };
     const { graph } = createScriptedGraph(script);
@@ -267,7 +269,28 @@ describe("get_assessment", () => {
     const result = await runGetAssessment({ profileId: PROFILE, assessmentId: ID }, assessmentToolContext(graph));
 
     expect((result.structuredContent as { readiness: Array<{ ready: boolean }> }).readiness.every((entry) => !entry.ready)).toBe(true);
-    expect(resultText(result)).toContain('On what this call read: no lifecycle tool would proceed (expected status "In Progress", observed status "Completed").');
+    expect(resultText(result)).toContain(
+      "On what this call read: no lifecycle tool would proceed; " +
+        'save_assessment_artifact, record_findings and transition_assessment to provisional would be refused (expected status "In Progress", observed status "Completed"); ' +
+        'transition_assessment to completed would be refused (expected status "In Progress" or "Provisional", observed status "Completed").',
+    );
+  });
+
+  it("reports a provisional assessment as ready to complete once its publication is present, and for nothing else", async () => {
+    const script = dossierOnly();
+    script[2] = { method: "get", pathIncludes: ["/lists/Assessments/items?", `AssessmentId eq '${ID}'`], headersInclude: NON_INDEXED_QUERY_HEADER, response: page([listItem("2", { ...PROBE_FIELDS, Status: "Provisional" })]) };
+    script[6] = { method: "get", pathIncludes: "_Risk_Assessment.docx", response: fileItem("Acme Corp_ASM-2026-00002_Risk_Assessment.docx", '"p1"', 52) };
+    const { graph } = createScriptedGraph(script);
+
+    const result = await runGetAssessment({ profileId: PROFILE, assessmentId: ID }, assessmentToolContext(graph));
+
+    expect((result.structuredContent as { readiness: Array<{ target?: string; ready: boolean }> }).readiness.map((entry) => [entry.target, entry.ready])).toEqual([
+      [undefined, false],
+      [undefined, false],
+      ["provisional", false],
+      ["completed", true],
+    ]);
+    expect(resultText(result)).toContain("transition_assessment to completed would proceed");
   });
 
   it("names what holds an artifact's path when it is not the artifact", async () => {

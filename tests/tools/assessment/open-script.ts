@@ -24,6 +24,19 @@ export function assessmentsQuery(folder: string, items: unknown[]): ScriptEntry 
   };
 }
 
+/**
+ * The second lookup, made only when nothing is in progress: an assessment parked as provisional
+ * for the same vendor and scope, which open returns instead of creating another.
+ */
+export function provisionalQuery(folder: string, items: unknown[]): ScriptEntry {
+  return {
+    method: "get",
+    pathIncludes: ["/lists/Assessments/items?", `VendorFolder eq '${folder}'`, "Scope eq 'Security'", "Status eq 'Provisional'"],
+    headersInclude: NON_INDEXED_QUERY_HEADER,
+    response: page(items),
+  };
+}
+
 /** The id write back and its read back for item `itemId`; `readBackId` differs from `assessmentId` to script a lost write. */
 export function idWriteBack(folder: string, itemId: string, assessmentId: string, readBackId = assessmentId): ScriptEntry[] {
   return [
@@ -98,6 +111,7 @@ export function firstOpenScript(conflict: string[] = []): ScriptEntry[] {
     vendorFolderQuery("Acme Corp", []),
     { method: "post", pathIncludes: "/lists/Vendors/items", response: listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" }) },
     assessmentsQuery("Acme Corp", []),
+    provisionalQuery("Acme Corp", []),
     { method: "post", pathIncludes: "/lists/Assessments/items", response: listItem("2", assessmentFields("Acme Corp")) },
     ...idWriteBack("Acme Corp", "2", "ASM-2026-00002"),
     ...folderCreates("Acme Corp", "ASM-2026-00002", conflict),

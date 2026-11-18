@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { ToolContext } from "../context.js";
 import { describeToolFailure, type FailureSubject } from "../errors.js";
-import { MAX_SMALL_UPLOAD_BYTES, UploadTooLargeError, createFile, overwriteFile, readDriveItem, type DriveItemFacts } from "../../graph/items.js";
+import { MAX_SMALL_UPLOAD_BYTES, UploadTooLargeError, createFile, createFolder, overwriteFile, readDriveItem, type DriveItemFacts } from "../../graph/items.js";
 import { downloadDriveItem } from "../../graph/content.js";
 import { updateListItemFields } from "../../graph/lists.js";
 import { fieldsFor, savePrecondition } from "../../domain/assessment/state.js";
@@ -12,6 +12,7 @@ import { findAssessmentById, readAssessmentState } from "./read-state.js";
 import { sha256Hex } from "./hash.js";
 import { appendJournal } from "./journal.js";
 import { refusalResult } from "./refusal.js";
+import { itemChangedText, itemWithoutEtagText } from "./item-precondition.js";
 import { withAssessmentLock } from "./keyed-lock.js";
 
 export const SAVE_INPUT_SCHEMA = {
@@ -34,11 +35,17 @@ export const SAVE_OUTPUT_SCHEMA = {
   stage: z
     .string()
     .describe(
-      'The stage this save stands for, which the State column holds when the call succeeds, for example "DOSSIER", or "CORRECTION" when the dossier was overwritten. On "unchanged" it is the kind\'s own stage, journaled only when the State column had to be set.',
+      'The stage this save stands for, for example "DOSSIER", or "CORRECTION" when the dossier was overwritten. A save that wrote the file records it in the State column. On "unchanged" it is the kind\'s own stage and nothing is recorded, so the State column may read another stage.',
     ),
   bytes: z.number().int().describe('Bytes of the file as last read: read back after a write, or as downloaded on "unchanged", for example 2048.'),
   sha256: z.string().describe('sha256 of those bytes, equal to the hash of the content sent, for example "9f86d0...".'),
   eTag: z.string().optional().describe('The item\'s ETag as last read: after the write, or as found on "unchanged", for example "\\"{...},2\\"".'),
+  foldersCreated: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Folders between the workspace root and the file that were absent and that this call created before writing the file, each journaled, for example ["Assessments/Acme Corp/ASM-2026-00002/Published"] after that folder was deleted. Absent when every folder was there.',
+    ),
   correlationId: z.string().describe('For example "6f1c...".'),
   graphRequests: z.number().int().describe("For example 9."),
 } satisfies z.ZodRawShape;
@@ -55,6 +62,13 @@ export function stageFor(kind: string, overwritten: boolean): string {
 
 function failure(text: string): CallToolResult {
   return { isError: true, content: [{ type: "text" as const, text }] };
+}
+
+/** The folders strictly between the workspace root and a file under it, outermost first. */
+export function foldersBetween(root: string | undefined, filePath: string): string[] {
+  if (root === undefined || !filePath.startsWith(`${root}/`)) return [];
+  const segments = filePath.slice(root.length + 1).split("/").slice(0, -1);
+  return segments.map((_, index) => `${root}/${segments.slice(0, index + 1).join("/")}`);
 }
 
 export async function runSaveAssessmentArtifact(input: unknown, context: ToolContext): Promise<CallToolResult> {
@@ -106,17 +120,43 @@ async function saveAssessmentArtifact(args: z.infer<typeof InputObject>, context
       );
     }
 
-    // The State write and its journal entry, shared by a save that wrote the file and one that found
-    // the content already there. The PATCH answers with the item's whole fields object after the
-    // update (L2b), which is the read back for this write. Returns the failure text on a mismatch.
-    const recordStage = async (stage: string, saved: string): Promise<string | undefined> => {
-      const fields = await updateListItemFields(context.graph, { siteId: ac.siteId, listName, itemId: item.itemId, fields: fieldsFor(columns, { state: stage }) });
+    // Checked wherever a write is about to follow, and not before: a save that finds the content
+    // already there writes nothing, and so needs no precondition to send.
+    const itemEtag = item.etag;
+    const noEtag = (): CallToolResult => failure(`${itemWithoutEtagText(listName, item.itemId)} Nothing was written.`);
+
+    // Folders this call created on the way to the file. Named in every result after that point,
+    // a failure included, because the journal holds them whatever happens next.
+    const foldersCreated: string[] = [];
+    const folderNote = (): string =>
+      foldersCreated.map((folder) => ` The folder ${folder} was not there, so this call created it before writing the file; the journal records it.`).join("");
+
+    // The State write and its journal entry, made after the file is written and read back. The
+    // PATCH answers with the item's whole fields object after the update (L2b), which is the read
+    // back for this write. Returns the failure text when the stage was not recorded as sent.
+    //
+    // It goes under the eTag the item was read with. The file is already written by then, so an
+    // item that changed in between leaves a save whose file stands and whose stage is not recorded,
+    // and the text says exactly that. Writing State first would refuse cleanly, and would leave
+    // State naming a stage whose file a failed write never produced, which is worse: the drive is
+    // what the tools trust, and State must never run ahead of it.
+    const recordStage = async (stage: string, saved: string, etag: string): Promise<string | undefined> => {
+      const updated = await updateListItemFields(context.graph, { siteId: ac.siteId, listName, itemId: item.itemId, fields: fieldsFor(columns, { state: stage }), etag });
+      if (updated.kind === "precondition_failed") {
+        return (
+          `${saved}, but ${columns.state} was not recorded: ${itemChangedText(listName, item.itemId, etag)} ` +
+          `The file and its journal entry stand, and ${columns.state} was left as it is. ` +
+          "Saving the same content again will not record it: a save that writes no file records no stage."
+        );
+      }
       await appendJournal(context, ac, assessmentId, {
         stage,
         operation: "list_item_updated",
         target: `${listName}/${item.itemId}`,
-        ...(item.etag !== undefined ? { etagBefore: item.etag } : {}),
+        etagBefore: etag,
+        ...(updated.eTag !== undefined ? { etagAfter: updated.eTag } : {}),
       });
+      const fields = updated.fields;
       if (fields[columns.state] === stage) return undefined;
       return (
         `${saved}, but the ${columns.state} update on ${listName} item ${item.itemId} answered ${JSON.stringify(fields[columns.state] ?? null)}, not "${stage}". ` +
@@ -130,9 +170,42 @@ async function saveAssessmentArtifact(args: z.infer<typeof InputObject>, context
     let written: DriveItemFacts;
     let priorHash: string | undefined;
     if (!artifact.present) {
+      if (itemEtag === undefined) return noEtag();
+      // A folder between the root and the file that is gone is created here, by its own request.
+      // Measured 2026-11-09 (campaign s1): left alone, the content PUT recreates it and answers as
+      // for any create, so nothing records that a folder came back. Ruled 2026-11-17: the save
+      // stands and the journal says so. Creating it first, and not inferring it afterward from an
+      // absence before the write and a presence after, puts the journal entry on a 201 this call
+      // received; a folder someone else restored in between answers 409 and is not claimed.
+      let above = true;
+      for (const folder of foldersBetween(state.rootPath, path)) {
+        if (above) {
+          const lookup = await readDriveItem(context.graph, { driveId: ac.driveId, path: folder });
+          if (lookup.kind === "found") {
+            if (lookup.item.isFolder) continue;
+            // Nothing has been created yet: a folder is created only below the first absent one.
+            return failure(`A file, not a folder, is at ${folder}, above ${path} where the profile puts the ${args.kind}. Nothing was written.`);
+          }
+          // Everything below an absent folder is absent too, so the lookups stop here.
+          above = false;
+        }
+        const cut = folder.lastIndexOf("/");
+        const made = await createFolder(context.graph, { driveId: ac.driveId, parentPath: folder.slice(0, cut), name: folder.slice(cut + 1) });
+        if (made.kind === "created") {
+          await appendJournal(context, ac, assessmentId, {
+            stage: stageFor(args.kind, false),
+            operation: "folder_created",
+            target: folder,
+            ...(made.item.eTag !== undefined ? { etagAfter: made.item.eTag } : {}),
+          });
+          foldersCreated.push(folder);
+        }
+      }
       const outcome = await createFile(context.graph, target);
       if (outcome.kind === "name_conflict") {
-        return failure(`The file at ${path} appeared between the read and the write, so Graph refused the create and nothing was replaced; call again and the server will overwrite it under its ETag.`);
+        return failure(
+          `The file at ${path} appeared between the read and the write, so Graph refused the create and nothing was replaced; call again and the server will overwrite it under its ETag.${folderNote()}`,
+        );
       }
       written = outcome.item;
     } else {
@@ -141,17 +214,16 @@ async function saveAssessmentArtifact(args: z.infer<typeof InputObject>, context
       }
       const prior = await downloadDriveItem(context.graph, { driveId: ac.driveId, workbookPath: path });
       priorHash = sha256Hex(prior);
-      // The file already holds exactly this content, so the file is not written again. Its stage is
-      // the kind's own, since nothing was corrected, and the State column read with the record is
-      // compared with it: a save whose file write landed but whose State write did not is completed
-      // here rather than left stranded.
+      // The file already holds exactly this content, so nothing is written, the State column
+      // included. Ruled 2026-11-17: a save that writes no file records no stage. This branch once
+      // set State to the kind's own stage whenever it read anything else, to finish a save whose
+      // file write had landed and whose State write had not. It could not tell that case from a
+      // retry of a dossier already corrected or already followed by findings, and it moved State
+      // back to DOSSIER in both. The cost of the ruling is the case the branch was written for: a
+      // State write that failed is no longer repaired by repeating the save. State is a marker
+      // for people, the drive is what the tools read, and the next stage's write moves it on.
       if (priorHash === sent) {
         const stage = stageFor(args.kind, false);
-        const stateSet = item.state !== stage;
-        if (stateSet) {
-          const mismatch = await recordStage(stage, `The ${args.kind} at ${path} already held this content (sha256 ${priorHash})`);
-          if (mismatch !== undefined) return failure(mismatch);
-        }
         const output = {
           assessmentId,
           kind: args.kind,
@@ -165,11 +237,13 @@ async function saveAssessmentArtifact(args: z.infer<typeof InputObject>, context
           graphRequests: context.graph.requests() - before,
         };
         const held = `The ${args.kind} at ${path} already held this content (${prior.byteLength} bytes, sha256 ${priorHash.slice(0, 12)}), so the file was not written`;
-        const text = stateSet
-          ? `${held}; ${columns.state} on ${listName} item ${item.itemId} read ${JSON.stringify(item.state ?? null)}, so it was set to ${stage}.`
-          : `${held}, and ${columns.state} on ${listName} item ${item.itemId} already read ${stage}. Nothing was written.`;
+        const text =
+          item.state === stage
+            ? `${held}, and ${columns.state} on ${listName} item ${item.itemId} already read ${stage}. Nothing was written.`
+            : `${held}. ${columns.state} on ${listName} item ${item.itemId} reads ${JSON.stringify(item.state ?? null)} and was left as it is: a save that writes no file records no stage. Nothing was written.`;
         return { structuredContent: output, content: [{ type: "text" as const, text }] };
       }
+      if (itemEtag === undefined) return noEtag();
       const outcome = await overwriteFile(context.graph, { ...target, etag: artifact.eTag });
       if (outcome.kind === "precondition_failed") {
         return failure(`The file at ${path} changed between the read and the write: Graph answered 412 to If-Match ${artifact.eTag}, so nothing was replaced; call again to save over the current version.`);
@@ -195,7 +269,7 @@ async function saveAssessmentArtifact(args: z.infer<typeof InputObject>, context
     if (after.kind !== "found" || after.item.isFolder) {
       return failure(
         `Graph accepted the write to ${path}, but reading it back ${after.kind === "found" ? "returned a folder" : "answered 404"}. ` +
-          `The assessment state was not advanced; the journal records the write with the hash of what was sent.`,
+          `The assessment state was not advanced; the journal records the write with the hash of what was sent.${folderNote()}`,
       );
     }
     const back = await downloadDriveItem(context.graph, { driveId: ac.driveId, workbookPath: path });
@@ -203,12 +277,12 @@ async function saveAssessmentArtifact(args: z.infer<typeof InputObject>, context
     if (hashBack !== sent) {
       return failure(
         `${path} was written but read back with a different hash: sent ${sent} (${bytes.byteLength} bytes), read back ${hashBack} (${back.byteLength} bytes). ` +
-          `The assessment state was not advanced; the journal records the write with the hash of what was sent.`,
+          `The assessment state was not advanced; the journal records the write with the hash of what was sent.${folderNote()}`,
       );
     }
 
-    const mismatch = await recordStage(stage, `${path} was saved and read back with sha256 ${hashBack}`);
-    if (mismatch !== undefined) return failure(mismatch);
+    const mismatch = await recordStage(stage, `${path} was saved and read back with sha256 ${hashBack}`, itemEtag);
+    if (mismatch !== undefined) return failure(`${mismatch}${folderNote()}`);
 
     const output = {
       assessmentId,
@@ -219,12 +293,13 @@ async function saveAssessmentArtifact(args: z.infer<typeof InputObject>, context
       bytes: back.byteLength,
       sha256: hashBack,
       eTag: after.item.eTag,
+      ...(foldersCreated.length > 0 ? { foldersCreated } : {}),
       correlationId: ac.correlationId,
       graphRequests: context.graph.requests() - before,
     };
     const text =
       `${overwritten ? `Overwrote ${path} under If-Match ${artifact.eTag}` : `Created ${path}`}: read back ${output.bytes} bytes, sha256 ${hashBack.slice(0, 12)}, ` +
-      `matching what was sent. Stage ${stage} recorded on ${listName} item ${item.itemId}.`;
+      `matching what was sent. Stage ${stage} recorded on ${listName} item ${item.itemId}.${folderNote()}`;
     return { structuredContent: output, content: [{ type: "text" as const, text }] };
   } catch (error) {
     console.error(`${TOOL} failed for profile "${args.profileId}"`, error);

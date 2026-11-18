@@ -9,6 +9,7 @@ import { resolveAssessmentContext } from "./context.js";
 import { findAssessmentById, readAssessmentState } from "./read-state.js";
 import { appendJournal } from "./journal.js";
 import { refusalResult } from "./refusal.js";
+import { itemChangedRefusal, itemWithoutEtagText } from "./item-precondition.js";
 import { withAssessmentLock } from "./keyed-lock.js";
 
 export const TRANSITION_INPUT_CONSTRAINTS = "disposition is one of the profile's disposition labels and risk is one of its risk labels.";
@@ -18,7 +19,9 @@ export const TRANSITION_INPUT_SCHEMA = {
   assessmentId: z.string().min(1).describe('The id open_assessment returned, for example "ASM-2026-00002".'),
   target: z
     .enum(["completed", "provisional"])
-    .describe('The status to move to, for example "completed", which needs the dossier and the publication present, or "provisional", which needs only the dossier.'),
+    .describe(
+      'The status to move to, for example "completed", which needs the dossier and the publication present and is reached from in progress or from provisional, or "provisional", which needs only the dossier and is reached from in progress.',
+    ),
   disposition: z.string().min(1).describe('One of the profile\'s disposition labels, for example "Approved with conditions".'),
   risk: z.string().min(1).describe('One of the profile\'s risk labels for the overall risk, for example "Medium".'),
 } satisfies z.ZodRawShape;
@@ -109,12 +112,18 @@ async function transitionAssessment(args: z.infer<typeof InputObject>, context: 
     if (!check.ok) return refusalResult(TOOL, STAGE, assessmentId, check);
     const item = record!;
 
-    await updateListItemFields(context.graph, {
+    // The update is made only if the item is still the one the preconditions were read from. A
+    // person can change its status in the browser while this call reads the drive, and a write
+    // that landed anyway would record a transition decided on a state that no longer exists.
+    if (item.etag === undefined) return failure(`${itemWithoutEtagText(listName, item.itemId)} Nothing was written.`);
+    const updated = await updateListItemFields(context.graph, {
       siteId: ac.siteId,
       listName,
       itemId: item.itemId,
       fields: fieldsFor(columns, { status: label, disposition: args.disposition, risk: args.risk, state: STAGE }),
+      etag: item.etag,
     });
+    if (updated.kind === "precondition_failed") return refusalResult(TOOL, STAGE, assessmentId, itemChangedRefusal(listName, item.itemId, item.etag));
 
     // The journal entry waits for the read back only to carry its ETag: Graph's 2xx already said the
     // update happened, so a read back that fails or disagrees must not leave it unrecorded.
@@ -129,8 +138,9 @@ async function transitionAssessment(args: z.infer<typeof InputObject>, context: 
       stage: STAGE,
       operation: "list_item_updated",
       target: `${listName}/${item.itemId}`,
-      ...(item.etag !== undefined ? { etagBefore: item.etag } : {}),
-      ...(back?.eTag !== undefined ? { etagAfter: back.eTag } : {}),
+      etagBefore: item.etag,
+      // The read back's eTag when there is one, and otherwise the one the update itself answered.
+      ...((back?.eTag ?? updated.eTag) !== undefined ? { etagAfter: back?.eTag ?? updated.eTag } : {}),
     });
     if (readError !== undefined) throw readError;
 

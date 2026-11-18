@@ -184,14 +184,22 @@ path rather than a separate one.
 Amended 2026-11-06: that rule governs every mutating tool over content the server did not create.
 A lifecycle tool, the fourth tool kind, is gated by state preconditions instead of a dry run: it
 refuses unless the prior stage is verified live in the lists and the drive, it creates records and
-files only at paths the server computes, it overwrites only a file it created and only under an
-ETag precondition, and it records every write in a per-assessment journal. One call per stage, no
+files only at paths the server computes, it changes an existing file or list item only under the
+ETag it just read, and it records every write in a per-assessment journal. One call per stage, no
 confirm flag, safe to retry because a completed stage is reported rather than repeated. The reason
 is a collision between the dry-run default and the assessment consumer's operating model, which
 says never ask permission between workflow stages; a confirm flag is the moment generative
 orchestration has been observed stopping to ask. The human review the dry run protected exists in
 that workflow at the Evidence Auditor and the published document. Rollback of lifecycle writes is
 held, because it would be this server's first delete.
+
+Amended 2026-11-17 by an operator ruling: the sentence above used to say a lifecycle tool
+"overwrites only a file it created". The server could not keep that. The only record of what it
+created is the journal, which is lost on restart without a table store, and a save has always
+overwritten whatever file sat at the artifact's computed path. What it can keep, and now says, is
+that the path is the server's own and that nothing changed since the tool's read is written over.
+The same day's probe showed Graph enforces `If-Match` on a list item's fields, so the ETag half of
+the rule now covers the assessment item and the findings as well as the files.
 
 ## Tool Set
 
@@ -209,11 +217,11 @@ held, because it would be this server's first delete.
 | `replicate_template` | write | Validates the source client internally before replicating |
 | `generate_custom_plan` | plan | Steps an operator describes, resolved against the index; no workbook needed |
 | `execute_custom_plan` | write | Dry run by default, ETag preconditions, reversal log; library-only profiles allowed |
-| `open_assessment` | lifecycle | Finds or creates the vendor, creates the assessment item, renders the id from the item id, creates the workspace; returns an open one instead of a second |
+| `open_assessment` | lifecycle | Finds or creates the vendor, creates the assessment item, renders the id from the item id, creates the workspace; returns one already in progress or provisional instead of a second |
 | `save_assessment_artifact` | lifecycle | Creates at the profile's path or overwrites under the ETag it just read; reads back; `publication` refused |
 | `read_assessment_artifact` | read | The persisted text and its hash, for the auditor |
 | `record_findings` | lifecycle | One item per finding, keyed so a retry updates; writes the summary |
-| `transition_assessment` | lifecycle | Completed needs dossier and publication present; provisional needs the dossier |
+| `transition_assessment` | lifecycle | Completed needs dossier and publication present and is reached from in progress or provisional; provisional needs the dossier |
 | `verify_publication` | read | What is at the publication's canonical path |
 | `get_assessment` | read | By id: status, artifact presence, what each lifecycle tool's precondition finds and the journal summary, with the findings and journal entries on request. Or a listing by vendor or by status |
 

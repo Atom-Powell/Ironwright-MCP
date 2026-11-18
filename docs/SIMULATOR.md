@@ -94,4 +94,4 @@ show: two calls overlapping, or a later call depending on what an earlier one le
 | A name with a character SharePoint refuses answers 400 | Modeled on the published name rules; the status and code were not measured |
 | A column the list does not have answers 400, on a write and in a filter | Modeled |
 | Every simulated column is treated as not indexed | Modeled; the header is required on every filtered query |
-| `If-Match` on a list item fields update | Not simulated, because it has never been probed; the update is unconditional, as the server sends it |
+| A fields update under a stale `If-Match` answers 412 `resourceModified` and writes nothing; one under the current eTag answers with the new eTag | Probes L4a, L4b and L4c, 2026-11-17 |

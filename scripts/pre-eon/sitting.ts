@@ -212,15 +212,23 @@ interface ProfileFacts {
   siteUrl: string;
   disposition: string;
   risk: string;
+  /** The profile's label for the provisional status. */
+  provisional: string;
 }
 
 function readProfile(): ProfileFacts {
   const profile = JSON.parse(readFileSync(PROFILE_FILE, "utf8")) as {
     profileId: string;
     sites: Array<{ siteUrl: string }>;
-    lifecycle: { dispositions: string[]; risks: string[] };
+    lifecycle: { dispositions: string[]; risks: string[]; status: { provisional: string } };
   };
-  return { profileId: profile.profileId, siteUrl: profile.sites[0]!.siteUrl, disposition: profile.lifecycle.dispositions[0]!, risk: profile.lifecycle.risks[0]! };
+  return {
+    profileId: profile.profileId,
+    siteUrl: profile.sites[0]!.siteUrl,
+    disposition: profile.lifecycle.dispositions[0]!,
+    risk: profile.lifecycle.risks[0]!,
+    provisional: profile.lifecycle.status.provisional,
+  };
 }
 
 async function gatherIdentity(profile: ProfileFacts): Promise<void> {
@@ -305,7 +313,9 @@ async function runCampaign(): Promise<void> {
   record(judgeCampaign(parseCampaignTable(campaign.text)));
 }
 
-/** The get_assessment additions and one refusal, on an assessment this run opens for itself. */
+const DOSSIER = "# Sitting check dossier\n\nWritten by the sitting runner.\n";
+
+/** The get_assessment additions, one refusal and two of the 2026-11-17 rulings, on an assessment this run opens for itself. */
 async function runReadChecks(profile: ProfileFacts): Promise<void> {
   const client = await connect();
   const base = { profileId: profile.profileId };
@@ -316,7 +326,7 @@ async function runReadChecks(profile: ProfileFacts): Promise<void> {
       record({ step: "read checks", verdict: "fail", detail: `open_assessment did not return an id: ${opened.text.slice(0, 300)}` });
       return;
     }
-    const saved = await call(client, "save_assessment_artifact", { ...base, assessmentId: id, kind: "dossier", content: "# Sitting check dossier\n\nWritten by the sitting runner.\n" });
+    const saved = await call(client, "save_assessment_artifact", { ...base, assessmentId: id, kind: "dossier", content: DOSSIER });
     const found = await call(client, "record_findings", {
       ...base,
       assessmentId: id,
@@ -359,6 +369,30 @@ async function runReadChecks(profile: ProfileFacts): Promise<void> {
         : refused.threw !== undefined
           ? `the client rejected the result: ${refused.threw}`
           : `not a refusal with evidence: ${refused.text.slice(0, 300)}`,
+    });
+
+    // Two of the rulings of 2026-11-17 that tool calls alone can show. The others need something
+    // done to the site between calls, which is the campaign's work, or during one, which is not
+    // producible from outside.
+    const resaved = await call(client, "save_assessment_artifact", { ...base, assessmentId: id, kind: "dossier", content: DOSSIER });
+    const afterResave = await call(client, "get_assessment", { ...base, assessmentId: id });
+    const stateHeld = (afterResave.sc.assessment as { state?: string } | undefined)?.state;
+    const leftAlone = !resaved.isError && resaved.sc.operation === "unchanged" && stateHeld === "FINDINGS";
+    record({
+      step: "an identical save leaves State alone",
+      verdict: leftAlone ? "pass" : "fail",
+      detail: leftAlone ? "the save answered unchanged and State still reads FINDINGS" : `the save answered ${JSON.stringify(resaved.sc.operation ?? resaved.text.slice(0, 200))} and State reads ${JSON.stringify(stateHeld ?? null)}`,
+    });
+
+    const parked = await call(client, "transition_assessment", { ...base, assessmentId: id, target: "provisional", disposition: profile.disposition, risk: profile.risk });
+    const reopened = await call(client, "open_assessment", { ...base, vendor: `Sitting Check ${TAG}`, scope: "Security" });
+    const returned = !parked.isError && !reopened.isError && reopened.sc.assessmentId === id && reopened.sc.created === false && reopened.sc.status === profile.provisional;
+    record({
+      step: "open returns a provisional assessment",
+      verdict: returned ? "pass" : "fail",
+      detail: returned
+        ? `${id} was parked as ${profile.provisional}, and open answered it and created nothing`
+        : `the transition ${parked.isError ? `failed: ${parked.text.slice(0, 200)}` : "landed"}; open answered ${JSON.stringify(reopened.sc.assessmentId ?? reopened.text.slice(0, 200))} with status ${JSON.stringify(reopened.sc.status ?? null)}, created ${JSON.stringify(reopened.sc.created ?? null)}`,
     });
   } finally {
     await client.close().catch(() => undefined);

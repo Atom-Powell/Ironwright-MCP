@@ -9,6 +9,7 @@ import { resolveAssessmentContext } from "./context.js";
 import { findAssessmentById, readAssessmentState } from "./read-state.js";
 import { appendJournal } from "./journal.js";
 import { refusalResult } from "./refusal.js";
+import { itemChangedText, itemWithoutEtagText } from "./item-precondition.js";
 import { withAssessmentLock } from "./keyed-lock.js";
 
 export const RECORD_INPUT_CONSTRAINTS = "Every finding's risk is one of the profile's risk labels, and no two findings share a key.";
@@ -140,11 +141,24 @@ async function recordFindings(args: z.infer<typeof InputObject>, context: ToolCo
       }
     }
 
-    const outcomes: { key: string; itemId: string; outcome: Outcome }[] = [];
-    for (const finding of args.findings) {
+    // What each finding needs, decided before anything is written, so an update that could carry
+    // no precondition is refused while the call has still written nothing.
+    const planned = args.findings.map((finding) => {
       const values = { [fc.observation]: finding.observation, [fc.risk]: finding.risk, [fc.recommendation]: finding.recommendation };
       const prior = byKey.get(finding.key)?.[0];
-      if (prior !== undefined && firstMismatch(values, prior.fields) === undefined) {
+      const unchanged = prior !== undefined && firstMismatch(values, prior.fields) === undefined;
+      return { finding, values, prior, unchanged };
+    });
+    // A retry whose summary and stage were already recorded does not write the assessment item.
+    const summaryHeld = item.summary === args.summary && item.state === STAGE;
+    if (!summaryHeld && item.etag === undefined) return failure(`${itemWithoutEtagText(assessments.name, item.itemId)} Nothing was written.`);
+    for (const { prior, unchanged } of planned) {
+      if (prior !== undefined && !unchanged && prior.eTag === undefined) return failure(`${itemWithoutEtagText(findingsList.name, prior.id)} Nothing was written.`);
+    }
+
+    const outcomes: { key: string; itemId: string; outcome: Outcome }[] = [];
+    for (const { finding, values, prior, unchanged } of planned) {
+      if (prior !== undefined && unchanged) {
         outcomes.push({ key: finding.key, itemId: prior.id, outcome: "unchanged" });
         continue;
       }
@@ -154,12 +168,24 @@ async function recordFindings(args: z.infer<typeof InputObject>, context: ToolCo
       if (prior !== undefined) {
         sent = values;
         itemId = prior.id;
-        answered = await updateListItemFields(context.graph, { siteId: ac.siteId, listName: findingsList.name, itemId, fields: sent });
+        const priorEtag = prior.eTag!;
+        const updated = await updateListItemFields(context.graph, { siteId: ac.siteId, listName: findingsList.name, itemId, fields: sent, etag: priorEtag });
+        if (updated.kind === "precondition_failed") {
+          const created = outcomes.filter((entry) => entry.outcome === "created").length;
+          const updatedBefore = outcomes.filter((entry) => entry.outcome === "updated").length;
+          const soFar =
+            created + updatedBefore === 0
+              ? "Nothing was written."
+              : `Before it this call wrote ${created} created, ${updatedBefore} updated; the journal records them. Nothing after it was written.`;
+          return failure(`Finding "${finding.key}" on ${findingsList.name} item ${itemId} was not updated: ${itemChangedText(findingsList.name, itemId, priorEtag)} ${soFar}`);
+        }
+        answered = updated.fields;
         await appendJournal(context, ac, assessmentId, {
           stage: STAGE,
           operation: "list_item_updated",
           target: `${findingsList.name}/${itemId}`,
-          ...(prior.eTag !== undefined ? { etagBefore: prior.eTag } : {}),
+          etagBefore: priorEtag,
+          ...(updated.eTag !== undefined ? { etagAfter: updated.eTag } : {}),
         });
         outcomes.push({ key: finding.key, itemId, outcome: "updated" });
       } else {
@@ -196,19 +222,30 @@ async function recordFindings(args: z.infer<typeof InputObject>, context: ToolCo
 
     // A retry whose summary and stage were already recorded is reported rather than written again.
     let closing: string;
-    if (item.summary === args.summary && item.state === STAGE) {
+    if (summaryHeld) {
       closing =
         counts.created + counts.updated === 0
           ? `Every finding already held the values sent, and ${assessments.name} item ${item.itemId} already held this summary and stage ${STAGE}. Nothing was written.`
           : `${assessments.name} item ${item.itemId} already held this summary and stage ${STAGE}, so it was not written.`;
     } else {
       const sent = fieldsFor(assessments.columns, { summary: args.summary, state: STAGE });
-      const answered = await updateListItemFields(context.graph, { siteId: ac.siteId, listName: assessments.name, itemId: item.itemId, fields: sent });
+      const itemEtag = item.etag!;
+      const updated = await updateListItemFields(context.graph, { siteId: ac.siteId, listName: assessments.name, itemId: item.itemId, fields: sent, etag: itemEtag });
+      if (updated.kind === "precondition_failed") {
+        const changed = itemChangedText(assessments.name, item.itemId, itemEtag);
+        return failure(
+          counts.created + counts.updated === 0
+            ? `No finding needed writing (${tally}), and the summary and stage ${STAGE} were not recorded: ${changed} Nothing was written.`
+            : `Findings recorded (${tally}), but the summary and stage ${STAGE} were not recorded: ${changed} The journal records what was written.`,
+        );
+      }
+      const answered = updated.fields;
       await appendJournal(context, ac, assessmentId, {
         stage: STAGE,
         operation: "list_item_updated",
         target: `${assessments.name}/${item.itemId}`,
-        ...(item.etag !== undefined ? { etagBefore: item.etag } : {}),
+        etagBefore: itemEtag,
+        ...(updated.eTag !== undefined ? { etagAfter: updated.eTag } : {}),
       });
       const mismatch = firstMismatch(sent, answered);
       if (mismatch !== undefined) {

@@ -696,6 +696,55 @@ is a departure from it, not a limit of the platform. The lock per assessment abo
 server's own calls and stays; the precondition is what covers a person editing the item in the
 browser.
 
-What a lifecycle tool does when its write is refused this way is not yet designed. The two
-candidates are to refuse with the evidence, as `save_assessment_artifact` does for a file that
-changed under it, and to read again and retry once. No plan is written until that is chosen.
+What a lifecycle tool does when its write is refused this way was the operator's to choose, and
+is the sixth ruling in the section below.
+
+## Amendments, 2026-11-17: six rulings
+
+Each was a question a test could measure and not decide. Where each stands is in
+`docs/OPEN-ITEMS.md`.
+
+**The lifecycle rule says what the server can keep.** The Decision Record's amendment of
+2026-11-06 and the sentence every lifecycle tool carries said a tool overwrites only a file it
+created. The server holds no durable record of what it created: that record is the journal, and
+without a table store a restart empties it. A save has always overwritten whatever file sat at the
+artifact's path. The rule now reads that a tool creates records and files only at paths the server
+computes and changes an existing file or list item only under the ETag it just read. The first
+half is why a foreign file can be at that path only if someone put it at a path the server owns,
+and the second is why nothing changed since the tool's read is lost.
+
+**Provisional is not an end state.** It is where an assessment waits for its publication.
+`transition_assessment` reaches completed from in progress or from provisional, and provisional
+only from in progress. `open_assessment` returns the vendor's open assessment for a scope, which
+is the one in progress or, failing that, one parked as provisional. It asks in two queries of the
+three clause shape already measured, the second only on the way to creating an assessment, and
+does not send an `or` across a column, which this list has never been asked. A save and a
+findings call still require in progress: the ruling was about completion.
+
+**A folder a save brings back is journaled.** A content PUT under a missing folder recreates it
+(campaign s1, 2026-11-09). The save is kept, not refused, since the path is the server's own. A
+save that creates a file first reads each folder between the workspace root and the file and
+creates an absent one itself, with the folder create `open_assessment` uses, journaling it on
+that request's 201. The first build of this inferred the folder from its absence before the write
+and its presence after, which a review showed could claim a folder someone else had restored in
+between; a create request answers 409 for that folder, and it is not claimed. A file found where
+one of those folders belongs is refused before anything is written.
+
+**State is not validated.** A hand edited State stops no tool. State is a marker a person reads in
+the list; the tools decide on the status column and on what the drive holds.
+
+**A save that writes no file records no stage.** When the file already holds the content sent,
+nothing is written, the State column included. This supersedes the 9c amendment under which such
+a save set State to the kind's own stage when it read otherwise, which moved State backward from
+CORRECTION and from FINDINGS on a harmless retry. The repair that branch existed for, a State
+write that had failed after its file write, is given up with it.
+
+**A list item write refused by its precondition is refused in turn.** Every update of a list item
+is sent under `If-Match` with the eTag the item was read with, and one read without an eTag is
+not written at all. On a 412 the tool does not read again and retry, because the item changed
+under a decision already made and the caller decides whether it stands. `transition_assessment`
+has written nothing at that point and answers with the structured refusal. The other three may
+have written, so each says what stands: a save's file and its journal entry, the findings recorded
+before the one refused, the item an open created. A save still writes its file before the State
+update, so State never names a stage whose file was not written; the price is a save that can end
+with its file written and its stage unrecorded.

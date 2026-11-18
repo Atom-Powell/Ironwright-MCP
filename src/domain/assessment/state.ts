@@ -111,16 +111,21 @@ export function requireRecord(state: AssessmentState, lookedUp: string): Precond
   };
 }
 
-export function requireInProgress(state: AssessmentState, labels: { inProgress: string }): Precondition {
+/** The item's status is one of those given, named in the refusal in the order given. */
+export function requireStatus(state: AssessmentState, allowed: readonly string[]): Precondition {
   const record = state.record;
   if (record === undefined) return requireRecord(state, "the assessments list");
-  if (record.status === labels.inProgress) return { ok: true };
+  if (record.status !== undefined && allowed.includes(record.status)) return { ok: true };
   return {
     ok: false,
-    expected: `status "${labels.inProgress}"`,
+    expected: `status ${allowed.map((label) => `"${label}"`).join(" or ")}`,
     observed: record.status === undefined ? "no status value" : `status "${record.status}"`,
     evidence: [{ source: "list", target: `assessments item ${record.itemId}`, found: record.status ?? "(empty)" }],
   };
+}
+
+export function requireInProgress(state: AssessmentState, labels: { inProgress: string }): Precondition {
+  return requireStatus(state, [labels.inProgress]);
 }
 
 export function requireRoot(state: AssessmentState): Precondition {
@@ -199,10 +204,18 @@ export function findingsPrecondition(state: AssessmentState, labels: { inProgres
 
 export type TransitionTarget = "completed" | "provisional";
 
-export function transitionPrecondition(state: AssessmentState, labels: { inProgress: string }, target: TransitionTarget, lookedUp: string): Precondition {
+/**
+ * Completion is reached from in progress or from provisional. Ruled
+ * 2026-11-17: provisional is not an end state. It is where an assessment
+ * waits for its publication, and one that could never leave it could only be
+ * finished by opening a second assessment for the same work. Provisional
+ * itself is still entered only from in progress, and the other lifecycle
+ * tools still require in progress.
+ */
+export function transitionPrecondition(state: AssessmentState, labels: { inProgress: string; provisional: string }, target: TransitionTarget, lookedUp: string): Precondition {
   return allOf(
     requireRecord(state, lookedUp),
-    requireInProgress(state, labels),
+    target === "completed" ? requireStatus(state, [labels.inProgress, labels.provisional]) : requireInProgress(state, labels),
     requireArtifact(state, "dossier"),
     ...(target === "completed" ? [requireArtifact(state, "publication")] : []),
   );
@@ -225,7 +238,7 @@ export interface ActionReadiness {
  * a path something else occupies, and every tool reads the state again when it
  * is called.
  */
-export function lifecycleReadiness(state: AssessmentState, labels: { inProgress: string }, lookedUp: string): ActionReadiness[] {
+export function lifecycleReadiness(state: AssessmentState, labels: { inProgress: string; provisional: string }, lookedUp: string): ActionReadiness[] {
   const entry = (tool: ActionReadiness["tool"], check: Precondition, target?: TransitionTarget): ActionReadiness => ({
     tool,
     ...(target === undefined ? {} : { target }),

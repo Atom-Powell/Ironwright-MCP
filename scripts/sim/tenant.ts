@@ -292,6 +292,12 @@ export function createSimTenant(options: SimTenantOptions): SimTenant {
         if (onFields && method === "PATCH") {
           const fields = (body ?? {}) as Record<string, unknown>;
           checkColumns(method, relative, list, Object.keys(fields));
+          // L4a and L4b, 2026-11-17: a stale If-Match answers 412 resourceModified and writes
+          // nothing. A PATCH with no If-Match is unconditional, as L2b sent it on 2026-11-07.
+          const ifMatch = headers?.["if-match"];
+          if (ifMatch !== undefined && ifMatch !== `"${item.guid},${item.version}"`) {
+            refuse(method, relative, 412, "resourceModified", "The resource has changed since the caller last read it; usually an eTag mismatch");
+          }
           Object.assign(item.fields, structuredClone(fields));
           item.version += 1;
           item.modified = now().toISOString();
