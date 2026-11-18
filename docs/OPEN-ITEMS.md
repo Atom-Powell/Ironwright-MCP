@@ -47,6 +47,7 @@ sections below say what was proven and what was not. Last updated 2026-11-17.
 | The six rulings of 2026-11-17 | Ruled by the operator and built the same day: the safety sentence reworded, provisional no longer an end state, a folder a save brings back journaled, State left to the drive, an unchanged save recording no stage, a refused list write refused in turn. Verified live in the second sitting of 2026-11-17: B as far as open returning a parked assessment, C by the campaign's deleted folder, E, and F on every list write that landed. Not reached live: completing from provisional, F's refusal, and G, which needs a gateway error | sections below; `docs/superpowers/specs/evidence/2026-11-17-second-sitting/`; spec amendments of 2026-11-17 |
 | 10 Profile defined lifecycles | Built 2026-11-17 against the fakes and the simulated tenant: the gates, the external kinds and the corrected kinds are profile data, `verify_publication` takes a kind, and two example profiles for a managed service provider ship. A client onboarding runs end to end on the simulated tenant. The vendor risk profile, which sets none of it, ran the whole second sitting of 2026-11-17 live as before; a profile that does set it has not met a tenant | `docs/superpowers/specs/2026-11-17-profile-defined-lifecycle-design.md`; section below |
 | Two site probe | Passed live in the second sitting of 2026-11-17: the second site refused the server application before its grant, opened to it after, took a write and gave it back, and the first site still resolved under the same token. One site per client is no longer blocked on an assumption; it is not designed or built | `scripts/pre-eon/second-site.ts`; sitting section below; `docs/superpowers/specs/evidence/2026-11-17-second-sitting/` |
+| A site per department | Built 2026-11-17: the server accepts several granted sites, each profile on one of them, and `npm run sitting` grants, provisions and runs every department profile it finds. Three department sites exist in the developer tenant, Technology Success, Service Desk and Professional Services, with a local profile each. The server was started with all four profiles; the workflows have run on the simulated tenant only. Not run live | spec amendment of 2026-11-17 in `docs/superpowers/specs/2026-11-17-profile-defined-lifecycle-design.md`; `scripts/pre-eon/department.ts` |
 | 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9c and carries the unverified A3 and B1 probes, and is the item that slips first | same spec |
 | Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
 | CPA practice domain (multi-site scan and queries, grant issuer loop over a sites file, folder template taxonomy) | Not started; the phase after 9 | same spec |
@@ -2950,6 +2951,34 @@ seven vendors under the tag `11180454`, and assessments up to `ASM-2026-00041`. 
 site, IronwrightTest2: a folder `IW-MultiSite` holding one file, and a permission entry for the
 server application at `read`. Nothing was deleted. The grant issuer was reissued once more and
 its secret was again read into memory and let go.
+
+## A site per department, 2026-11-17
+
+The operator said the pilot should simulate the consumer's own layout, in which each department
+has a SharePoint site. That is a profile per site, which the profile schema already allowed, so
+the change to the server is one rule: `IW_SITE_URL` may list several granted sites, and a profile
+may be on any of them.
+
+**In the developer tenant.** Three blank communication sites were created through the browser
+with the operator's permission: Technology Success, Service Desk and Professional Services. Each
+has a local profile, uncommitted like every profile: vendor risk for the first, the incident
+record for the second and the client onboarding for the third, which are the three shipped
+examples pointed at those sites. The department names are the operator's; nothing in the
+repository names them outside this file.
+
+**In the runner.** For each such profile `npm run sitting` grants the server application on its
+site, creates the lists it names, reads each list's columns back, and takes one case through
+every stage the profile gates: opened, the kinds the server writes saved, a finding recorded,
+parked as provisional, completion refused until the kind produced elsewhere is uploaded, then
+completed from provisional. Each grant is put back to `read` at the end.
+
+**What it has met.** The grant, list and column logic against scripted answers. The workflow
+against the real tool handlers on the simulated tenant, under each of the three example profiles,
+open to completed. The real server, started with all four profiles across four sites, answering
+its health check and listing its tools. Nothing here has met Graph: no list has been created in a
+department site, no column name of the two new workflows has been tried, and no case has been
+opened there. The next sitting is that run, and it is also the first live completion from
+provisional and the first live run of a profile that sets its own gates.
 
 ## The phase 6d live sitting, 2026-09-24: plans an operator describes
 

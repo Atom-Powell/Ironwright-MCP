@@ -16,6 +16,10 @@
  *   npm run sitting -- --sim             the same server steps over the simulated tenant, no credentials
  *   npm run sitting -- --interrupt-ms=800   how long an open runs before the server is stopped under it
  *
+ * Every other assessment profile in the profiles folder is a department's workflow on its own
+ * site. The live sitting grants the server application on that site, creates the lists the
+ * profile names where they are absent, and takes one case from open to completed (department.ts).
+ *
  * When a second site is named, in IW_SECOND_SITE_URL or as secondSiteUrl in the identity file, the
  * live sitting ends with the two site probe in second-site.ts.
  *
@@ -33,7 +37,7 @@
  * Results: .superpowers/sitting/<stamp>/summary.md and one log per step.
  */
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -41,6 +45,12 @@ import { clientCredentialsTokenProvider, requireExactRoles, SERVER_TOKEN_ROLES }
 import { REFUSAL_META_KEY } from "../../src/tools/refusal.js";
 import { runScript as runRepoScript, type ScriptRun } from "./run-script.js";
 import { probeSecondSite } from "./second-site.js";
+import { ensureLists, grantWrite, listDefinitionsFor, restoreRead, runProfileWorkflow, type SiteGrant, type WorkflowProfile } from "./department.js";
+import { resolveDrive } from "../../src/graph/drive.js";
+import { GraphRequestError } from "../../src/graph/errors.js";
+import { createFile } from "../../src/graph/items.js";
+import { loadAnyProfile } from "../../src/profiles/registry.js";
+import type { GraphClient } from "../../src/graph/client.js";
 import { createGraphClient } from "../../src/graph/client.js";
 import {
   judgeCampaign,
@@ -151,7 +161,9 @@ async function healthy(): Promise<boolean> {
 
 async function startServer(): Promise<void> {
   const script = SIM ? "scripts/sim/main.ts" : "src/server/main.ts";
-  const env = serverEnvironment(SIM ? "sim" : "live", PORT);
+  // The sitting's own site first, then each department's, so every profile in the folder loads.
+  const sites = SIM ? [] : [process.env.IW_SITE_URL!, ...departmentProfiles().map((department) => department.sites[0]!.siteUrl)];
+  const env = serverEnvironment(SIM ? "sim" : "live", PORT, [...new Set(sites)]);
   const logFile = join(FOLDER, "server.log");
   const child = spawn(process.execPath, ["--import", "tsx", script], { env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
   const log = (chunk: Buffer): void => appendFileSync(logFile, redactSecrets(chunk.toString("utf8"), secrets));
@@ -498,8 +510,107 @@ async function runInterruptedOpen(profile: ProfileFacts): Promise<void> {
   record({ step, verdict: "skipped", detail: `the open finished before the server stopped on all three tries; run again with --interrupt-ms set below ${delay}` });
 }
 
+/**
+ * The other assessment profiles in the profiles folder, each a department's workflow on its own
+ * site. Read through the server's loader, so a setting a profile leaves out is the default the
+ * tools will use. A file that does not load is the server's to refuse at startup, in its words.
+ */
+function departmentProfiles(): WorkflowProfile[] {
+  const own = PROFILE_FILE.replace(/^.*[\\/]/, "");
+  const found: WorkflowProfile[] = [];
+  for (const name of readdirSync("profiles").filter((file) => file.endsWith(".json") && file !== own).sort()) {
+    try {
+      const profile = loadAnyProfile(JSON.parse(readFileSync(join("profiles", name), "utf8"))) as { kind?: string };
+      if (profile.kind === "assessment") found.push(profile as unknown as WorkflowProfile);
+    } catch {
+      // Not this function's to report.
+    }
+  }
+  return found;
+}
+
+const departmentGrants: SiteGrant[] = [];
+let departmentIssuer: GraphClient | undefined;
+
+/**
+ * Each department's workflow on its own site: a grant for the server application there, the
+ * lists its profile names, and one case from open to completed through the running server. A
+ * department that fails is one line in the summary and does not stop the next.
+ */
+async function runDepartments(): Promise<void> {
+  const departments = departmentProfiles();
+  if (departments.length === 0) return;
+  const tenantId = process.env.IW_TENANT_ID!;
+  const clientId = process.env.IW_CLIENT_ID!;
+  const serverGraph = createGraphClient({
+    tokenProvider: requireExactRoles(clientCredentialsTokenProvider({ tenantId, clientId, clientSecret: process.env.IW_CLIENT_SECRET! }), SERVER_TOKEN_ROLES),
+  });
+  departmentIssuer = createGraphClient({
+    tokenProvider: clientCredentialsTokenProvider({ tenantId, clientId: process.env.IW_BOOTSTRAP_CLIENT_ID!, clientSecret: process.env.IW_BOOTSTRAP_CLIENT_SECRET! }),
+  });
+  const client = await connect();
+  try {
+    for (const department of departments) {
+      const step = `department workflow ${department.profileId}`;
+      const site = department.sites[0]!;
+      say(`Standing up ${department.profileId} on its own site.`);
+      try {
+        const grant = await grantWrite(departmentIssuer, site.siteUrl, clientId);
+        departmentGrants.push(grant);
+        const lists = await ensureLists(departmentIssuer, grant.siteId, listDefinitionsFor(department));
+        say(`grant ${grant.before === undefined ? "created" : `widened from ${grant.before}`}; lists created: ${lists.created.join(", ") || "none"}; already there: ${lists.existing.join(", ") || "none"}`);
+
+        // A new grant is not always in effect at once, so a refusal is waited out before it is believed.
+        let driveId: string | undefined;
+        let last = "";
+        for (let attempt = 1; attempt <= 9 && driveId === undefined; attempt += 1) {
+          try {
+            driveId = (await resolveDrive(serverGraph, site.siteUrl, site.library)).driveId;
+          } catch (error) {
+            last = error instanceof Error ? error.message : String(error);
+            if (!(error instanceof GraphRequestError && (error.status === 403 || error.status === 404))) break;
+            if (attempt < 9) {
+              say(`the site still refuses the server application; waiting 10 seconds, attempt ${attempt} of 9`);
+              await sleep(10_000);
+            }
+          }
+        }
+        if (driveId === undefined) {
+          record({ step, verdict: "fail", detail: `the site did not open to the server application after its grant: ${last}` });
+          continue;
+        }
+        const drive = driveId;
+        record(
+          await runProfileWorkflow(department, {
+            call: (name, args) => call(client, name, args),
+            upload: async (path, bytes) => {
+              const made = await createFile(serverGraph, { driveId: drive, path, bytes, contentType: "application/octet-stream" });
+              if (made.kind !== "created") throw new Error(`a file was already at ${path}`);
+            },
+            tag: TAG,
+          }),
+        );
+      } catch (error) {
+        record({ step, verdict: "fail", detail: error instanceof Error ? error.message : String(error) });
+      }
+    }
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}
+
 async function cleanUp(): Promise<void> {
   await stopServer();
+  // Read at rest on every department's site, as on the first, whatever the run found.
+  for (const grant of departmentGrants.splice(0)) {
+    const step = `grant restored to read on ${grant.siteUrl.replace(/^.*\/sites\//, "")}`;
+    try {
+      const roles = await restoreRead(departmentIssuer!, grant);
+      record({ step, verdict: roles === "read" ? "pass" : "fail", detail: roles === "read" ? "roles after the update: read" : `THE GRANT MAY STILL BE AT WRITE: the update answered roles ${roles}` });
+    } catch (error) {
+      record({ step, verdict: "fail", detail: `THE GRANT MAY STILL BE AT WRITE: ${error instanceof Error ? error.message : String(error)}` });
+    }
+  }
   if (grantWidened) {
     grantWidened = false;
     const restored = await runScript("grant-restore", "scripts/assessment-probe/grant.ts", ["--roles=read"]);
@@ -552,6 +663,7 @@ async function main(): Promise<void> {
   }
   await runReadChecks(profile);
   await runInterruptedOpen(profile);
+  if (!SIM) await runDepartments();
   if (!SIM) await runSecondSite(profile);
 }
 

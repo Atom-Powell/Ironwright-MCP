@@ -50,9 +50,19 @@ export function redactSecrets(line: string, secrets: readonly string[]): string 
  * machine. Left out, the server refuses to start for want of a key, which is
  * how the first live run of this runner ended.
  */
-export function serverEnvironment(mode: "live" | "sim", port: number): Record<string, string> {
+export function serverEnvironment(mode: "live" | "sim", port: number, sites: readonly string[] = []): Record<string, string> {
   if (mode === "sim") return { SIM_PORT: String(port) };
-  return { IW_PROFILE_DIR: "profiles", IW_ALLOW_WRITES: "true", PORT: String(port), IW_INBOUND_AUTH: "none", IW_ALLOW_ANONYMOUS: "1" };
+  return {
+    IW_PROFILE_DIR: "profiles",
+    IW_ALLOW_WRITES: "true",
+    PORT: String(port),
+    IW_INBOUND_AUTH: "none",
+    IW_ALLOW_ANONYMOUS: "1",
+    // Every site a profile in the folder names, the sitting's own first. The server refuses to
+    // start with a profile on a site it was not told it is granted. Left to the runner's own
+    // environment when no site is given, which is one site.
+    ...(sites.length > 0 ? { IW_SITE_URL: sites.join(",") } : {}),
+  };
 }
 
 export interface CampaignRow {

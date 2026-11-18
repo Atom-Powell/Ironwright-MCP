@@ -46,6 +46,27 @@ Move 1 comes first because it is the only one that can be built and proven with 
 because a pilot on one operations site, with a folder per client, gets every workflow below from
 it alone.
 
+## Amendment, 2026-11-17: the sites are departments
+
+The operator settled what move 2 has to be for the pilot: the consumer keeps a SharePoint site per
+department, not per client. That makes it smaller than the move described above. A profile
+already addresses one site, and a department's workflow is one profile, so a site per department
+is a profile per site. No tool takes a new argument and no case has to say which site it belongs
+to: the profile id already does.
+
+What stood in the way was only the server's startup rule, which took one granted site and refused
+a profile on any other. `IW_SITE_URL` now lists every site the application is granted, and a
+profile's site must be among them. Nothing else in the server changed.
+
+A site per client, where one workflow spans many sites, is a different problem and is not
+solved by this: there a case would have to name its site. It is left where it was, for the
+consumer that needs it.
+
+The sitting runner stands each department up and runs it: for every other assessment profile in
+the profiles folder it grants the server application on that profile's site, creates the three
+lists the profile names where they are absent, checks each list has the columns the profile maps,
+and takes one case from open to completed through the running server by the profile's own gates.
+
 ## What a profile now says
 
 Three settings under `lifecycle`, each optional:
@@ -97,6 +118,7 @@ none, the tool says there is nothing to check.
 | A profile that sets no gates behaves as it did | The pilot's vendor risk profile must not change under it | The module's existing tests run unchanged against the example profile, which sets none, and a test pins the defaults |
 | The seven tools need nothing from Graph they did not need before | Otherwise a probe would come first | Every Graph request in the change is one the 2026-11-07 probe, the sittings and the campaign have sent; the change adds none and only chooses which artifact paths a precondition reads |
 | A workflow with other lists, kinds and gates runs end to end | The claim of this design | A client onboarding run through the real tool handlers over the simulated tenant, from open to completed, under the shipped example profile |
+| A list created through Graph carries the column names asked for | A department's lists are created from its profile, and the tools write to those names | Not measured for the names the two service provider examples use. The runner reads each list's columns back and refuses in words when one is missing, so a renamed column is a clear failure and not a wrong write |
 | One application can hold grants on several sites and the server can address each | Move 2 | Confirmed live in the second sitting of 2026-11-17 for two sites: 403 `accessDenied` on the second site before its grant; a grant created with the setup command's request; then a folder and a file written and the file read back under the same server token; the first site still resolving. Recorded in `evidence/2026-11-17-second-sitting/`. What it does not cover is a list on the second site, or any tool addressing it |
 
 ## Not established

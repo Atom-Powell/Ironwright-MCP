@@ -557,7 +557,14 @@ development build afterward puts the setup output back.
   application's own client-credentials identity, the same three values the normal setup run above
   prints as `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and `AZURE_CLIENT_SECRET`, and the same three
   `npm run scan` already reads under their `IW_` names, described below.
-- `IW_SITE_URL` is required. It is the same `--site` value you passed to the normal setup run
+- `IW_SITE_URL` is required, and may name more than one site, separated by commas, spaces or new
+  lines, when the server application has been granted on several: a site per department, for an
+  organization whose departments each keep their own. Each profile still addresses one site, so a
+  workflow per department is a profile per site and no tool changes. Every profile's site must be
+  among those listed. `describe_workbook`, the one tool that reads a site with no profile, reads
+  the first. The server application needs its own grant on each site; the setup command grants
+  one, and `scripts/pre-eon/department.ts` holds the request for another. For one site, the value
+  is the same `--site` value you passed to the normal setup run
   above, not one of the four values that run prints, since a site URL is not a secret and setup
   already had it as an input rather than an output. The server checks every profile's
   `siteUrl` of every entry in `sites` against this value at startup and refuses to start if any
