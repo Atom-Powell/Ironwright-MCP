@@ -293,9 +293,19 @@ run a client onboarding and an incident record on the same tools, with their own
 column names, kinds and gates. The tool and field names do not change with the profile, so the
 party a case is about is passed as `vendor` whatever the lists call it.
 
-Provisioning the three lists from the profile is not built. An operator creates them by hand, or
-uses the probe's seed (`npm run probe:assessment:seed`, under `scripts/assessment-probe/`) as a
-pattern.
+`npm run department:setup -- --profile=<file>` prepares the site one assessment profile
+addresses. Under the grant issuer's token it grants the server application on that site, creates
+the three lists the profile names where they are absent, and reads each list's columns back,
+refusing in words when one the profile maps is missing. A list that already exists is not
+changed. It reads `IW_TENANT_ID`, `IW_BOOTSTRAP_CLIENT_ID`, `IW_BOOTSTRAP_CLIENT_SECRET` and
+`IW_CLIENT_ID`, and it is setup: it belongs on the operator's workstation with the setup command.
+`--dry-run` says what it would do and changes nothing. `--roles=read` leaves the grant at read
+for a deployment that only reads; the default, `write`, is what the lifecycle tools need. For a
+deployment whose departments each keep a site, run it once per profile and list every site in
+`IW_SITE_URL`. Indexing the columns named above is still done in the list settings.
+
+The command has not been run against a tenant as a command. The grant and the list creation it
+is made of are the ones `npm run sitting` uses; `docs/OPEN-ITEMS.md` says which sitting ran them.
 
 ## The permission model
 
