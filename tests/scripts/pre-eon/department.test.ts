@@ -101,6 +101,25 @@ describe("a grant for the server application on a department's site", () => {
     );
   });
 
+  // A gateway status does not say whether Graph applied the request, and nothing holds an id
+  // to restore. A refusal does say: Graph answered that it would not.
+  it("says a grant may stand at write when the request for it failed without a refusal", async () => {
+    const gateway = new GraphRequestError({ method: "POST", path: "/sites/site-1/permissions", status: 504, body: "" });
+    const issuer = scripted([lookup, { method: "GET", includes: "/sites/site-1/permissions", answers: [{ value: [] }] }, { method: "POST", includes: "/sites/site-1/permissions", answers: [gateway] }]);
+
+    await expect(grantWrite(issuer.client, SITE, CLIENT)).rejects.toThrow(new RegExp(`^A GRANT MAY NOW STAND AT WRITE on ${SITE}: the request for it failed without a refusal .*504.*, so whether Graph applied it is not known\\.$`));
+  });
+
+  it("lets a refusal of the grant through as it is, since a refused request granted nothing", async () => {
+    const denied = new GraphRequestError({ method: "PATCH", path: "/sites/site-1/permissions/ours", status: 403, body: JSON.stringify({ error: { code: "accessDenied" } }) });
+    const entries = [{ id: "ours", roles: ["read"], grantedToIdentitiesV2: [{ application: { id: CLIENT } }] }];
+    const issuer = scripted([lookup, { method: "GET", includes: "/sites/site-1/permissions", answers: [{ value: entries }] }, { method: "PATCH", includes: "/sites/site-1/permissions/ours", answers: [denied] }]);
+
+    const failure = await grantWrite(issuer.client, SITE, CLIENT).catch((error: unknown) => error);
+
+    expect(failure).toBe(denied);
+  });
+
   it("is put back to read, answering the roles Graph says it holds", async () => {
     const issuer = scripted([{ method: "PATCH", includes: "/sites/site-1/permissions/p1", answers: [{ id: "p1", roles: ["read"] }] }]);
 

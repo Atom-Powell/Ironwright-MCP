@@ -14,6 +14,7 @@ import type { StateStore } from "../store/types.js";
 import type { ToolContext } from "../tools/context.js";
 import { SERVER_NAME, formatToolCallRecord } from "../mcp/build-server.js";
 import { SERVER_VERSION } from "../version.js";
+import { inWords } from "../domain/words.js";
 
 async function main(): Promise<void> {
   const config = loadConfig(process.env);
@@ -91,7 +92,7 @@ async function main(): Promise<void> {
     if (!server.listening) return;
 
     console.log(
-      `${SERVER_NAME} ${SERVER_VERSION} listening on ${host === undefined ? "port " : `${host}:`}${config.port}, ${grantedSiteUrls.length === 1 ? `site ${grantedSiteUrl}` : `sites ${grantedSiteUrls.join(" and ")}`}, writes ${config.allowWrites ? "enabled" : "disabled"}, ` +
+      `${SERVER_NAME} ${SERVER_VERSION} listening on ${host === undefined ? "port " : `${host}:`}${config.port}, ${grantedSiteUrls.length === 1 ? `site ${grantedSiteUrl}` : `sites ${inWords(grantedSiteUrls)}`}, writes ${config.allowWrites ? "enabled" : "disabled"}, ` +
         `${profileCount} ${profileCount === 1 ? "profile" : "profiles"} from ${config.profileDir}, ` +
         `${storeKind} store, inbound auth ${inboundAuth.mode}`,
     );

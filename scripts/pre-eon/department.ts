@@ -55,6 +55,46 @@ export interface SiteGrant {
  * issuer's token. Measured live on 2026-11-17 by the two site probe.
  */
 export async function grantWrite(issuer: Pick<GraphClient, "get" | "post" | "patch">, siteUrl: string, clientId: string): Promise<SiteGrant> {
+  const { siteId, entries: matches } = await readGrant(issuer, siteUrl, clientId);
+  if (matches.length > 1) throw new Error(`${matches.length} permission entries on ${siteUrl} name the server application; nothing was changed`);
+
+  // A refusal says Graph did not apply the request. Anything else, a gateway status or a
+  // connection that dropped, does not say, and by then nothing here holds an id to restore.
+  const sent = async <T>(request: () => Promise<T>): Promise<T> => {
+    try {
+      return await request();
+    } catch (error) {
+      if (error instanceof GraphRequestError && error.status >= 400 && error.status < 500) throw error;
+      throw new Error(
+        `A GRANT MAY NOW STAND AT WRITE on ${siteUrl}: the request for it failed without a refusal (${error instanceof Error ? error.message : String(error)}), so whether Graph applied it is not known.`,
+      );
+    }
+  };
+
+  const existing = matches[0];
+  if (existing !== undefined) {
+    const updated = await sent(() => issuer.patch<PermissionEntry>(`/sites/${siteId}/permissions/${existing.id}`, { roles: ["write"] }));
+    return { siteUrl, siteId, permissionId: existing.id, before: existing.roles, now: rolesOf(updated) };
+  }
+  const created = await sent(() =>
+    issuer.post<PermissionEntry>(`/sites/${siteId}/permissions`, {
+      roles: ["write"],
+      grantedToIdentities: [{ application: { id: clientId, displayName: "Ironwright MCP server application" } }],
+    }),
+  );
+  // The grant exists by now. Without its id nothing here can restore it, and the caller has no
+  // record of it either, so the error itself has to carry the warning into the summary.
+  if (typeof created.id !== "string") {
+    throw new Error(`A GRANT MAY NOW STAND AT WRITE on ${siteUrl}: Graph accepted the grant and answered no permission id, so this run cannot put it back to read.`);
+  }
+  return { siteUrl, siteId, permissionId: created.id, before: undefined, now: rolesOf(created) };
+}
+
+/**
+ * The site's id and every permission entry on it that names the application,
+ * with the roles each holds. Reads only, so a dry run can say what is there.
+ */
+export async function readGrant(issuer: Pick<GraphClient, "get">, siteUrl: string, clientId: string): Promise<{ siteId: string; entries: Array<{ id: string; roles: string }> }> {
   const site = await issuer.get<{ id?: unknown }>(`${siteLookupPath(siteUrl)}?$select=id`);
   if (typeof site.id !== "string" || site.id.length === 0) throw new Error(`resolving ${siteUrl} returned no site id`);
   const siteId = site.id;
@@ -71,23 +111,7 @@ export async function grantWrite(issuer: Pick<GraphClient, "get" | "post" | "pat
     }
     next = typeof page["@odata.nextLink"] === "string" ? page["@odata.nextLink"] : undefined;
   }
-  if (matches.length > 1) throw new Error(`${matches.length} permission entries on ${siteUrl} name the server application; nothing was changed`);
-
-  const existing = matches[0];
-  if (existing !== undefined) {
-    const updated = await issuer.patch<PermissionEntry>(`/sites/${siteId}/permissions/${existing.id}`, { roles: ["write"] });
-    return { siteUrl, siteId, permissionId: existing.id, before: existing.roles, now: rolesOf(updated) };
-  }
-  const created = await issuer.post<PermissionEntry>(`/sites/${siteId}/permissions`, {
-    roles: ["write"],
-    grantedToIdentities: [{ application: { id: clientId, displayName: "Ironwright MCP server application" } }],
-  });
-  // The grant exists by now. Without its id nothing here can restore it, and the caller has no
-  // record of it either, so the error itself has to carry the warning into the summary.
-  if (typeof created.id !== "string") {
-    throw new Error(`A GRANT MAY NOW STAND AT WRITE on ${siteUrl}: Graph accepted the grant and answered no permission id, so this run cannot put it back to read.`);
-  }
-  return { siteUrl, siteId, permissionId: created.id, before: undefined, now: rolesOf(created) };
+  return { siteId, entries: matches };
 }
 
 /** Puts a grant back to read, and answers the roles Graph says it now holds. */

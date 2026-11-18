@@ -5,6 +5,7 @@ import type { Profile } from "../domain/profile/schema.js";
 import { isAssessmentProfile, isLibraryProfile, type AnyProfile } from "../domain/profile/library.js";
 import { normalizeProfileSites } from "../domain/profile/base.js";
 import { ALL_MODULES, moduleForKind, type DomainModule } from "../modules/index.js";
+import { inWords } from "../domain/words.js";
 
 /**
  * A profile directory this server cannot start with. Every problem found in
@@ -202,7 +203,7 @@ export function createProfileRegistry(
     if (foreign >= 0) {
       issues.push(
         `${entry.source}: profile "${profile.profileId}" sites[${foreign}] names site ${profile.sites[foreign]!.siteUrl}, but this ` +
-          `server's Sites.Selected grant covers ${granted.join(" and ")}. A profile pointed at a site the grant does ` +
+          `server's Sites.Selected grant covers ${inWords(granted)}. A profile pointed at a site the grant does ` +
           "not cover would fail as a 403 on its first Graph call rather than at startup.",
       );
       continue;

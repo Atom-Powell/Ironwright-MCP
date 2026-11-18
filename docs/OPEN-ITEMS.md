@@ -48,7 +48,7 @@ sections below say what was proven and what was not. Last updated 2026-11-17.
 | 10 Profile defined lifecycles | Built 2026-11-17 against the fakes and the simulated tenant: the gates, the external kinds and the corrected kinds are profile data, `verify_publication` takes a kind, and two example profiles for a managed service provider ship. A client onboarding runs end to end on the simulated tenant. The vendor risk profile, which sets none of it, ran the whole second sitting of 2026-11-17 live as before; a profile that does set it has not met a tenant | `docs/superpowers/specs/2026-11-17-profile-defined-lifecycle-design.md`; section below |
 | Two site probe | Passed live in the second sitting of 2026-11-17: the second site refused the server application before its grant, opened to it after, took a write and gave it back, and the first site still resolved under the same token. One site per client is no longer blocked on an assumption; it is not designed or built | `scripts/pre-eon/second-site.ts`; sitting section below; `docs/superpowers/specs/evidence/2026-11-17-second-sitting/` |
 | `describe_assessment_workflow` | Built 2026-11-17: a read tool that answers, from the loaded profiles and with no Graph request, which assessment workflows the server offers and what each needs. Unit tests and the simulated walkthrough; not called on a deployed server | paragraph in the department section below |
-| `npm run department:setup` | Built 2026-11-17: grants the server application on a profile's site, creates its lists and checks their columns, with a dry run. Its argument handling is tested and its refusals were run; it has not been run against a tenant as a command | `docs/SETUP.md`, the assessment profiles section |
+| `npm run department:setup` | Built 2026-11-17: grants the server application on a profile's site, creates its lists and checks their columns, with a dry run. Tested against a scripted Graph client, and its refusals were run; it has not been run against a tenant as a command | `docs/SETUP.md`, the assessment profiles section |
 | A site per department | Built 2026-11-17: the server accepts several granted sites, each profile on one of them, and `npm run sitting` grants, provisions and runs every department profile it finds. Three department sites exist in the developer tenant, Technology Success, Service Desk and Professional Services, with a local profile each. The server was started with all four profiles; the workflows have run on the simulated tenant only. Not run live | spec amendment of 2026-11-17 in `docs/superpowers/specs/2026-11-17-profile-defined-lifecycle-design.md`; `scripts/pre-eon/department.ts` |
 | 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9c and carries the unverified A3 and B1 probes, and is the item that slips first | same spec |
 | Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
@@ -3008,6 +3008,23 @@ things, and all eight are fixed.
 The interrupt handling is the one fix with no test of its own: it is in the runner's process
 handling, and what covers it is having been read twice. The first site's own grant is now marked
 for restoring before its widening is sent, for the same reason.
+
+**Reviewed again.** A second independent read, of the new tool, the fixes above and the setup
+command, traced the interrupt ordering and found it sound: no department grant escapes the
+restore, and the clean up cannot run twice. It found six other things, and all six are fixed.
+
+| Finding | State |
+|---|---|
+| `npm run department:setup -- --dry-run=true` ran for real, because an argument that began like a known one was accepted and then not read | Fixed: an argument that is not exactly one of the three is refused, with or without dashes |
+| With `--roles=read`, a list that failed after the grant was widened left the grant at write and said nothing | Fixed: the lists are made and checked first, so a list problem is found with the grant untouched |
+| The setup command said the grant was set to read, or granted, without reading what Graph answered | Fixed: it fails, in words that say the grant may still be at write, unless Graph answers the roles asked for |
+| A second interrupt during the two site probe left that site's grant at write, and the summary could not name it | Fixed: the probe hands its grant to the runner while it stands at write, so the clean up restores it with the rest |
+| A grant request that failed without a refusal, a gateway status or a dropped connection, was reported as an ordinary failure though the grant may have landed | Fixed: the error says a grant may stand at write. A refusal is passed through as it is |
+| The first interrupt waited forever at a prompt when the input was not a terminal | Fixed: the interrupt ends the prompt |
+
+The setup command's work is now one function tested against a scripted Graph client, a dry run
+included, and the dry run reads the grant that is there. What a second interrupt cannot have on
+record is a grant whose request was still on its way; its message says so.
 
 ## The phase 6d live sitting, 2026-09-24: plans an operator describes
 

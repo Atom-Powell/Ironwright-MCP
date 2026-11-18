@@ -92,6 +92,9 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Ends a prompt that is waiting on input that is not a terminal's. Set only while one waits. */
+let abandonPrompt: (() => void) | undefined;
+
 /**
  * Reads one line from the terminal. A hidden line is read without being echoed, so a secret is
  * neither shown nor left in the shell's history.
@@ -102,12 +105,22 @@ function ask(question: string, hidden = false): Promise<string> {
   stdin.setEncoding("utf8");
   if (!stdin.isTTY) {
     if (hidden) return Promise.reject(new Error("A secret can only be asked for in a terminal. Set IW_CLIENT_SECRET in the environment and run again."));
-    return new Promise((resolve) => {
-      stdin.resume();
-      stdin.once("data", (chunk: string) => {
+    return new Promise((resolve, reject) => {
+      const onData = (chunk: string): void => {
+        abandonPrompt = undefined;
         stdin.pause();
         resolve(chunk.trim());
-      });
+      };
+      // Without a terminal an interrupt is a signal and not a keystroke, so nothing would ever
+      // end this wait. The interrupt handler ends it.
+      abandonPrompt = (): void => {
+        abandonPrompt = undefined;
+        stdin.off("data", onData);
+        stdin.pause();
+        reject(new Error("Interrupted at a prompt."));
+      };
+      stdin.resume();
+      stdin.once("data", onData);
     });
   }
   stdin.setRawMode(true);
@@ -287,6 +300,16 @@ async function runSecondSite(profile: ProfileFacts): Promise<void> {
       stamp: STAMP,
       sleep,
       log: (line) => say(line),
+      // On this run's record while it stands at write, so a clean up that cuts the probe off
+      // restores it with the rest. Off the record once the probe has seen it back at read.
+      onGrant: (grant) => {
+        departmentIssuer ??= issuer;
+        departmentGrants.push({ ...grant, before: undefined, now: "write" });
+      },
+      onRestored: (grant) => {
+        const at = departmentGrants.findIndex((held) => held.siteId === grant.siteId && held.permissionId === grant.permissionId);
+        if (at >= 0) departmentGrants.splice(at, 1);
+      },
     });
     results.push(...found);
   } catch (error) {
@@ -728,10 +751,13 @@ process.on("SIGINT", () => {
     // The step in hand is let finish, so whatever it granted is recorded and its own clean up
     // runs. Only then is the server stopped and every grant restored.
     say("Interrupted. Finishing the step in hand, then stopping the server and restoring every grant. Press Ctrl+C again to clean up at once.");
+    abandonPrompt?.();
     void running.then(finish).finally(() => process.exit(130));
     return;
   }
-  say("Interrupted again. Cleaning up now. A step cut off this way may leave its own grant at write: read the summary, and run this again if it names one.");
+  // Every grant this run has on record is restored. What it cannot have on record is a grant
+  // whose request was still on its way when this arrived, so the words do not promise that one.
+  say("Interrupted again. Cleaning up now, without waiting for the step in hand. Every grant on this run's record is restored and named in the summary. A grant request cut off on its way is not on that record: run this again to leave every site at read.");
   void finish().finally(() => process.exit(130));
 });
 

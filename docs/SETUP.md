@@ -294,13 +294,15 @@ column names, kinds and gates. The tool and field names do not change with the p
 party a case is about is passed as `vendor` whatever the lists call it.
 
 `npm run department:setup -- --profile=<file>` prepares the site one assessment profile
-addresses. Under the grant issuer's token it grants the server application on that site, creates
-the three lists the profile names where they are absent, and reads each list's columns back,
-refusing in words when one the profile maps is missing. A list that already exists is not
-changed. It reads `IW_TENANT_ID`, `IW_BOOTSTRAP_CLIENT_ID`, `IW_BOOTSTRAP_CLIENT_SECRET` and
+addresses. Under the grant issuer's token it creates the three lists the profile names where they
+are absent, reads each list's columns back, refusing in words when one the profile maps is
+missing, and then grants the server application on that site. The lists come first so that a list
+problem is found with the grant untouched. A list that already exists is not changed. It reads `IW_TENANT_ID`, `IW_BOOTSTRAP_CLIENT_ID`, `IW_BOOTSTRAP_CLIENT_SECRET` and
 `IW_CLIENT_ID`, and it is setup: it belongs on the operator's workstation with the setup command.
-`--dry-run` says what it would do and changes nothing. `--roles=read` leaves the grant at read
-for a deployment that only reads; the default, `write`, is what the lifecycle tools need. For a
+`--dry-run` says what grant and lists are there and what a run would do, and changes nothing.
+`--roles=read` leaves the grant at read for a deployment that only reads; the default, `write`,
+is what the lifecycle tools need. The command fails unless Graph answers the roles asked for, and
+an argument that is not exactly one of the three is refused. For a
 deployment whose departments each keep a site, run it once per profile and list every site in
 `IW_SITE_URL`. Indexing the columns named above is still done in the list settings.
 

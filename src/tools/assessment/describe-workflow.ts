@@ -5,6 +5,7 @@ import { isAssessmentProfile } from "../../domain/profile/library.js";
 import type { ToolContext } from "../context.js";
 import { describeToolFailure } from "../errors.js";
 import { NotAnAssessmentProfileError } from "./context.js";
+import { inWords as joined } from "../../domain/words.js";
 
 export const DESCRIBE_WORKFLOW_INPUT_SCHEMA = {
   profileId: z
@@ -60,10 +61,6 @@ const InputObject = z.object(DESCRIBE_WORKFLOW_INPUT_SCHEMA);
 const TOOL = "describe_assessment_workflow";
 
 type Workflow = z.infer<z.ZodObject<typeof WORKFLOW_SHAPE>>;
-
-function joined(names: readonly string[]): string {
-  return names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)!}`;
-}
 
 function workflowOf(profile: AssessmentProfile): Workflow {
   const { gates, external, corrected, status, dispositions, risks } = profile.lifecycle;

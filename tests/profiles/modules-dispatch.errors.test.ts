@@ -55,6 +55,19 @@ describe("registry dispatch by kind, refused", () => {
     expect((caught as ProfileRegistryError).issues[0]).toMatch(/sites\/Elsewhere.*grant covers .*sites\/Example and .*sites\/ServiceDesk/);
   });
 
+  it("names three granted sites as a list, not as a chain of and", () => {
+    const desk = "https://contoso.sharepoint.com/sites/ServiceDesk";
+    const success = "https://contoso.sharepoint.com/sites/TechnologySuccess";
+    const stray = { ...example(), identity: { ...(example().identity as object), siteUrl: "https://contoso.sharepoint.com/sites/Elsewhere" } };
+    let caught: unknown;
+    try {
+      createProfileRegistry([{ source: "stray.json", contents: stray }], [SITE, desk, success]);
+    } catch (error) {
+      caught = error;
+    }
+    expect((caught as ProfileRegistryError).issues[0]).toContain(`grant covers ${SITE}, ${desk} and ${success}.`);
+  });
+
   it("refuses a null kind, at the registry and at the loader the registry calls", () => {
     const input = { ...example(), kind: null };
     expect(() => createProfileRegistry([{ source: "x.json", contents: input }], SITE)).toThrow(/null/);
