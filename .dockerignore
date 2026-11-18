@@ -1,0 +1,17 @@
+# Only package.json, the lockfile, the two tsconfig files and src are copied into the image.
+# Everything else stays out of the build context, above all anything that can hold a secret or
+# a customer's configuration.
+node_modules
+dist
+coverage
+.git
+.github
+.superpowers
+.env
+.env.*
+profiles
+docs
+tests
+scripts
+examples
+*.log

@@ -647,6 +647,17 @@ owns is the durable path that needs no Azure subscription. Azure Container Apps 
 cloud deployment. Plan 9d carries the full procedure for each; this phase builds the inbound key
 all three rely on.
 
+#### The container image
+
+The image is the unit of deployment. `Dockerfile` builds it in two stages: the first compiles with
+`npm run build:prod`, which leaves out `src/setup`, and the second holds only `dist` and the
+production dependencies, running as the node image's unprivileged user on port 3000. Profiles are
+mounted at run time and named by `IW_PROFILE_DIR`; none is baked in, and `.dockerignore` keeps
+`profiles`, `.env` files and `.superpowers` out of the build context. CI builds the image on every
+change, starts it with made up credentials, and fails unless `/health` answers, a request to `/mcp`
+without the inbound key answers 401, and the process is not root. That CI job is the only place
+the image has been built: the development machine has no container runtime.
+
 #### Cloudflare Tunnel, verified 2026-11-18
 
 Run end to end against the developer tenant on 2026-11-18, with a Copilot Studio agent calling the

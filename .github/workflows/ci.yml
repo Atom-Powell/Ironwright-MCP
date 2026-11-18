@@ -21,3 +21,37 @@ jobs:
       # Separate gate: Vitest exits non-zero when this filter matches no files,
       # so deleting the error-path suite fails the build instead of passing quietly.
       - run: npm run test:errors
+
+  # The image is the unit of deployment, so it is built and started on every change. The
+  # credentials are made up: the server starts without a Graph token (it warns and checks on
+  # first use), and /health never calls Graph. What this proves is that the image builds, starts
+  # under its unprivileged user, answers /health, and refuses /mcp without the inbound key.
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t ironwright-mcp:ci .
+      - name: Start the image and check it answers
+        run: |
+          mkdir -p ci-profiles
+          cp examples/profiles/assessment-example.json ci-profiles/
+          docker run -d --name iw -p 3000:3000 \
+            -e IW_TENANT_ID=00000000-0000-0000-0000-000000000001 \
+            -e IW_CLIENT_ID=00000000-0000-0000-0000-000000000002 \
+            -e IW_CLIENT_SECRET=made-up-for-ci \
+            -e IW_SITE_URL=https://contoso.sharepoint.com/sites/Example \
+            -e IW_PROFILE_DIR=/profiles \
+            -e IW_INBOUND_KEY=ci-only-inbound-key-0123456789abcdef \
+            -v "$PWD/ci-profiles:/profiles:ro" \
+            ironwright-mcp:ci
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3000/health; then break; fi
+            if [ "$i" = 60 ]; then docker logs iw; exit 1; fi
+            sleep 1
+          done
+          echo
+          status=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:3000/mcp)
+          echo "POST /mcp without a key answered $status"
+          if [ "$status" != 401 ]; then docker logs iw; exit 1; fi
+          if [ "$(docker exec iw id -u)" = 0 ]; then echo "the server runs as root"; exit 1; fi
+          docker logs iw
