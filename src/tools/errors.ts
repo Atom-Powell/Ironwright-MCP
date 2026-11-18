@@ -1,4 +1,5 @@
 import { GraphRequestError } from "../graph/errors.js";
+import { isGatewayStatus } from "../graph/retry.js";
 import { LibraryNotFoundError } from "../graph/drive.js";
 import { TokenRequestError, UnexpectedTokenRolesError } from "../graph/token.js";
 import { WorkbookFileError, WorkbookMappingError, WorkbookUnreadableError } from "../workbook/errors.js";
@@ -152,10 +153,14 @@ export function describeToolFailure(error: unknown, subject: FailureSubject): st
 
   if (error instanceof GraphRequestError) {
     const forWhom = subject.profileId === undefined ? subject.tool : `${subject.tool} for profile "${subject.profileId}"`;
+    // A gateway answered, not necessarily Graph, so a write may have landed behind it. The caller
+    // is told, because the natural reading of a failure is that nothing happened.
+    const unknownFate =
+      error.method !== "GET" && isGatewayStatus(error.status) ? " A gateway status does not say whether the write was applied, so read what is there now before repeating it." : "";
     return (
       `Microsoft Graph refused ${error.method} ${error.path} with ${error.status}` +
       `${error.code === undefined ? "" : ` (${error.code})`}, while serving ${forWhom}. ` +
-      "The full Graph response was written to the server log. This server does not infer a cause from the status."
+      `The full Graph response was written to the server log. This server does not infer a cause from the status.${unknownFate}`
     );
   }
 

@@ -44,6 +44,15 @@ export function isRetriableStatus(status: number): boolean {
   return status === 429 || status === 502 || status === 503 || status === 504;
 }
 
+/**
+ * A status a gateway in front of the service returns, which does not say
+ * whether the service behind it acted. 429 and 503 are the service itself
+ * declining, and are not these.
+ */
+export function isGatewayStatus(status: number): boolean {
+  return status === 502 || status === 504;
+}
+
 export interface RetryVerdict {
   retriable: boolean;
   retryAfter: string | null;

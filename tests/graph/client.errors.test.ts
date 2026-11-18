@@ -269,3 +269,65 @@ describe("createGraphClient putBytes failures", () => {
     expect(attempts).toBe(1);
   });
 });
+
+// Ruled 2026-11-17. A gateway status does not say whether Graph applied the request. A write
+// carrying If-Match that is replayed after one cannot apply twice, and that is the trouble: if the
+// first attempt landed, the replay is refused with 412, and every caller reads a 412 as an item
+// someone else changed with nothing written by this call. So such a write is sent once.
+describe("createGraphClient and a write under a precondition", () => {
+  function counting(statuses: number[]) {
+    let call = 0;
+    const client = createGraphClient({
+      tokenProvider: TOKEN,
+      retry: defaultRetryPolicy({ maxAttempts: 4, sleep: async () => {}, now: () => 0 }),
+      fetchImpl: (async () => {
+        const status = statuses[Math.min(call, statuses.length - 1)]!;
+        call += 1;
+        return new Response("{}", { status });
+      }) as typeof fetch,
+    });
+    return client;
+  }
+
+  it.each([502, 504])("sends a PATCH under If-Match once when Graph answers %i, and surfaces that status", async (status) => {
+    const client = counting([status, 200]);
+
+    await expect(client.patch("/sites/s/lists/L/items/2/fields", { State: "X" }, { "if-match": '"abc,1"' })).rejects.toMatchObject({ name: "GraphRequestError", status });
+    expect(client.requests()).toBe(1);
+  });
+
+  it("sends a content PUT under If-Match once when Graph answers 504", async () => {
+    const client = counting([504, 200]);
+
+    await expect(client.putBytes("/drives/d1/root:/a.md:/content", new Uint8Array([1]), "text/plain", { "if-match": '"e1"' })).rejects.toMatchObject({ status: 504 });
+    expect(client.requests()).toBe(1);
+  });
+
+  it("reads the header name without regard to case", async () => {
+    const client = counting([504, 200]);
+
+    await expect(client.patch("/drives/d1/items/i1", { name: "b" }, { "If-Match": '"e1"' })).rejects.toMatchObject({ status: 504 });
+    expect(client.requests()).toBe(1);
+  });
+
+  it.each([429, 503])("still retries a PATCH under If-Match on %i, where the server said it did not act", async (status) => {
+    const client = counting([status, 200]);
+
+    await client.patch("/sites/s/lists/L/items/2/fields", { State: "X" }, { "if-match": '"abc,1"' });
+    expect(client.requests()).toBe(2);
+  });
+
+  it("still retries a write that carries no precondition on a gateway status, as before", async () => {
+    const client = counting([504, 200]);
+
+    await client.patch("/sites/s/lists/L/items/2/fields", { State: "X" });
+    expect(client.requests()).toBe(2);
+  });
+
+  it("still retries a read on a gateway status", async () => {
+    const client = counting([502, 200]);
+
+    await client.get("/drives/d1", { "if-match": '"e1"' });
+    expect(client.requests()).toBe(2);
+  });
+});

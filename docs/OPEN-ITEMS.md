@@ -2804,8 +2804,16 @@ seven are fixed, each behind a test that failed first.
 | An item read without an eTag refused even a save that would have written nothing | Fixed: checked only where a write follows |
 | "Findings recorded" beside "Nothing was written" when no finding needed writing and the summary was refused | Fixed: says no finding needed writing |
 | Every create pays one read per folder above the file | Accepted, and named in the costs above; the reads now stop at the first absent folder |
-| A PATCH that Graph applied and then answered 502, 503 or 504 is retried by the client, and the retry answers 412 under its own `If-Match`, which every caller reports as an item someone else changed and nothing written | Carried below: it is the client's standing retry rule and older than this change |
+| A PATCH that Graph applied and then answered 502, 503 or 504 is retried by the client, and the retry answers 412 under its own `If-Match`, which every caller reports as an item someone else changed and nothing written | Ruled and fixed the same day, as its own change: see below |
 
+**RULED 2026-11-17 and built: a write under a precondition is sent once on a gateway status.** The
+operator took the recommendation. A request other than a read that carries `If-Match` is no longer
+replayed on 502 or 504; the status surfaces, and the tool's words say that a gateway status does
+not tell whether the write was applied and that what is there now should be read before repeating
+it. 429 and 503 are retried as before, and so is every read and every write with no precondition.
+This changes how the rename, move, custom plan and file save tools behave under a gateway error,
+all of which were verified live with the old rule; none has met a gateway error live under either.
+Covered by unit tests on the client. The item read:
 **Carried from the review of 2026-11-17: a retried conditional write can be misreported.** The
 Graph client retries a returned 429, 502, 503 or 504 on every verb, on the reasoning written
 beside it that a returned status is the server declining to act. For 429 that holds. For a
@@ -2825,7 +2833,7 @@ changed between calls, which is the campaign's kind of work and is not in it yet
 needs the item edited while a call is in flight; the probe measured the 412 itself, and the path
 from that answer to the tool's words is covered by the fakes only.
 
-The suite is at 3272 tests across 229 files.
+The suite is at 3283 tests across 229 files after the gateway ruling.
 
 ## The phase 6d live sitting, 2026-09-24: plans an operator describes
 

@@ -82,7 +82,11 @@ etag fetch costs one per candidate, and an excluded item costs none. Amended 202
 `parentReference.path` written RAW, since Graph refuses a percent-encoded folder with the same
 generic 400 an absent folder gets; one PATCH moves and renames together; and every move sends
 `conflictBehavior: fail`, which makes 6b-1 `conflictBehavior`'s first caller. Under it, an
-occupied target name answers 409 `nameAlreadyExists` and nothing is replaced.
+occupied target name answers 409 `nameAlreadyExists` and nothing is replaced. Amended 2026-11-17
+by an operator ruling: a write that carries `If-Match` is sent once when the answer is 502 or 504.
+A gateway status does not say whether Graph applied the request, and a replay of one that landed
+is refused by its own precondition with 412, which reads as a change someone else made. 429 and
+503 are still retried.
 
 **Reading the workbook. Rewritten 2026-09-16 by a live tenant run; the previous entry is void.**
 The Graph Excel API is unreachable from this server. `/workbook/` calls are refused with 403

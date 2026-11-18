@@ -107,6 +107,25 @@ describe("describeToolFailure", () => {
     expect(message).toContain("written to the server log");
   });
 
+  // Ruled 2026-11-17: a write under a precondition is sent once on a gateway status, so this is
+  // the text a caller reads when one ends that way. It must not let them assume either outcome.
+  it.each([502, 504])("says a write that ended on %i may or may not have been applied", (status) => {
+    const error = new GraphRequestError({ method: "PATCH", path: "/sites/s/lists/Assessments/items/2/fields", status, body: "" });
+
+    const message = describeToolFailure(error, { tool: "transition_assessment", profileId: "example" });
+
+    expect(message).toContain(`with ${status}`);
+    expect(message).toContain("A gateway status does not say whether the write was applied, so read what is there now before repeating it.");
+  });
+
+  it("adds nothing about a write's fate to a read that failed, or to a write Graph itself refused", () => {
+    const read = new GraphRequestError({ method: "GET", path: "/drives/x/root/delta", status: 504, body: "" });
+    const refused = new GraphRequestError({ method: "PATCH", path: "/drives/x/items/i", status: 403, body: "" });
+
+    expect(describeToolFailure(read, SUBJECT)).not.toContain("gateway status");
+    expect(describeToolFailure(refused, SUBJECT)).not.toContain("gateway status");
+  });
+
   it("names the tool that failed rather than assuming reconciliation", () => {
     const error = new GraphRequestError({
       method: "GET",
