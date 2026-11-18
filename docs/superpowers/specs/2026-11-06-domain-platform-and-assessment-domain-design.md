@@ -331,7 +331,7 @@ probe server first and the real server second, with the call trace as the eviden
 
 ## Assumptions
 
-Rows L and F were measured on 2026-11-07 by the probe under `scripts/assessment-probe/`, run against
+Rows L and F were measured on 2026-11-07, and row L4 on 2026-11-17, by the probe under `scripts/assessment-probe/`, run against
 the Ironwright developer tenant under a token the runner verified to carry exactly `Sites.Selected`.
 The redacted recording and report are in `evidence/2026-11-07-assessment-probe/` beside this spec,
 and the findings that changed the design are in the 2026-11-07 amendment at the end. Rows A and B
@@ -343,6 +343,7 @@ implementation plan that depends on it.
 | `Sites.Selected` reaches list items under the site for read, create and update | The state lists are the consumer's system of record | L1 | Confirmed 2026-11-07: read 200, create 201, fields update 200 (L1, L2a, L2b). Under the `read` role the create answered 403 `accessDenied` |
 | List item create returns the item with its integer id; a fields PATCH returns the updated fields | ID minting and every status update | L2 | Confirmed 2026-11-07: the body's `id` is the integer rendered as a string, `"2"`; the fields PATCH returned the whole fields object with the new value, and a single item read it back (L2a, L2b, L1b) |
 | A list query filtered on a field works on this grant, with or without the non indexed query header | Open by vendor and scope, lookup by ID | L3 | Amended 2026-11-07: without the header, 400 `invalidRequest` naming the column as not indexed; with `Prefer: HonorNonIndexedQueriesWarningMayFailRandomly`, 200 with the one item (L3a, L3b) |
+| A fields PATCH on a list item under `If-Match` answers 412 on a stale ETag, and its answer on success carries the new one | A lifecycle write to the assessment item must not overwrite an edit made since the tool read it | L4 | Confirmed 2026-11-17: 412 `resourceModified` under the eTag the create answered, the item read back unchanged, 200 with `@odata.etag` under the eTag just read, and 412 for the same stale write sent to the item itself (L4a to L4d). Evidence in `evidence/2026-11-17-list-if-match-probe/` |
 | Folder create by path with `conflictBehavior: fail` returns the item with an ETag and answers 409 on an existing folder | Additive workspace creation and the retry rule | F1 | Confirmed 2026-11-07: 201 with `eTag` in the body, 409 `nameAlreadyExists` on the repeat (F0, F1a, F1b) |
 | A small content PUT with `conflictBehavior: fail` refuses an occupied name with 409 | Create file never replaces | F2 | Confirmed 2026-11-07: 201 with `eTag` in the body, 409 `nameAlreadyExists` on the occupied name, and the content read back unchanged (F2a, F2b, F4) |
 | The same PUT under `If-Match` answers 412 on a stale ETag and returns the new ETag on success | Overwrite only under a precondition | F3 | Confirmed for the stale and current cases, 200 with a new `eTag` and 412 (F3a, F3b). Amended 2026-11-07 for the absent case: a PUT under `If-Match` to a path holding nothing created the file and answered 201 (F3c) |
@@ -682,3 +683,19 @@ Graph requests the module sends from state it holds, and `docs/SIMULATOR.md` lis
 behavior as copied from a dated measurement or as modeled. It can show that the server's steps
 compose and that overlapping calls are ordered, which the scripted fake cannot. It cannot stand in
 the Assumptions table: a row there still needs a live probe or the real producer's output.
+
+## Amendments, 2026-11-17, from the list precondition probe
+
+**A list item write can carry a precondition, and this design did not use one.** Row L4 of the
+Assumptions table was measured after the design above was built, by four steps added to the probe.
+Graph refuses a fields PATCH sent under a stale `If-Match` with 412 `resourceModified`, at the
+address `updateListItemFields` already writes, and answers one sent under the current eTag with the
+item's new `@odata.etag`. The Decision Record's rule, an ETag precondition on every write, has
+therefore been reachable for the assessment item all along, and the module's unconditional update
+is a departure from it, not a limit of the platform. The lock per assessment above orders this
+server's own calls and stays; the precondition is what covers a person editing the item in the
+browser.
+
+What a lifecycle tool does when its write is refused this way is not yet designed. The two
+candidates are to refuse with the evidence, as `save_assessment_artifact` does for a file that
+changed under it, and to read again and retry once. No plan is written until that is chosen.

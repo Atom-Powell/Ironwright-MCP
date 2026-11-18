@@ -44,6 +44,7 @@ import {
   parseCampaignTable,
   parseProbeLines,
   redactSecrets,
+  serverEnvironment,
   summaryMarkdown,
   type StepResult,
 } from "./sitting-lib.js";
@@ -145,7 +146,7 @@ async function healthy(): Promise<boolean> {
 
 async function startServer(): Promise<void> {
   const script = SIM ? "scripts/sim/main.ts" : "src/server/main.ts";
-  const env: Record<string, string> = SIM ? { SIM_PORT: String(PORT) } : { IW_PROFILE_DIR: "profiles", IW_ALLOW_WRITES: "true", PORT: String(PORT) };
+  const env = serverEnvironment(SIM ? "sim" : "live", PORT);
   const logFile = join(FOLDER, "server.log");
   const child = spawn(process.execPath, ["--import", "tsx", script], { env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
   const log = (chunk: Buffer): void => appendFileSync(logFile, redactSecrets(chunk.toString("utf8"), secrets));
@@ -445,18 +446,22 @@ async function main(): Promise<void> {
   mkdirSync(FOLDER, { recursive: true });
   const profile = readProfile();
 
+  if (!SIM) await gatherIdentity(profile);
+
+  // Started before the sign-ins, not after: a server that will not start then costs the operator
+  // nothing. The first live run learned that after two sign-ins and a new grant issuer.
+  say(`Starting the server on ${BASE}.`);
+  await startServer();
+  say("The server answers.");
+
   if (!SIM) {
-    await gatherIdentity(profile);
     await ensureGrantIssuer();
     const widened = await runScript("grant-widen", "scripts/assessment-probe/grant.ts", ["--roles=write"]);
     if (widened.code !== 0) throw new Error("The grant could not be widened to write, so nothing further was run.");
     grantWidened = true;
     await runProbe();
+    await runCampaign();
   }
-
-  say(`Starting the server on ${BASE}.`);
-  await startServer();
-  if (!SIM) await runCampaign();
   await runReadChecks(profile);
   await runInterruptedOpen(profile);
 }

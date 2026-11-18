@@ -7,8 +7,11 @@ import {
   parseCampaignTable,
   parseProbeLines,
   redactSecrets,
+  serverEnvironment,
   summaryMarkdown,
 } from "../../../scripts/pre-eon/sitting-lib.js";
+import { loadGrantedSiteUrl, loadGraphCredentials, loadInboundAuth } from "../../../src/config.js";
+import { loadConfig } from "../../../src/server/config.js";
 import { describeBootstrapSuccess } from "../../../src/setup/cli.js";
 
 describe("the grant issuer's credentials", () => {
@@ -113,6 +116,29 @@ describe("the probe's list precondition lines", () => {
     const result = judgeListPrecondition(parseProbeLines("R1   200  pass\nL1   403  FAIL expected 200, received 403"));
     expect(result.verdict).toBe("fail");
     expect(result.detail).toContain("did not reach L4a");
+  });
+});
+
+describe("the environment the runner starts the server with", () => {
+  // The first live run stopped here: the runner set the profile folder and the write switch and
+  // nothing about inbound authentication, and the server refused to start without a key. The
+  // environment is checked against the server's own loaders so that cannot recur unseen.
+  const identity = { IW_TENANT_ID: "t", IW_CLIENT_ID: "c", IW_CLIENT_SECRET: "s", IW_SITE_URL: "https://contoso.sharepoint.com/sites/Example" };
+
+  it("is accepted by every loader the server runs at startup", () => {
+    const env = { ...identity, ...serverEnvironment("live", 3000) };
+    expect(loadConfig(env)).toMatchObject({ port: 3000, allowWrites: true, profileDir: "profiles" });
+    expect(loadInboundAuth(env).mode).toBe("none");
+    expect(() => loadGraphCredentials(env)).not.toThrow();
+    expect(loadGrantedSiteUrl(env)).toBe(identity.IW_SITE_URL);
+  });
+
+  it("asks for no inbound key because mode none binds loopback only, and says the operator meant it", () => {
+    expect(serverEnvironment("live", 3000)).toMatchObject({ IW_INBOUND_AUTH: "none", IW_ALLOW_ANONYMOUS: "1" });
+  });
+
+  it("gives the simulator only its port", () => {
+    expect(serverEnvironment("sim", 3939)).toEqual({ SIM_PORT: "3939" });
   });
 });
 

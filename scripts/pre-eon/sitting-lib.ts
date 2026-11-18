@@ -40,6 +40,21 @@ export function redactSecrets(line: string, secrets: readonly string[]): string 
   return out;
 }
 
+/**
+ * What the runner adds to its own environment for the server it starts. The
+ * identity and the site are already in that environment by then.
+ *
+ * Inbound authentication is off, as it was in every earlier sitting, and the
+ * second variable is the server's own requirement for saying so on purpose.
+ * Mode none binds loopback only, and the runner's client is on the same
+ * machine. Left out, the server refuses to start for want of a key, which is
+ * how the first live run of this runner ended.
+ */
+export function serverEnvironment(mode: "live" | "sim", port: number): Record<string, string> {
+  if (mode === "sim") return { SIM_PORT: String(port) };
+  return { IW_PROFILE_DIR: "profiles", IW_ALLOW_WRITES: "true", PORT: String(port), IW_INBOUND_AUTH: "none", IW_ALLOW_ANONYMOUS: "1" };
+}
+
 export interface CampaignRow {
   key: string;
   verdict: string;

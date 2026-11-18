@@ -40,9 +40,10 @@ sections below say what was proven and what was not. Last updated 2026-11-17.
 | 9a Probes and the grant | Complete: probes L and F run live 2026-11-07, fifteen of seventeen steps as designed and the spec amended on the other two (`If-Match` on a content PUT does not guard an absent path; a filtered list query needs the non-indexed header); A3 and B1 stay unverified until 9d | `docs/superpowers/specs/evidence/2026-11-07-assessment-probe/`; sitting below; PR #24 |
 | 9b Core: modules, site sets, inbound authentication, lifecycle kind, journal | Complete against fakes, merged 2026-11-07; nothing in it has met a live tenant yet | PR #22, merged 2026-11-07 |
 | 9c Assessment module and the four Graph operations | Verified live 2026-11-08 on the main path: open, save, findings, verify, transition and both reads, 25 calls on the developer tenant. Three checks were not run and stay carried: the implicit parent folder, the publication name case, and an `executive_summary` save | PR #25; sitting below; `docs/superpowers/specs/evidence/2026-11-08-assessment-sitting/` |
-| Pre-EON test campaign | First run 2026-11-09: 8 scenarios on the developer tenant, 2 defects found (concurrent opens duplicated an assessment; a misnamed publication completed an assessment), both fixed in PR #27. Rerun the same day on the fixed server: s2 and s4 pass, s3, s5, s7 and s8 pass, s1 and s6 measured as before. Still to run: interrupted open, throttling and token expiry, inbound auth over a public tunnel, Copilot Studio contact (plan 9d); plan `docs/superpowers/plans/2026-11-09-pre-eon-test-campaign.md` | `scripts/pre-eon/campaign.ts`; sitting below |
-| Phase 9 code review | 2026-11-16: ten defects read out of the 9b, 9c and campaign source; seven fixed against fakes, three wait on a ruling or a probe (see the carried items below). 2026-11-17: a review of those fixes read ten more findings, all fixed against fakes. None of it run live | section below; spec amendments of 2026-11-16 |
-| Assessment module upgrades and the simulated tenant | 2026-11-17: a stateful simulated tenant with a local server and walkthrough; refusals carried under `_meta` after the first client that lists tools rejected them; one lock per assessment; concurrent state reads; honest journal failures; one profile loader with more refused at load; version reporting, a record of every tool call and a bounded startup wait; `get_assessment` readiness, findings and journal readback, and listing by status. Built against the scripted fakes and the simulated tenant. None of it run live | section below; `docs/SIMULATOR.md`; spec amendments of 2026-11-17 |
+| Pre-EON test campaign | First run 2026-11-09: 8 scenarios on the developer tenant, 2 defects found (concurrent opens duplicated an assessment; a misnamed publication completed an assessment), both fixed in PR #27. Rerun the same day on the fixed server: s2 and s4 pass, s3, s5, s7 and s8 pass, s1 and s6 measured as before. Third run 2026-11-17, through `npm run sitting` on the build carrying the review fixes and the upgrades: the same eight verdicts, and the interrupted open, run for the first time, passed. Still to run: throttling and token expiry, inbound auth over a public tunnel, Copilot Studio contact (plan 9d); plan `docs/superpowers/plans/2026-11-09-pre-eon-test-campaign.md` | `scripts/pre-eon/campaign.ts`; sitting below |
+| Phase 9 code review | 2026-11-16: ten defects read out of the 9b, 9c and campaign source; seven fixed against fakes, three wait on a ruling or a probe (see the carried items below). 2026-11-17: a review of those fixes read ten more findings, all fixed against fakes. Run live 2026-11-17 on the paths the campaign and the sitting's own calls take, with no defect found; a fix whose case those paths do not reach is still covered by tests only | section below; the sitting of 2026-11-17; spec amendments of 2026-11-16 |
+| Assessment module upgrades and the simulated tenant | 2026-11-17: a stateful simulated tenant with a local server and walkthrough; refusals carried under `_meta` after the first client that lists tools rejected them; one lock per assessment; concurrent state reads; honest journal failures; one profile loader with more refused at load; version reporting, a record of every tool call and a bounded startup wait; `get_assessment` readiness, findings and journal readback, and listing by status. Built against the scripted fakes and the simulated tenant. Verified live 2026-11-17: a refusal through a client that lists the tools, the lock per assessment, the state read, profile loading, the version in the startup line, the call record, and all three `get_assessment` additions. Not exercised live: a journal append failure, the token request bound, a status listing past 200 | sections below; `docs/SIMULATOR.md`; `docs/superpowers/specs/evidence/2026-11-17-sitting/`; spec amendments of 2026-11-17 |
+| List item writes under `If-Match` | Probed live 2026-11-17: Graph refuses a stale fields PATCH with 412 and answers a current one with the new ETag. The server does not send the precondition yet; the fix is not written | carried item below; `docs/superpowers/specs/evidence/2026-11-17-list-if-match-probe/` |
 | 9d Ingress and Copilot Studio contact | Designed 2026-11-06; waits on 9c and carries the unverified A3 and B1 probes, and is the item that slips first | same spec |
 | Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
 | CPA practice domain (multi-site scan and queries, grant issuer loop over a sites file, folder template taxonomy) | Not started; the phase after 9 | same spec |
@@ -374,6 +375,17 @@ in case Graph enforces the precondition there and not on the fields address. A 4
 fix patches the item; a 200 at both means Graph offers no precondition on a list item and the
 remedy is a read after the write. No fix is designed until the run says which.
 
+**Probed 2026-11-17: Graph enforces it, on both addresses.** The stale fields PATCH answered 412
+`resourceModified` (L4a), the item read back unchanged (L4b), the PATCH under the eTag just read
+answered 200 (L4c), and the stale PATCH of the item itself answered 412 as well (L4d). The 200 at
+L4c carries `@odata.etag` with the item's new version, so a write refreshes its own precondition
+from its response, as a `driveItem` PATCH was measured to on 2026-09-19, and a tool that writes the
+item twice in one call needs no read between. So `updateListItemFields` can send `If-Match` where
+it already writes. What is not decided is what a lifecycle tool does with the 412: refuse with the
+evidence, as a save does when its file changed under it, or read again and retry once. That is a
+design choice for the operator before any code. Until then the defect stands as narrowed above: a
+person editing the item between a tool's read and its write is overwritten.
+
 **Carried from the phase 9 code review, 2026-11-16: a provisional assessment cannot be completed.**
 `requireInProgress` refuses every tool once the status is provisional, and a later `open_assessment`
 for the same vendor and scope creates a second assessment. The spec does not say whether
@@ -395,6 +407,12 @@ structured content against a tool's output schema, as the MCP SDK client does, a
 shows `_meta` or an error result's prose to the agent, has not been probed. The prose alone is
 enough for an agent that sees it. Plan 9d's first refused call is the check.
 
+**CLOSED 2026-11-17 by the sitting below, with three exceptions.** The campaign rerun and the
+sitting's own calls ran the readiness report, the findings and journal readback, the listing by
+status, the lock, the state read and the profile checks against the developer tenant, and a
+refusal reached a client that had listed the tools with its evidence. Three things the sitting did
+not reach stay covered by tests only: a journal append that fails after a confirmed write, a token
+request abandoned at 15 seconds, and a status listing that stops at 200. The item read:
 **Carried from the 2026-11-17 upgrades: nothing in them has met a tenant.** The readiness report,
 the findings and journal readback, the listing by status, the per-assessment lock, the concurrent
 state read and the stricter profile checks were run against the scripted fakes and the simulated
@@ -2637,12 +2655,79 @@ happened. The operator supplies two sign-ins, the word yes and the server applic
 and the grant issuer's secret is read from the setup command's output into memory and never shown.
 The interrupted open, which the campaign plan left to a person, is here because the server being
 stopped is one this script started, and it is stopped outright, where Ctrl+C would have let the
-server drain the call. `npm run sitting -- --sim` runs the server steps over the simulated tenant;
-that run and one with refused credentials, which stopped before changing anything, are all it has
-met. Its first live run is also the live check of everything in the table above.
+server drain the call. `npm run sitting -- --sim` runs the server steps over the simulated tenant.
+Its two live runs the same evening are the next section.
 
-The suite is at 3177 tests across 229 files, twenty eight of them for the `If-Match` probe steps
-and the sitting runner written the same day.
+## The live sitting of 2026-11-17: the review fixes and the upgrades on the developer tenant
+
+Run by the operator with `npm run sitting`, from `e9b5fa6` plus an uncommitted correction to the
+runner, against the IronwrightTest site under the `assessment-sitting` profile, with the server on
+127.0.0.1, writes enabled and inbound authentication off. The redacted results are in
+`docs/superpowers/specs/evidence/2026-11-17-sitting/report.md` and the probe's recordings in
+`docs/superpowers/specs/evidence/2026-11-17-list-if-match-probe/`, both read for redaction before
+they were kept.
+
+**Two runs. The first stopped at the server, and the fault was the runner's.** It reissued the
+grant issuer, widened the grant and ran the probe, then started the server with the profile folder
+and the write switch and nothing about inbound authentication, and the server refused to start
+without a key. Every earlier sitting had set `IW_INBOUND_AUTH=none` and `IW_ALLOW_ANONYMOUS=1` by
+hand; the runner had only ever started the simulator, which needs neither. It restored the grant
+to `read` on its way out, which is the one thing that run proved about the runner. The correction
+has two parts: the environment the runner gives the server is now checked by a test against the
+server's own configuration loaders, and the server is started before the sign-ins, so a server
+that will not start costs the operator nothing. This was the assumption gate's lesson again, at
+small scale: a runner proven against the stand-in had not met the thing it stood in for.
+
+**The second run answered every step.**
+
+| Step | Result |
+|---|---|
+| `If-Match` on a list item | Enforced. A stale fields PATCH answered 412 `resourceModified`, the item read back unchanged, a PATCH under the current eTag answered 200 carrying the new one, and a stale PATCH of the item itself answered 412. The carried item above has what follows from it |
+| Campaign | s2, s3, s4, s5, s7 and s8 pass; s1 and s6 measured as on 2026-11-09 |
+| `get_assessment` by status | 23 assessments in progress across vendors, the run's own among them, from one call |
+| `get_assessment` readback and readiness | One finding with its two paragraph observation, ten journal entries, and a readiness report saying a save, a findings call and a provisional transition would proceed and a completed one would not |
+| A refusal through a client that lists the tools | `transition_assessment` refused with its expected and observed states under `_meta`, and the client accepted it. This is the defect the simulator found, now seen fixed against the tenant |
+| Interrupted open | The server was stopped 1200 ms into an open. The repeat on a new server process answered the same assessment as already in progress, created its five folders, and the vendor has exactly one assessment |
+| Grant | Restored to `read` and read back |
+
+**What changed since the last campaign run, and is not a defect.** On 2026-11-09 six concurrent
+overwrites of one dossier ended with one overwrite and five refusals under the ETag. This run
+ended with six overwrites and no refusal, the final content one writer's. The lock per assessment
+is why: the six saves now run one after another, each reads the ETag the one before it left, and
+none is stale. The scenario's requirement, never a mixed file, holds either way. Two things follow
+that a consumer should know. The last writer wins among this server's own callers, where before
+the first did. And the calls queue: the last of the six answered after 21 seconds, most of it
+spent waiting its turn, which a client with a shorter timeout would abandon while the server
+carried on.
+
+**What the call record showed.** Thirty nine lines for thirty nine settled calls, 36 `ok` and 3
+`refused`, none carrying a vendor name, a path or a finding. The interrupted open wrote no line,
+because the process that would have written it was stopped; a call cut off this way is visible
+only as a client that got no answer. An open took a median of 3.7 seconds and up to 19 Graph
+requests, a save 2.2 seconds and 12 to 14.
+
+**What this sitting did not establish.**
+
+- The interrupted open was cut at one point, after the item and its id were written and before any
+  folder. A stop between the vendor record and the item, or between the item and its id, was not
+  produced; the delay is a flag on the runner.
+- Whether the interrupted open left a second vendor record. The tools found one assessment for the
+  vendor; the Vendors list itself was not read.
+- The journal across a restart. The store was in memory, so the resumed open's journal holds only
+  what the second process wrote, and the first process's entries for the item it created are gone.
+  This is the known cost of running without a table store, seen here for the first time.
+- A journal append failure, a token request that runs out its 15 seconds, and a status listing past
+  200, none of which a healthy run reaches.
+- Anything about Copilot Studio, inbound authentication or a public address.
+
+**Residue left in the tenant.** Probe items 21 and 22 in `IW Probe Assessments` and a folder under
+`IW-Probe` for each of the two runs; the campaign's seven vendors under the tag `11172355`;
+assessments up to `ASM-2026-00031`, the last two being the runner's `Sitting Check` and `Sitting
+Interrupt` vendors. Nothing was deleted. The grant issuer was deleted, purged and recreated twice;
+the one that remains has a seven day secret that nobody holds, since the runner read it into
+memory and let it go, so the next sitting reissues it the same way.
+
+The suite is at 3228 tests across 229 files.
 
 ## The phase 6d live sitting, 2026-09-24: plans an operator describes
 

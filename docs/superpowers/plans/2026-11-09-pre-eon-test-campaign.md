@@ -26,7 +26,7 @@ PASS means the behavior matched the design. FAIL means a defect or a design clai
 ## Not automated here
 
 - **Throttling and token expiry mid call.** Need a way to provoke a 429 on demand; carried until one exists.
-- **Interrupted open.** A server killed mid create is a process this script did not start, so it is run by hand in a sitting.
+- **Interrupted open.** A server killed mid create is a process this script did not start. Since 2026-11-17 `npm run sitting` starts the server itself, stops it under an open and retries, so this no longer needs a person.
 - **Inbound authentication on a public tunnel, and the Copilot Studio contact.** Plan 9d.
 
 ## Recording
