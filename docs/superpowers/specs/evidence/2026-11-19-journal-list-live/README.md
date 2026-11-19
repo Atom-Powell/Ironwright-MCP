@@ -47,3 +47,11 @@ nothing. The read only ruling did not affect the server, whose writes come from 
 Found: the two creates `open_assessment` makes before the id exists are journaled under the
 placeholders "(vendor)" and "(unassigned)", so a read by id never returns them. That predates the
 list; the store keyed them the same way. It is an open item in `docs/OPEN-ITEMS.md`.
+
+## After the fix, the same afternoon
+
+With the fix merged (PR #37), a write session opened INC-2026-00004 for Fabrikam Clinic, scope
+"Wi-Fi drops in exam rooms", at 19:16 UTC. Asked for its journal, the agent returned eight entries:
+the assessment item created (Incidents/4), then the vendor record (Clients/4), then the id written,
+then the five folders. The two creates are now filed under the id and returned by a read by id, in
+the order the fix writes them.
