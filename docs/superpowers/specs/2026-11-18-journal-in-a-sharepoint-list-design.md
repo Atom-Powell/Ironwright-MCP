@@ -50,7 +50,10 @@ only where an answer is truly needed. Each can be overruled.
 - **`npm run department:setup` creates the journal list** with the others, from the profile, and
   checks its columns the same way.
 
-**The one that waits, for the operator: who may edit the journal.** A list inherits the site's
+**RULED 2026-11-18 by the operator: option 2, the journal list read only for site members, set by
+hand once per site at setup.** The question as it was put:
+
+**Who may edit the journal.** A list inherits the site's
 permissions, so anyone who can edit the site can edit or delete a journal entry. SharePoint keeps
 a version history of every list item and the Microsoft 365 audit log records the edit, so an
 alteration is visible, but it is not prevented. Three ways to go:
@@ -122,4 +125,5 @@ real journal, and says so at the end.
 
 The probe has run and every assumption held. Built the same night against the fakes and the
 simulated tenant, with a test that the journal survives a restart; not yet run against a tenant. The
-ruling on who may edit the journal list still waits; the design works under all three.
+ruling on who may edit the journal list is made: read only for site members, an operator step per
+site.

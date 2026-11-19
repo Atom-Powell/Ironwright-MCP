@@ -666,9 +666,16 @@ name and column names the site should use:
 ```
 
 `npm run department:setup` then creates it with the others, the assessment id column indexed. Each
-journaled write costs one more Graph request, which every tool's request count shows. Anyone who can
-edit the site can edit a journal entry unless the list's permissions say otherwise; SharePoint's
-version history and the audit log show an edit.
+journaled write costs one more Graph request, which every tool's request count shows.
+
+**Then make the journal list read only for the site's people**, once per site. This was ruled on
+2026-11-18: the journal is an audit record, and a list inherits the site's permissions, so anyone
+who can edit the site could otherwise edit an entry. In the browser, open the journal list, then
+**Settings** (the gear), **List settings**, **Permissions for this list**. Choose **Stop Inheriting
+Permissions**, then change the site's **Members** group to **Read**. Leave the owners as they are.
+The server application keeps its write: its access comes from its own site grant, not from these
+groups. SharePoint's version history and the Microsoft 365 audit log still show any edit an owner
+makes.
 
 #### The container image
 
