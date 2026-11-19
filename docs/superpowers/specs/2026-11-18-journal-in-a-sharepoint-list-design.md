@@ -90,13 +90,13 @@ The design below works under all three; only the runbook and the setup step diff
 
 | Assumption | Why the design needs it | Evidence |
 |---|---|---|
-| The server application can create items in a fourth list on a site it holds write on | Every journal entry is a list item create | The same operation the findings list takes, live since 2026-11-08 and again on 2026-11-18. Not yet run against a list holding eleven text columns, one of them multi line: the probe below covers it |
-| A column created through Graph with `indexed: true` is indexed, so a filter on it needs no non-indexed header | The journal read filters on the assessment id | **Not measured.** The column definition carries an `indexed` property; this project has never set it. Probe J2 |
-| A multi line text column takes a value longer than 255 characters and returns it whole | The target is a library path | **Not measured** for a list item field. Probe J3 |
-| A filter on one assessment's id returns only its entries, across pages | The read is per assessment | The filter and paging are the ones the findings read already uses, live. Probe J4 runs it on the journal list with more than one page |
-| The grant issuer can create the journal list with these columns | `department:setup` creates it | List creation with column definitions is the one the third sitting ran on 2026-11-18, implied and not recorded. Probe J1 creates and reads back this exact list |
+| The server application can create items in a fourth list on a site it holds write on | Every journal entry is a list item create | Confirmed 2026-11-18, probe J3 and J4: the server application created 63 entries in a list of eleven text columns |
+| A column created through Graph with `indexed: true` is indexed, so a filter on it needs no non-indexed header | The journal read filters on the assessment id | Confirmed 2026-11-18, probe J2a and J2c: the column read back indexed, and a filter on it without the non-indexed header answered 200 |
+| A multi line text column takes a value longer than 255 characters and returns it whole | The target is a library path | Confirmed 2026-11-18, probe J3: a 400 character target read back whole |
+| A filter on one assessment's id returns only its entries, across pages | The read is per assessment | Confirmed 2026-11-18, probe J4: 60 of 60 entries for one id over 2 pages, none for another |
+| The grant issuer can create the journal list with these columns | `department:setup` creates it | Confirmed 2026-11-18, probe J1: the list created from the definition, all eleven columns read back |
 
-No plan task is written until the probe has run and this table is amended with what it returned.
+The probe ran on 2026-11-18 and every row held; the evidence is in `evidence/2026-11-18-journal-probe/`. The plan may be written.
 
 ## The probe
 
@@ -117,4 +117,4 @@ real journal, and says so at the end.
 
 ## Not established
 
-Everything above is a design. Nothing is built and nothing has been probed.
+The probe has run and every assumption held. Nothing is built yet. The ruling on who may edit the journal list still waits; the design works under all three.
