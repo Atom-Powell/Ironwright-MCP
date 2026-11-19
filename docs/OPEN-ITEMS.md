@@ -659,8 +659,10 @@ permissions listed before anything is written, and a failed read stops the run w
 changed and names the site. With `--confirm` each entry is revoked in the order given; a revoke
 that fails stops the run before the application is deleted, because the application's id is the
 only key a re-run has to find the entries still standing, and the failure names the sites
-revoked, the one that failed and the ones not yet attempted. The preview and the outcome name
-each site. A single `--site` reads as it did. `docs/SETUP.md` describes it.
+revoked, the one that failed and the ones not yet attempted. A revoke answered with 404 is
+recorded as already gone, never as revoked, and the run carries on. Two URLs that resolve to one
+site are refused before any write. The preview and the outcome name each site. A single `--site`
+reads as it did. `docs/SETUP.md` describes it.
 
 **Not verified live.** This is known from the code and from tests against a fake `SetupGraph`
 (`tests/setup/delete-server-app.sites.test.ts`); no multi-site teardown has run against a tenant.

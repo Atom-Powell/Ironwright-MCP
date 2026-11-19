@@ -148,7 +148,7 @@ describe("runDeleteServerApp errors", () => {
       hasGrantIssuer: false,
     });
 
-    expect(outcome).toMatchObject({ kind: "torn-down", sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permissionRevoked: false }], orphanedPermission: true });
+    expect(outcome).toMatchObject({ kind: "torn-down", sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permission: "none" }], orphanedPermission: true });
     expect(calls).toContain("deleteApplication:obj-1");
     expect(calls).toContain("purgeDeletedApplication:obj-1");
     expect(calls).not.toContain("listSitePermissions:site-1");

@@ -82,6 +82,22 @@ describe("parseArgs", () => {
     ]);
   });
 
+  it("reads a quoted teardown site list separated by spaces and new lines, as IW_SITE_URL is", () => {
+    const parsed = parseArgs([
+      "node",
+      "main.js",
+      "--tenant=contoso.onmicrosoft.com",
+      "--site=https://contoso.sharepoint.com/sites/Finance https://contoso.sharepoint.com/sites/Legal\nhttps://contoso.sharepoint.com/sites/HR",
+      "--delete-server-app",
+    ]);
+
+    expect(parsed.siteUrls).toEqual([
+      "https://contoso.sharepoint.com/sites/Finance",
+      "https://contoso.sharepoint.com/sites/Legal",
+      "https://contoso.sharepoint.com/sites/HR",
+    ]);
+  });
+
   it("reads a single teardown site as a list of one", () => {
     const parsed = parseArgs([
       "node",
@@ -590,7 +606,7 @@ describe("describeDeleteServerAppOutcome", () => {
         kind: "torn-down",
         appId: "app-1",
         objectId: "obj-1",
-        sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permissionRevoked: true }],
+        sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permission: "revoked" }],
         orphanedPermission: false,
         applicationDeleted: true,
         purgeConfirmed: true,
@@ -618,7 +634,7 @@ describe("describeDeleteServerAppOutcome", () => {
         kind: "torn-down",
         appId: "app-1",
         objectId: "obj-1",
-        sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permissionRevoked: true }],
+        sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permission: "revoked" }],
         orphanedPermission: false,
         applicationDeleted: true,
         purgeConfirmed: false,
@@ -637,7 +653,7 @@ describe("describeDeleteServerAppOutcome", () => {
         kind: "torn-down",
         appId: "app-1",
         objectId: "obj-1",
-        sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permissionRevoked: true }],
+        sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permission: "revoked" }],
         orphanedPermission: false,
         applicationDeleted: true,
         purgeConfirmed: false,
@@ -656,7 +672,7 @@ describe("describeDeleteServerAppOutcome", () => {
         kind: "torn-down",
         appId: "app-1",
         objectId: "obj-1",
-        sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permissionRevoked: false }],
+        sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permission: "none" }],
         orphanedPermission: true,
         applicationDeleted: true,
         purgeConfirmed: true,

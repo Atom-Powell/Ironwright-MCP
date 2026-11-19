@@ -47,6 +47,15 @@ describe("parseArgs failures", () => {
     ).toThrow(/names https:\/\/CONTOSO\.sharepoint\.com\/sites\/finance\/ twice/);
   });
 
+  it.each([
+    ["a query string", "https://contoso.sharepoint.com/sites/Finance,https://contoso.sharepoint.com/sites/Finance?web=1"],
+    ["a fragment", "https://contoso.sharepoint.com/sites/Finance,https://contoso.sharepoint.com/sites/Finance#top"],
+  ])("refuses a teardown site list naming one site twice through %s", (_label, value) => {
+    expect(() =>
+      parseArgs(["node", "main.js", "--tenant=contoso.onmicrosoft.com", `--site=${value}`, "--delete-server-app"]),
+    ).toThrow(/twice/);
+  });
+
   it("refuses a teardown site list that holds only separators, the same way as a missing --site", () => {
     expect(() =>
       parseArgs(["node", "main.js", "--tenant=contoso.onmicrosoft.com", "--site= , ,", "--delete-server-app"]),
@@ -61,7 +70,7 @@ describe("parseArgs failures", () => {
         "--tenant=contoso.onmicrosoft.com",
         "--site=https://contoso.sharepoint.com/sites/Finance,https://contoso.sharepoint.com/sites/Legal",
       ]),
-    ).toThrow(/--site takes one site for setup/);
+    ).toThrow(/--site takes one site for setup[\s\S]*%2C/);
   });
 
   it.each([["--create-bootstrap"], ["--delete-bootstrap"]])(

@@ -15,6 +15,9 @@ const SITES: Record<string, { siteId: string }> = {
   "contoso.sharepoint.com:/sites/Finance": { siteId: "site-fin" },
   "contoso.sharepoint.com:/sites/Legal": { siteId: "site-legal" },
   "contoso.sharepoint.com:/sites/HR": { siteId: "site-hr" },
+  // A spelling the parser cannot tell from Finance by its text, which Graph
+  // resolves to the same site all the same.
+  "contoso.sharepoint.com:/sites/Fin%61nce": { siteId: "site-fin" },
 };
 
 // Implements every SetupGraph method for the same reason the single-site fakes
@@ -25,6 +28,8 @@ function fakeGraph(options: {
   permissions: Record<string, Array<{ permissionId: string; appIds: string[] }>>;
   listFailsFor?: string;
   revokeFailsFor?: string;
+  /** The status the failing revoke answers with; 403 unless a test says otherwise. */
+  revokeFailStatus?: number;
 }): { graph: SetupGraph; calls: string[] } {
   const calls: string[] = [];
   const graph: SetupGraph = {
@@ -80,7 +85,7 @@ function fakeGraph(options: {
         throw new GraphRequestError({
           method: "DELETE",
           path: `/sites/${siteId}/permissions/${permissionId}`,
-          status: 403,
+          status: options.revokeFailStatus ?? 403,
           body: "{}",
         });
       }
@@ -121,8 +126,8 @@ describe("runDeleteServerApp across several sites", () => {
       appId: "app-1",
       objectId: "obj-1",
       sites: [
-        { siteUrl: FINANCE, permissionRevoked: true },
-        { siteUrl: LEGAL, permissionRevoked: true },
+        { siteUrl: FINANCE, permission: "revoked" },
+        { siteUrl: LEGAL, permission: "revoked" },
       ],
       orphanedPermission: false,
       applicationDeleted: true,
@@ -168,8 +173,8 @@ describe("runDeleteServerApp across several sites", () => {
     expect(outcome).toMatchObject({
       kind: "torn-down",
       sites: [
-        { siteUrl: FINANCE, permissionRevoked: true },
-        { siteUrl: LEGAL, permissionRevoked: false },
+        { siteUrl: FINANCE, permission: "revoked" },
+        { siteUrl: LEGAL, permission: "none" },
       ],
     });
     expect(calls.filter((call) => WRITES.test(call))).toEqual([
@@ -297,6 +302,110 @@ describe("runDeleteServerApp across several sites", () => {
     ]);
   });
 
+  it("names a later site with no entry as having nothing to revoke when a revoke fails", async () => {
+    const { graph } = fakeGraph({
+      app: APP,
+      permissions: {
+        "site-fin": [{ permissionId: "perm-fin", appIds: ["app-1"] }],
+        "site-hr": [{ permissionId: "perm-hr", appIds: ["app-1"] }],
+      },
+      revokeFailsFor: "site-fin",
+    });
+
+    const failure = runDeleteServerApp(graph, {
+      siteUrls: [FINANCE, LEGAL, HR],
+      displayName: NAME,
+      confirm: true,
+      forceOrphan: false,
+      hasGrantIssuer: true,
+    });
+
+    await expect(failure).rejects.toThrow(new RegExp(`Already revoked: none\\.`));
+    await expect(failure).rejects.toThrow(new RegExp(`Not yet attempted: ${HR}\\.`));
+    await expect(failure).rejects.toThrow(new RegExp(`Nothing to revoke on: ${LEGAL}\\.`));
+  });
+
+  it("with one site, a failed revoke reads without the per-site lists", async () => {
+    const { graph, calls } = fakeGraph({
+      app: APP,
+      permissions: { "site-fin": [{ permissionId: "perm-fin", appIds: ["app-1"] }] },
+      revokeFailsFor: "site-fin",
+    });
+
+    const failure = runDeleteServerApp(graph, {
+      siteUrls: [FINANCE],
+      displayName: NAME,
+      confirm: true,
+      forceOrphan: false,
+      hasGrantIssuer: true,
+    });
+
+    await expect(failure).rejects.toThrow(new RegExp(`Revoking permission entry perm-fin on ${FINANCE} failed`));
+    await expect(failure).rejects.toThrow(/application app-1 still exists/);
+    await expect(failure).rejects.not.toThrow(/Already revoked|Not yet attempted|Nothing to revoke on/);
+    expect(calls.filter((call) => WRITES.test(call))).toEqual(["deleteSitePermission:site-fin:perm-fin"]);
+  });
+
+  it("tolerates a revoke that finds the entry already gone, carries on, and never calls it revoked", async () => {
+    const { graph, calls } = fakeGraph({
+      app: APP,
+      permissions: {
+        "site-fin": [{ permissionId: "perm-fin", appIds: ["app-1"] }],
+        "site-legal": [{ permissionId: "perm-legal", appIds: ["app-1"] }],
+      },
+      revokeFailsFor: "site-fin",
+      revokeFailStatus: 404,
+    });
+
+    const outcome = await runDeleteServerApp(graph, {
+      siteUrls: [FINANCE, LEGAL],
+      displayName: NAME,
+      confirm: true,
+      forceOrphan: false,
+      hasGrantIssuer: true,
+    });
+
+    expect(outcome).toMatchObject({
+      kind: "torn-down",
+      sites: [
+        { siteUrl: FINANCE, permission: "already-gone" },
+        { siteUrl: LEGAL, permission: "revoked" },
+      ],
+      applicationDeleted: true,
+    });
+    expect(calls.filter((call) => WRITES.test(call))).toEqual([
+      "deleteSitePermission:site-fin:perm-fin",
+      "deleteSitePermission:site-legal:perm-legal",
+      "deleteApplication:obj-1",
+      "purgeDeletedApplication:obj-1",
+    ]);
+
+    const message = describeDeleteServerAppOutcome(outcome, [FINANCE, LEGAL]);
+    expect(message).toContain(`On ${FINANCE} the entry was already gone when this run tried to revoke it.`);
+    expect(message).not.toContain(`Revoked its permission entry on ${FINANCE}`);
+    expect(message).toContain(`Revoked its permission entry on ${LEGAL}.`);
+  });
+
+  it("refuses before any write when two URLs resolve to the same site, naming both as typed", async () => {
+    const { graph, calls } = fakeGraph({
+      app: APP,
+      permissions: { "site-fin": [{ permissionId: "perm-fin", appIds: ["app-1"] }] },
+    });
+    const sameSite = "https://contoso.sharepoint.com/sites/Fin%61nce";
+
+    const failure = runDeleteServerApp(graph, {
+      siteUrls: [FINANCE, sameSite],
+      displayName: NAME,
+      confirm: true,
+      forceOrphan: false,
+      hasGrantIssuer: true,
+    });
+
+    await expect(failure).rejects.toThrow(new RegExp(`${FINANCE} and ${sameSite} name the same site`));
+    await expect(failure).rejects.toThrow(/nothing was changed/i);
+    expect(calls.filter((call) => WRITES.test(call))).toEqual([]);
+  });
+
   it("with --force-orphan, inspects no site and names every site in the residue", async () => {
     const { graph, calls } = fakeGraph({ app: APP, permissions: {} });
 
@@ -312,8 +421,8 @@ describe("runDeleteServerApp across several sites", () => {
       kind: "torn-down",
       orphanedPermission: true,
       sites: [
-        { siteUrl: FINANCE, permissionRevoked: false },
-        { siteUrl: LEGAL, permissionRevoked: false },
+        { siteUrl: FINANCE, permission: "none" },
+        { siteUrl: LEGAL, permission: "none" },
       ],
     });
     expect(calls.some((call) => call.startsWith("listSitePermissions"))).toBe(false);

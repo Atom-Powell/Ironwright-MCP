@@ -6,7 +6,7 @@
 import { SetupFailedError } from "./errors.js";
 import { GraphRequestError } from "../graph/errors.js";
 import type { DeleteBootstrapOutcome, DeleteServerAppOutcome } from "./run.js";
-import { BOOTSTRAP_SECRET_LIFETIME_DAYS, listSiteUrls } from "./steps.js";
+import { BOOTSTRAP_SECRET_LIFETIME_DAYS, listSiteUrls, siteIdPathFromUrl } from "./steps.js";
 
 export interface ParsedArgs {
   tenantId: string;
@@ -134,7 +134,8 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     // the URL's shape rather than the list.
     throw new Error(
       `--site takes one site for setup, and "${siteUrl}" holds a comma. Run setup once per site; only ` +
-        "--delete-server-app takes a comma-separated list, because a teardown has to revoke every site's grant.",
+        "--delete-server-app takes a comma-separated list, because a teardown has to revoke every site's grant. " +
+        "If the site's own path really holds a comma, give it as %2C.",
     );
   } else {
     siteUrls = siteUrl === "" ? [] : [siteUrl];
@@ -158,31 +159,42 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
 }
 
 /**
- * The --delete-server-app site list. Split on commas only, unlike IW_SITE_URL,
- * which also splits on whitespace: on a command line a space has already ended
- * the argument, so the only whitespace left inside it is padding around a
- * comma. A duplicate is refused rather than silently collapsed the way
- * IW_SITE_URL collapses one, because here each entry drives a revoke and a
- * repeated site usually means a different one was meant.
+ * The --delete-server-app site list. Split on commas and whitespace, the same
+ * separators as IW_SITE_URL, so that variable's value pasted inside quotes,
+ * where a space or a new line does not end the argument, names the same
+ * sites the server was granted. A duplicate is refused rather than silently
+ * collapsed the way IW_SITE_URL collapses one, because here each entry drives
+ * a revoke and a repeated site usually means a different one was meant.
  */
 function parseTeardownSites(value: string): string[] {
-  const urls = value
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
+  const urls = value.split(/[,\s]+/).filter((entry) => entry.length > 0);
   if (urls.length === 0) throw new Error("missing required argument --site=<value>");
   const seen = new Set<string>();
   for (const url of urls) {
-    // SharePoint host names and site paths are case-insensitive, and a
-    // trailing slash names the same site, so either spelling reaches the same
-    // permission entry.
-    const key = url.toLowerCase().replace(/\/+$/, "");
+    // Compared in the form resolveSite receives, lowercased: SharePoint host
+    // names and site paths are case-insensitive, and that form already drops a
+    // trailing slash, a query string and a fragment, none of which name a
+    // different site. Spellings this cannot see through, such as a percent
+    // encoded letter, are caught by runDeleteServerApp's own check on the
+    // resolved site id.
+    const key = sitePathKey(url);
     if (seen.has(key)) {
       throw new Error(`--site names ${url} twice. List each granted site once, separated by commas.`);
     }
     seen.add(key);
   }
   return urls;
+}
+
+function sitePathKey(url: string): string {
+  try {
+    return siteIdPathFromUrl(url).toLowerCase();
+  } catch {
+    // Not a URL at all. Left for resolveSite to refuse with its own message,
+    // so compare the text as typed rather than failing here for a different
+    // reason than a duplicate.
+    return url.toLowerCase();
+  }
 }
 
 interface TokenErrorBody {
@@ -549,8 +561,8 @@ export function describeDeleteServerAppOutcome(outcome: DeleteServerAppOutcome, 
   }
 
   // Gated on orphanedPermission first, the same way the planned branch gates on
-  // permissionsInspected: permissionRevoked can only be true when a grant
-  // issuer was configured, and orphanedPermission is set from the absence of
+  // permissionsInspected: a site's permission can be other than none only
+  // when a grant issuer was configured, and orphanedPermission is set from the absence of
   // one, so the two clauses below and the residue clause after them would
   // otherwise both fire on every --force-orphan teardown, one asserting no
   // permission was granted and the other saying nobody looked. Only one of
@@ -562,11 +574,15 @@ export function describeDeleteServerAppOutcome(outcome: DeleteServerAppOutcome, 
       "grant issuer."
     : outcome.sites
         .map((site) =>
-          site.permissionRevoked
+          site.permission === "revoked"
             ? `Revoked its permission entry on ${site.siteUrl}.`
-            : // "there" only with several sites, where it says which one;
-              // with one site the sentence reads as it always has.
-              `No permission entry on ${site.siteUrl} was granted to it, so none was revoked${several ? " there" : ""}.`,
+            : site.permission === "already-gone"
+              ? // Never "Revoked": the revoke answered not found, so this run
+                // watched no entry being removed.
+                `On ${site.siteUrl} the entry was already gone when this run tried to revoke it.`
+              : // "there" only with several sites, where it says which one;
+                // with one site the sentence reads as it always has.
+                `No permission entry on ${site.siteUrl} was granted to it, so none was revoked${several ? " there" : ""}.`,
         )
         .join(" ");
 

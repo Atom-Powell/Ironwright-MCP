@@ -160,7 +160,7 @@ describe("runDeleteServerApp", () => {
       kind: "torn-down",
       appId: "app-1",
       objectId: "obj-1",
-      sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permissionRevoked: true }],
+      sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permission: "revoked" }],
       orphanedPermission: false,
       applicationDeleted: true,
       purgeConfirmed: true,
@@ -203,6 +203,6 @@ describe("runDeleteServerApp", () => {
       hasGrantIssuer: true,
     });
 
-    expect(outcome).toMatchObject({ kind: "torn-down", sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permissionRevoked: false }], orphanedPermission: false });
+    expect(outcome).toMatchObject({ kind: "torn-down", sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permission: "none" }], orphanedPermission: false });
   });
 });

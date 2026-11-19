@@ -394,11 +394,13 @@ export type DeleteServerAppOutcome =
       appId: string;
       objectId: string;
       /**
-       * One entry per site, in the order given. `permissionRevoked` is false
-       * both where the listing found no entry and, under orphanedPermission,
-       * where nobody listed; orphanedPermission is what tells those apart.
+       * One entry per site, in the order given. `none` covers both a site
+       * whose listing found no entry and, under orphanedPermission, one nobody
+       * listed; orphanedPermission is what tells those apart. `already-gone`
+       * is an entry the listing found that the revoke then answered 404 for:
+       * this run did not remove it and must not say it did.
        */
-      sites: Array<{ siteUrl: string; permissionRevoked: boolean }>;
+      sites: Array<{ siteUrl: string; permission: "revoked" | "already-gone" | "none" }>;
       orphanedPermission: boolean;
       /**
        * False when deleteApplication answered 404: the application was already
@@ -545,6 +547,20 @@ export async function runDeleteServerApp(
       throw readFailure("Resolving", siteUrl, error);
     }
 
+    // The parser refuses the spellings it can see through, but Graph resolves
+    // more than text comparison can, a percent encoded letter for one. Two
+    // URLs for one site would revoke its entry and then fail on the second
+    // attempt after the first had already written, so it is refused here,
+    // while nothing has been written yet.
+    const earlier = sites.find((site) => site.siteId === siteId);
+    if (earlier !== undefined) {
+      throw new Error(
+        `${earlier.siteUrl} and ${siteUrl} name the same site, so nothing was changed: no permission was ` +
+          `revoked on any site and application ${existing.appId} still exists. List each granted site once ` +
+          "and run this again.",
+      );
+    }
+
     let permissionId: string | undefined;
     if (args.hasGrantIssuer) {
       try {
@@ -554,6 +570,7 @@ export async function runDeleteServerApp(
         throw readFailure("Listing the permissions on", siteUrl, error);
       }
     }
+
     sites.push({ siteUrl, siteId, permissionId });
   }
 
@@ -568,10 +585,10 @@ export async function runDeleteServerApp(
   }
 
   const revoked: string[] = [];
-  const results: Array<{ siteUrl: string; permissionRevoked: boolean }> = [];
+  const results: Array<{ siteUrl: string; permission: "revoked" | "already-gone" | "none" }> = [];
   for (const [index, site] of sites.entries()) {
     if (site.permissionId === undefined) {
-      results.push({ siteUrl: site.siteUrl, permissionRevoked: false });
+      results.push({ siteUrl: site.siteUrl, permission: "none" });
       continue;
     }
     // Named by the site URL the operator typed, not by siteId: every other
@@ -581,18 +598,32 @@ export async function runDeleteServerApp(
     try {
       await graph.deleteSitePermission(site.siteId, site.permissionId);
     } catch (error) {
+      // A 404 means the entry was gone before this revoke reached it, most
+      // likely a concurrent run or a removal by hand since the listing. What
+      // the operator asked for is true on this site, so the run carries on,
+      // but this run did not remove it and records that it did not.
+      if (statusOf(error) === 404) {
+        results.push({ siteUrl: site.siteUrl, permission: "already-gone" });
+        continue;
+      }
       // The application is deliberately left in place. Its app id is the only
       // thing a re-run can match the remaining entries by, so deleting it now
       // would turn a recoverable stop into permanent residue on every site
       // after this one.
-      const remaining = sites.slice(index + 1).filter((later) => later.permissionId !== undefined);
-      const remainingUrls = remaining.map((later) => later.siteUrl);
+      const later = sites.slice(index + 1);
+      const pending = later.filter((next) => next.permissionId !== undefined).map((next) => next.siteUrl);
+      const empty = later.filter((next) => next.permissionId === undefined).map((next) => next.siteUrl);
+      // The per-site lists only say something when there are other sites; with
+      // one the message reads as a single-site teardown always has.
+      const progress = several
+        ? `Already revoked: ${revoked.length === 0 ? "none" : listSiteUrls(revoked)}. ` +
+          `Not yet attempted: ${pending.length === 0 ? "none" : listSiteUrls(pending)}. ` +
+          (empty.length === 0 ? "" : `Nothing to revoke on: ${listSiteUrls(empty)}. `)
+        : "";
       throw new Error(
         `Revoking permission entry ${site.permissionId} on ${site.siteUrl} failed, so this run stopped there ` +
           `and did not delete the application: application ${existing.appId} still exists, and it is the only ` +
-          "key a re-run has to find the remaining entries by. " +
-          `Already revoked: ${revoked.length === 0 ? "none" : listSiteUrls(revoked)}. ` +
-          `Not yet attempted: ${remainingUrls.length === 0 ? "none" : listSiteUrls(remainingUrls)}. ` +
+          `key a re-run has to find the remaining entries by. ${progress}` +
           "Re-running is safe: it reads every site again, revokes what is still there, then deletes and purges " +
           `the application. Underlying failure: ${detail(error)}`,
         // Preserved so describeSetupFailure can still reach the site
@@ -602,7 +633,7 @@ export async function runDeleteServerApp(
       );
     }
     revoked.push(site.siteUrl);
-    results.push({ siteUrl: site.siteUrl, permissionRevoked: true });
+    results.push({ siteUrl: site.siteUrl, permission: "revoked" });
   }
 
   notice(`Deleting application ${existing.appId} (object id ${existing.objectId}).`);
