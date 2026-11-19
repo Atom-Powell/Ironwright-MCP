@@ -369,10 +369,36 @@ site gets decommissioned. Dry run is the default here, the same as every other d
 in this project: omit `--confirm` first to see what the command found and exactly what it would
 do, and pass `--confirm` only once that preview looks right.
 
+In this mode `--site` takes every site the application was granted, not just one: a deployment
+with a site per department lists them all, separated by commas, the same sites `IW_SITE_URL`
+names on the server. Spaces and new lines separate them too, as they do in `IW_SITE_URL`, so that
+variable's value can be pasted inside quotes.
+
+```bash
+npm run setup -- --tenant=<tenant-id> --site=https://<tenant>.sharepoint.com/sites/Finance,https://<tenant>.sharepoint.com/sites/Legal --delete-server-app
+```
+
+Name them all in one run. Each entry is found by the application's id, so once the application is
+deleted nothing can find the entries on the sites a run left out; they stay behind naming an
+identity that no longer exists. A site named twice is refused, whether the two spellings differ
+only by case, a trailing slash, a query string or a fragment, or resolve to the same site some
+other way. The normal run still grants one site per run and refuses a list; a site whose path
+really holds a comma is given with the comma written as `%2C`.
+
+Every site is read before anything is written: the command resolves each site and lists its
+permissions first, and if any of those reads fails it stops and names the site, with nothing
+changed. With `--confirm` it then revokes each site's entry in the order given. A revoke that
+finds the entry already gone, removed by hand or by another run since the listing, is reported as
+already gone rather than as revoked, and the run carries on. If a revoke fails any other way it
+stops there and does not delete the application, because the application's id is the only key a
+re-run has to find the entries still standing; the failure names the sites already revoked, the
+one that failed, the ones not yet attempted, and separately the later sites that had no entry
+and so had nothing to revoke. Re-running the same command is safe.
+
 The order it acts in is forced, not a preference. The per-site permission entry is matched to the
 application by its application id, so revoking it has to happen while that identity still exists;
 deleting the application first would leave an entry naming an id nothing can look up again. So
-this command lists the site's permissions and revokes the matching entry, then deletes the
+this command lists each site's permissions and revokes the matching entries, then deletes the
 application, then purges it from the tenant's deleted items. The purge is not optional cleanup:
 Entra's delete of an application registration is a soft delete, and the object stays restorable,
 with its credentials, in the tenant's deleted items for 30 days. Stopping at the delete schedules

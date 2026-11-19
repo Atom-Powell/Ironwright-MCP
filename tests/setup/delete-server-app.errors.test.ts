@@ -101,7 +101,7 @@ describe("runDeleteServerApp errors", () => {
 
     await expect(
       runDeleteServerApp(graph, {
-        siteUrl: "https://contoso.sharepoint.com/sites/Example",
+        siteUrls: ["https://contoso.sharepoint.com/sites/Example"],
         displayName: "Ironwright Repository Reconciliation",
         confirm: true,
         forceOrphan: false,
@@ -123,7 +123,7 @@ describe("runDeleteServerApp errors", () => {
     });
 
     const failure = runDeleteServerApp(graph, {
-      siteUrl: "https://contoso.sharepoint.com/sites/Example",
+      siteUrls: ["https://contoso.sharepoint.com/sites/Example"],
       displayName: "Ironwright Repository Reconciliation",
       confirm: true,
       forceOrphan: false,
@@ -141,14 +141,14 @@ describe("runDeleteServerApp errors", () => {
     });
 
     const outcome = await runDeleteServerApp(graph, {
-      siteUrl: "https://contoso.sharepoint.com/sites/Example",
+      siteUrls: ["https://contoso.sharepoint.com/sites/Example"],
       displayName: "Ironwright Repository Reconciliation",
       confirm: true,
       forceOrphan: true,
       hasGrantIssuer: false,
     });
 
-    expect(outcome).toMatchObject({ kind: "torn-down", permissionRevoked: false, orphanedPermission: true });
+    expect(outcome).toMatchObject({ kind: "torn-down", sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permission: "none" }], orphanedPermission: true });
     expect(calls).toContain("deleteApplication:obj-1");
     expect(calls).toContain("purgeDeletedApplication:obj-1");
     expect(calls).not.toContain("listSitePermissions:site-1");
@@ -161,7 +161,7 @@ describe("runDeleteServerApp errors", () => {
     });
 
     const outcome = await runDeleteServerApp(graph, {
-      siteUrl: "https://contoso.sharepoint.com/sites/Example",
+      siteUrls: ["https://contoso.sharepoint.com/sites/Example"],
       displayName: "Ironwright Repository Reconciliation",
       confirm: false,
       forceOrphan: true,
@@ -172,7 +172,7 @@ describe("runDeleteServerApp errors", () => {
       kind: "planned",
       appId: "app-1",
       objectId: "obj-1",
-      permissionId: undefined,
+      sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permissionId: undefined }],
       permissionsInspected: false,
     });
     expect(calls).not.toContain("listSitePermissions:site-1");
@@ -186,7 +186,7 @@ describe("runDeleteServerApp errors", () => {
     });
 
     const outcome = await runDeleteServerApp(graph, {
-      siteUrl: "https://contoso.sharepoint.com/sites/Example",
+      siteUrls: ["https://contoso.sharepoint.com/sites/Example"],
       displayName: "Ironwright Repository Reconciliation",
       confirm: true,
       forceOrphan: false,
@@ -207,14 +207,14 @@ describe("runDeleteServerApp errors", () => {
     });
 
     const outcome = await runDeleteServerApp(graph, {
-      siteUrl: "https://contoso.sharepoint.com/sites/Example",
+      siteUrls: ["https://contoso.sharepoint.com/sites/Example"],
       displayName: "Ironwright Repository Reconciliation",
       confirm: true,
       forceOrphan: false,
       hasGrantIssuer: true,
     });
 
-    const message = describeDeleteServerAppOutcome(outcome, "https://contoso.sharepoint.com/sites/Example");
+    const message = describeDeleteServerAppOutcome(outcome, ["https://contoso.sharepoint.com/sites/Example"]);
 
     expect(message).toMatch(/already gone when this run tried to delete it/i);
     expect(message).toMatch(/this run did not delete it/i);
@@ -230,7 +230,7 @@ describe("runDeleteServerApp errors", () => {
 
     await expect(
       runDeleteServerApp(graph, {
-        siteUrl: "https://contoso.sharepoint.com/sites/Example",
+        siteUrls: ["https://contoso.sharepoint.com/sites/Example"],
         displayName: "Ironwright Repository Reconciliation",
         confirm: true,
         forceOrphan: false,
@@ -252,14 +252,14 @@ describe("runDeleteServerApp errors", () => {
     });
 
     const outcome = await runDeleteServerApp(graph, {
-      siteUrl: "https://contoso.sharepoint.com/sites/Example",
+      siteUrls: ["https://contoso.sharepoint.com/sites/Example"],
       displayName: "Ironwright Repository Reconciliation",
       confirm: true,
       forceOrphan: false,
       hasGrantIssuer: true,
     });
 
-    const message = describeDeleteServerAppOutcome(outcome, "https://contoso.sharepoint.com/sites/Example");
+    const message = describeDeleteServerAppOutcome(outcome, ["https://contoso.sharepoint.com/sites/Example"]);
 
     expect(message).toMatch(/Deleted application app-1/);
     expect(message).toMatch(/purge returned not found/i);
@@ -289,7 +289,7 @@ describe("runDeleteServerApp errors", () => {
     const outcome = await runDeleteServerApp(
       graph,
       {
-        siteUrl: "https://contoso.sharepoint.com/sites/Example",
+        siteUrls: ["https://contoso.sharepoint.com/sites/Example"],
         displayName: "Ironwright Repository Reconciliation",
         confirm: true,
         forceOrphan: false,
@@ -311,7 +311,7 @@ describe("runDeleteServerApp errors", () => {
 
     // Unlike the no-code 404 above, this run genuinely slept through the whole
     // ladder, so the message may say so.
-    const message = describeDeleteServerAppOutcome(outcome, "https://contoso.sharepoint.com/sites/Example");
+    const message = describeDeleteServerAppOutcome(outcome, ["https://contoso.sharepoint.com/sites/Example"]);
     expect(message).toMatch(/even after retrying/i);
   });
 
@@ -326,7 +326,7 @@ describe("runDeleteServerApp errors", () => {
     const outcome = await runDeleteServerApp(
       graph,
       {
-        siteUrl: "https://contoso.sharepoint.com/sites/Example",
+        siteUrls: ["https://contoso.sharepoint.com/sites/Example"],
         displayName: "Ironwright Repository Reconciliation",
         confirm: true,
         forceOrphan: false,
@@ -352,7 +352,7 @@ describe("runDeleteServerApp errors", () => {
     });
 
     const failure = runDeleteServerApp(graph, {
-      siteUrl: "https://contoso.sharepoint.com/sites/Example",
+      siteUrls: ["https://contoso.sharepoint.com/sites/Example"],
       displayName: "Ironwright Repository Reconciliation",
       confirm: true,
       forceOrphan: false,
@@ -371,7 +371,7 @@ describe("runDeleteServerApp errors", () => {
     });
 
     const failure = runDeleteServerApp(graph, {
-      siteUrl: "https://contoso.sharepoint.com/sites/Example",
+      siteUrls: ["https://contoso.sharepoint.com/sites/Example"],
       displayName: "Ironwright Repository Reconciliation",
       confirm: true,
       forceOrphan: false,
@@ -393,7 +393,7 @@ describe("runDeleteServerApp errors", () => {
     });
 
     const failure = runDeleteServerApp(graph, {
-      siteUrl: "https://contoso.sharepoint.com/sites/Example",
+      siteUrls: ["https://contoso.sharepoint.com/sites/Example"],
       displayName: "Ironwright Repository Reconciliation",
       confirm: true,
       forceOrphan: false,
