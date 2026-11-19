@@ -5,14 +5,16 @@ import { describeToolFailure, type FailureSubject } from "../errors.js";
 import { createListItem, odataString, queryListItems, updateListItemFields, type ListItemRecord } from "../../graph/lists.js";
 import { isAssessmentProfile } from "../../domain/profile/library.js";
 import { fieldsFor, findingsPrecondition } from "../../domain/assessment/state.js";
-import { resolveAssessmentContext } from "./context.js";
+import { NotAnAssessmentProfileError, resolveAssessmentContext } from "./context.js";
 import { findAssessmentById, readAssessmentState } from "./read-state.js";
 import { appendJournal } from "./journal.js";
 import { refusalResult } from "./refusal.js";
 import { itemChangedText, itemWithoutEtagText } from "./item-precondition.js";
 import { withAssessmentLock } from "./keyed-lock.js";
 
-export const RECORD_INPUT_CONSTRAINTS = "Every finding's risk is one of the profile's risk labels, and no two findings share a key.";
+export const RECORD_INPUT_CONSTRAINTS =
+  "Findings come either as the findings list or as one finding in findingKey, findingObservation, findingRisk and findingRecommendation, never both; for one finding, prefer the four plain fields. " +
+  "Every finding's risk is one of the profile's risk labels, and no two findings share a key.";
 
 export const FINDING_SCHEMA = z.object({
   key: z
@@ -27,7 +29,24 @@ export const FINDING_SCHEMA = z.object({
 export const RECORD_INPUT_SCHEMA = {
   profileId: z.string().min(1).describe('For example "vendor-assessments".'),
   assessmentId: z.string().min(1).describe('For example "ASM-2026-00002".'),
-  findings: z.array(FINDING_SCHEMA).min(1).max(100).describe("One entry per finding, for example a list of three."),
+  findings: z
+    .array(FINDING_SCHEMA)
+    .min(1)
+    .max(100)
+    .optional()
+    .describe("One entry per finding, for example a list of three. Leave it out to send one finding as findingKey, findingObservation, findingRisk and findingRecommendation instead."),
+  // One finding as plain fields. Copilot Studio could not fill the list above on 2026-11-18: it
+  // asked the user again for a key it had been given, then failed before sending anything.
+  findingKey: z
+    .string()
+    .regex(/^[A-Za-z0-9._-]{1,64}$/)
+    .optional()
+    .describe('The key of a single finding sent as plain fields, for example "F-1". Choose it yourself, F-1, F-2 and so on in order; reuse a key to update that finding.'),
+  // Prefixed, not the list form's own names: transition_assessment takes a top-level risk that
+  // means the assessment's overall risk, and an agent carrying it here should not read as half a finding.
+  findingObservation: z.string().min(1).max(20000).optional().describe('A single finding\'s observation, for example "Invoices were forwarded to an external address for six days."'),
+  findingRisk: z.string().min(1).optional().describe('A single finding\'s risk, one of the profile\'s risk labels, for example "High".'),
+  findingRecommendation: z.string().min(1).max(20000).optional().describe('A single finding\'s recommendation, for example "Block external auto-forwarding."'),
   summary: z.string().min(1).max(20000).describe('The assessment summary written to the assessment item, for example "Three findings, one high."'),
 } satisfies z.ZodRawShape;
 
@@ -51,6 +70,30 @@ export const RECORD_OUTPUT_SCHEMA = {
 
 const InputObject = z.object(RECORD_INPUT_SCHEMA);
 const TOOL = "record_findings";
+
+type Finding = z.infer<typeof FINDING_SCHEMA>;
+type Args = Omit<z.infer<typeof InputObject>, "findings"> & { findings: Finding[] };
+
+const FLAT_FIELDS = ["findingKey", "findingObservation", "findingRisk", "findingRecommendation"] as const;
+
+function inWords(names: readonly string[]): string {
+  return names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)!}`;
+}
+
+/** The findings this call carries, in one shape, or the words for why it carries none it can use. */
+export function findingsOf(args: z.infer<typeof InputObject>): Finding[] | string {
+  const flatGiven = FLAT_FIELDS.filter((field) => args[field] !== undefined);
+  if (args.findings !== undefined && flatGiven.length > 0) {
+    return `${RECORD_INPUT_CONSTRAINTS} The findings list and ${inWords(flatGiven)} were both given. Nothing was read or written.`;
+  }
+  if (args.findings !== undefined) return args.findings;
+  if (flatGiven.length === 0) return `${RECORD_INPUT_CONSTRAINTS} Neither was given. Nothing was read or written.`;
+  const missing = FLAT_FIELDS.filter((field) => args[field] === undefined);
+  if (missing.length > 0) {
+    return `${RECORD_INPUT_CONSTRAINTS} A single finding needs all four; ${inWords(missing)} ${missing.length === 1 ? "is" : "are"} missing. Nothing was read or written.`;
+  }
+  return [{ key: args.findingKey!, observation: args.findingObservation!, risk: args.findingRisk!, recommendation: args.findingRecommendation! }];
+}
 const STAGE = "FINDINGS";
 
 type Outcome = "created" | "updated" | "unchanged";
@@ -69,10 +112,10 @@ export function firstMismatch(sent: Record<string, string>, answered: Record<str
 
 /**
  * Checked from the registry before any Graph request, so a label or key the
- * call cannot use costs nothing. Undefined for a profile that is not an
- * assessment profile, which resolveAssessmentContext then reports in its own words.
+ * call cannot use costs nothing. The profile's kind was checked before this
+ * runs, so the profile here is an assessment profile.
  */
-function inputProblem(context: ToolContext, args: z.infer<typeof InputObject>): string | undefined {
+function inputProblem(context: ToolContext, args: Args): string | undefined {
   const profile = context.profiles.getAny(args.profileId);
   if (!isAssessmentProfile(profile)) return undefined;
   const risks = profile.lifecycle.risks;
@@ -98,11 +141,19 @@ export async function runRecordFindings(input: unknown, context: ToolContext): P
   return withAssessmentLock(args.profileId, args.assessmentId, () => recordFindings(args, context));
 }
 
-async function recordFindings(args: z.infer<typeof InputObject>, context: ToolContext): Promise<CallToolResult> {
-  const subject: FailureSubject = { tool: TOOL, profileId: args.profileId };
+async function recordFindings(parsed: z.infer<typeof InputObject>, context: ToolContext): Promise<CallToolResult> {
+  const subject: FailureSubject = { tool: TOOL, profileId: parsed.profileId };
   const before = context.graph.requests();
 
   try {
+    // The profile first: a profile of another kind is refused in the words every assessment tool
+    // uses, whatever shape the findings came in. Both checks come before any Graph request.
+    const profile = context.profiles.getAny(parsed.profileId);
+    if (!isAssessmentProfile(profile)) throw new NotAnAssessmentProfileError(parsed.profileId, profile.kind ?? "compliance");
+    const findings = findingsOf(parsed);
+    if (typeof findings === "string") return failure(findings);
+    const args: Args = { ...parsed, findings };
+
     const problem = inputProblem(context, args);
     if (problem !== undefined) return failure(problem);
 
@@ -268,7 +319,7 @@ async function recordFindings(args: z.infer<typeof InputObject>, context: ToolCo
     const text = `Findings for ${assessmentId}: ${tally}.${written} ${closing}`;
     return { structuredContent: output, content: [{ type: "text" as const, text }] };
   } catch (error) {
-    console.error(`${TOOL} failed for profile "${args.profileId}"`, error);
+    console.error(`${TOOL} failed for profile "${parsed.profileId}"`, error);
     return { isError: true, content: [{ type: "text" as const, text: describeToolFailure(error, subject) }] };
   }
 }

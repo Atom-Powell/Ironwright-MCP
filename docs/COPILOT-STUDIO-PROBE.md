@@ -340,6 +340,39 @@ INC-2026-00001, client "Pilot Check 1118T1714", status Closed, disposition Resol
 the Incidents list in 3 Graph requests. The agent mapped "Service Desk" and "closed" to the right
 profile and label without being told either.
 
+### The first writes through Copilot Studio, and the input shape it could not fill
+
+The same evening, with the server started with writes on and only the Service Desk site's grant
+raised to write (it was put back to read when the server was stopped), the demo script's first
+steps were run in the test pane.
+
+- **Writes landed.** "Open an incident for client Northwind Dental: a suspicious inbox forwarding
+  rule was found on the office manager's mailbox." The agent first called
+  `describe_assessment_workflow`, chose the `service-desk-incidents` profile by itself, and called
+  `open_assessment`: INC-2026-00002, status Open, the list item and the workspace folders, read back
+  (20 Graph requests). "Open it again." returned the same incident and created nothing (8). "Record
+  the timeline: ..." saved `Record/INC-2026-00002_Timeline.md` and verified it (14). The server's own
+  log has one line per call with its outcome and Graph request count.
+- **A tool card's connection is separate from the test session's.** Deleting old connections left
+  the tool's own page saying "The connection for this tool is no longer valid (it may have been
+  deleted or its authorization revoked)", and picking the remaining connection there did not take.
+  The test pane still worked, because it uses the session's connection and lists the server's tools
+  afresh on every run; the write tools, which the server advertises only with writes on, were
+  available without refreshing the page.
+- **Copilot Studio cannot fill a list of records.** "Record a finding: ... Risk High.
+  Recommendation: ..." made the agent ask "Please provide the key for the findings within the
+  assessment, such as F-1". Told "Use F-1.", it answered "Sorry, something went wrong. Error code:
+  SystemError"; the activity view showed `record_findings` prepared with every value, a key it had
+  invented itself included, and "The tool action completed with status Failed. Consuming 0
+  tokens". Asked again, it asked for the key again. The server's log shows no `record_findings` call
+  at all: the failure is inside Copilot Studio, before sending. `findings` was the only input made
+  of a list of objects; every tool with flat inputs worked.
+- **The response.** `record_findings` now also accepts one finding as four plain top-level fields,
+  `findingKey`, `findingObservation`, `findingRisk` and `findingRecommendation`, beside the list,
+  with exactly one form per call. The prefix keeps `findingRisk` apart from `transition_assessment`'s
+  top-level `risk`, the assessment's overall risk. Recorded here before it has been tried in Copilot Studio; the next write session tries
+  it from step 5 of the demo script on INC-2026-00002.
+
 ## Running the probe server
 
 The probe server is `scripts/copilot-probe/`. It exposes two dummy tools (`get_fruit_stock` and
