@@ -80,6 +80,21 @@ export const AssessmentProfileSchema = z
             columns: z.object({ assessmentId: ColumnName, findingKey: ColumnName, observation: ColumnName, risk: ColumnName, recommendation: ColumnName }).strict(),
           })
           .strict(),
+        // Optional: named, the journal is kept in this list on the workflow's own site, so it
+        // survives a restart with no table store; left out, it is kept in the state store as before.
+        // docs/superpowers/specs/2026-11-18-journal-in-a-sharepoint-list-design.md
+        journal: z
+          .object({
+            name: z.string().min(1),
+            columns: z
+              .object({
+                assessmentId: ColumnName, at: ColumnName, correlationId: ColumnName, stage: ColumnName, operation: ColumnName, target: ColumnName,
+                etagBefore: ColumnName, etagAfter: ColumnName, contentHash: ColumnName, priorContentHash: ColumnName, versionId: ColumnName,
+              })
+              .strict(),
+          })
+          .strict()
+          .optional(),
       })
       .strict(),
     lifecycle: z
@@ -226,12 +241,13 @@ export const AssessmentProfileSchema = z
       });
     }
 
-    // One list under two roles would mix vendors, assessments and findings in one set of items.
-    const listRoles = ["vendors", "assessments", "findings"] as const;
+    // One list under two roles would mix vendors, assessments, findings and journal entries in one set of items.
+    const listRoles = (["vendors", "assessments", "findings", "journal"] as const).filter((role) => profile.lists[role] !== undefined);
     listRoles.forEach((role, index) => {
-      const earlier = listRoles.slice(0, index).find((other) => profile.lists[other].name.toLowerCase() === profile.lists[role].name.toLowerCase());
+      const name = profile.lists[role]!.name.toLowerCase();
+      const earlier = listRoles.slice(0, index).find((other) => profile.lists[other]!.name.toLowerCase() === name);
       if (earlier !== undefined) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["lists", role, "name"], message: `this is the same list as lists.${earlier}, and each of the three needs its own` });
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["lists", role, "name"], message: `this is the same list as lists.${earlier}, and each list needs its own` });
       }
     });
 

@@ -5,6 +5,7 @@ import { assessmentModule } from "../../src/modules/assessment/index.js";
 import { SERVER_VERSION } from "../../src/version.js";
 import type { JournalEntry } from "../../src/store/types.js";
 import type { SimDeployment } from "./deployment.js";
+import { readJournal } from "../../src/tools/assessment/journal.js";
 
 export const SIM_NOTICE = "Simulated tenant. Nothing here reached Microsoft 365, and nothing here shows how Microsoft Graph behaves.";
 
@@ -12,7 +13,8 @@ export const SIM_NOTICE = "Simulated tenant. Nothing here reached Microsoft 365,
 export async function simState(deployment: SimDeployment): Promise<Record<string, unknown>> {
   const { sim, context, profile } = deployment;
   const lists: Record<string, unknown> = {};
-  for (const name of [profile.lists.vendors.name, profile.lists.assessments.name, profile.lists.findings.name]) lists[name] = sim.listItems(name);
+  const names = [profile.lists.vendors.name, profile.lists.assessments.name, profile.lists.findings.name, ...(profile.lists.journal === undefined ? [] : [profile.lists.journal.name])];
+  for (const name of names) lists[name] = sim.listItems(name);
 
   // The journal is keyed by assessment id, and by two placeholders for the writes an open makes
   // before the id exists.
@@ -20,7 +22,8 @@ export async function simState(deployment: SimDeployment): Promise<Record<string
   const keys = ["(vendor)", "(unassigned)", ...sim.listItems(profile.lists.assessments.name).flatMap((item) => (typeof item.fields[idColumn] === "string" ? [item.fields[idColumn]] : []))];
   const journal: Record<string, JournalEntry[]> = {};
   for (const key of keys) {
-    const entries = await context.store.listJournal(profile.profileId, key);
+    // Through the journal's own reader, so a profile that keeps it in a list is shown from the list.
+    const entries = await readJournal(context, { profile, siteId: sim.siteId, driveId: sim.driveId, correlationId: "sim-state", now: context.now() }, key);
     if (entries.length > 0) journal[key] = entries;
   }
   return { notice: SIM_NOTICE, profileId: profile.profileId, lists, library: sim.tree(), journal };

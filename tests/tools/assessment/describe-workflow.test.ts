@@ -75,6 +75,16 @@ describe("describe_assessment_workflow", () => {
     expect(resultText(result)).toContain("publication is produced outside the server and only verified.");
   });
 
+  it("names the journal list when the profile keeps the journal in one", async () => {
+    const withJournal = read("assessment-example.json") as { lists: Record<string, unknown> } & Record<string, unknown>;
+    withJournal.lists = { ...withJournal.lists, journal: { name: "Journal", columns: { assessmentId: "A", at: "B", correlationId: "C", stage: "D", operation: "E", target: "F", etagBefore: "G", etagAfter: "H", contentHash: "I", priorContentHash: "J", versionId: "K" } } };
+    const profiles = createProfileRegistry([{ source: "j.json", contents: withJournal }], SITE);
+
+    const result = await runDescribeAssessmentWorkflow({}, createFakeToolContext({ profiles }));
+
+    expect((result.structuredContent as { workflows: Array<{ lists: Record<string, string> }> }).workflows[0]!.lists.journal).toBe("Journal");
+  });
+
   it("says a stage that waits on nothing waits on no artifact", async () => {
     const open = { ...read("assessment-example.json"), profileId: "open-gates" } as unknown as { lifecycle: Record<string, unknown> } & Record<string, unknown>;
     open.lifecycle = { ...open.lifecycle, gates: { findings: [], provisional: [], completed: ["dossier"] }, external: [] };

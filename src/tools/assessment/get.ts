@@ -10,6 +10,7 @@ import { resolveAssessmentContext } from "./context.js";
 import { findAssessmentById, findVendor, readAssessmentState } from "./read-state.js";
 import { ARTIFACT_PRESENCE_SHAPE, ASSESSMENT_SUMMARY_SHAPE, FINDING_READ_SHAPE, JOURNAL_ENTRY_SHAPE, JOURNAL_SUMMARY_SHAPE, READINESS_SHAPE } from "./output.js";
 import { inWords as joined } from "../../domain/words.js";
+import { readJournal } from "./journal.js";
 
 export const GET_INPUT_CONSTRAINTS = "Exactly one of assessmentId, vendor or status is given, and include is given only with assessmentId.";
 
@@ -92,7 +93,7 @@ export function assessmentSummary(record: AssessmentRecord): z.infer<z.ZodObject
 function journalSummary(entries: readonly JournalEntry[]): z.infer<z.ZodObject<typeof JOURNAL_SUMMARY_SHAPE>> {
   const byOperation: Record<string, number> = {};
   for (const entry of entries) byOperation[entry.operation] = (byOperation[entry.operation] ?? 0) + 1;
-  // listJournal returns entries ascending by `at`, so the last is the latest.
+  // readJournal returns entries ascending by `at`, so the last is the latest.
   return { entries: entries.length, lastAt: entries.at(-1)?.at, byOperation };
 }
 
@@ -152,7 +153,7 @@ export async function runGetAssessment(input: unknown, context: ToolContext): Pr
       // The journal is keyed by the assessment id as the list stores it, which the lookup can match in
       // another case; entries written under a placeholder before the id existed are not read here.
       const assessmentId = record.assessmentId;
-      const entries = await context.store.listJournal(ac.profile.profileId, assessmentId);
+      const entries = await readJournal(context, ac, assessmentId);
       const journal = journalSummary(entries);
       const artifacts = state.artifacts.map((artifact) => ({
         kind: artifact.kind,

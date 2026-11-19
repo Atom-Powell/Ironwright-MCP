@@ -130,6 +130,10 @@ export interface WorkflowProfile {
     vendors: { name: string; columns: { folderName: string } };
     assessments: { name: string; columns: Record<"assessmentId" | "vendorFolder" | "scope" | "status" | "state" | "disposition" | "risk" | "summary", string> };
     findings: { name: string; columns: Record<"assessmentId" | "findingKey" | "observation" | "risk" | "recommendation", string> };
+    journal?: {
+      name: string;
+      columns: Record<"assessmentId" | "at" | "correlationId" | "stage" | "operation" | "target" | "etagBefore" | "etagAfter" | "contentHash" | "priorContentHash" | "versionId", string>;
+    };
   };
   lifecycle: {
     status: { inProgress: string; completed: string; provisional: string };
@@ -146,10 +150,14 @@ export interface ListDefinition {
 }
 
 /**
- * The three lists a profile names, with the columns it maps, as Graph creates
- * a list. Every column is text; the three that hold prose take several lines,
- * since the module compares what it sent with what Graph answers exactly
- * (measured 2026-11-08). Title is SharePoint's own and is not created.
+ * The lists a profile names, with the columns it maps, as Graph creates a
+ * list: the three every workflow has, and the journal list when the profile
+ * names one. Every column is text; the three that hold prose take several
+ * lines, since the module compares what it sent with what Graph answers
+ * exactly (measured 2026-11-08). The journal's id column is created indexed,
+ * since the journal is read by filtering on it, and its target takes several
+ * lines, since a library path can pass 255 characters (both measured
+ * 2026-11-18, probe J1 to J4). Title is SharePoint's own and is not created.
  */
 export function listDefinitionsFor(profile: WorkflowProfile): ListDefinition[] {
   const text = (name: string, multiline = false): unknown => (multiline ? { name, text: { allowMultipleLines: true } } : { name, text: {} });
@@ -160,7 +168,19 @@ export function listDefinitionsFor(profile: WorkflowProfile): ListDefinition[] {
     list(profile.lists.vendors.name, [text(profile.lists.vendors.columns.folderName)]),
     list(profile.lists.assessments.name, [text(a.assessmentId), text(a.vendorFolder), text(a.scope), text(a.status), text(a.state), text(a.disposition), text(a.risk), text(a.summary, true)]),
     list(profile.lists.findings.name, [text(f.assessmentId), text(f.findingKey), text(f.observation, true), text(f.risk), text(f.recommendation, true)]),
+    ...(profile.lists.journal === undefined ? [] : [journalDefinition(profile.lists.journal)]),
   ];
+}
+
+function journalDefinition(journal: NonNullable<WorkflowProfile["lists"]["journal"]>): ListDefinition {
+  const c = journal.columns;
+  const columns = [
+    { name: c.assessmentId, indexed: true, text: {} },
+    ...[c.at, c.correlationId, c.stage, c.operation].map((name) => ({ name, text: {} })),
+    { name: c.target, text: { allowMultipleLines: true } },
+    ...[c.etagBefore, c.etagAfter, c.contentHash, c.priorContentHash, c.versionId].map((name) => ({ name, text: {} })),
+  ];
+  return { displayName: journal.name, body: { displayName: journal.name, list: { template: "genericList" }, columns } };
 }
 
 /**

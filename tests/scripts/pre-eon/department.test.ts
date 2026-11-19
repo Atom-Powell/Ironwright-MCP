@@ -55,6 +55,32 @@ function scripted(rules: Rule[]) {
   };
 }
 
+describe("the journal list in a profile's list definitions", () => {
+  const JOURNAL = {
+    name: "Incident Journal",
+    columns: {
+      assessmentId: "AssessmentId", at: "At", correlationId: "CorrelationId", stage: "Stage", operation: "Operation", target: "Target",
+      etagBefore: "EtagBefore", etagAfter: "EtagAfter", contentHash: "ContentHash", priorContentHash: "PriorContentHash", versionId: "VersionId",
+    },
+  };
+
+  // Probed 2026-11-18 (J1, J2): created this way, the id column reads back indexed and a 400 character target reads back whole.
+  it("adds the journal list, its id column indexed and its target multi line, when the profile names one", () => {
+    const profile = loaded("msp-security-incident.json");
+    const definitions = listDefinitionsFor({ ...profile, lists: { ...profile.lists, journal: JOURNAL } });
+
+    expect(definitions.map((definition) => definition.displayName)).toEqual(["Clients", "Incidents", "Incident Findings", "Incident Journal"]);
+    const columns = (definitions[3]!.body as { columns: Array<Record<string, unknown>> }).columns;
+    expect(columns).toHaveLength(11);
+    expect(columns.find((column) => column.name === "AssessmentId")).toEqual({ name: "AssessmentId", indexed: true, text: {} });
+    expect(columns.find((column) => column.name === "Target")).toEqual({ name: "Target", text: { allowMultipleLines: true } });
+  });
+
+  it("adds nothing when the profile names no journal list", () => {
+    expect(listDefinitionsFor(loaded("msp-security-incident.json")).map((definition) => definition.displayName)).toEqual(["Clients", "Incidents", "Incident Findings"]);
+  });
+});
+
 describe("a grant for the server application on a department's site", () => {
   const lookup: Rule = { method: "GET", includes: "/sites/contoso.sharepoint.com:/sites/Example", answers: [{ id: "site-1" }] };
 

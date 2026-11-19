@@ -71,7 +71,10 @@ The design below works under all three; only the runbook and the setup step diff
 - **Profile schema.** `lists.journal` is optional: `{ name, columns: { assessmentId, at,
   correlationId, stage, operation, target, etagBefore, etagAfter, contentHash, priorContentHash,
   versionId } }`. The same rules the other lists follow apply: no list name used twice, column names
-  from the same pattern. The example profiles gain it.
+  from the same pattern. Amended while building: the example profiles do not gain it. Every
+  lifecycle test is built on them and scripts the Graph requests a tool makes, so a journal list there
+  would rewrite them all for no new evidence; the behavior is tested with a profile that names one,
+  and a deployment's own profiles name it.
 - **A journal sink chosen per profile.** `appendJournal` and `get_assessment`'s read go through one
   function that picks the list when the profile names one and the store otherwise. The store's
   journal methods stay, unchanged, for profiles without a list.
@@ -117,4 +120,6 @@ real journal, and says so at the end.
 
 ## Not established
 
-The probe has run and every assumption held. Nothing is built yet. The ruling on who may edit the journal list still waits; the design works under all three.
+The probe has run and every assumption held. Built the same night against the fakes and the
+simulated tenant, with a test that the journal survives a restart; not yet run against a tenant. The
+ruling on who may edit the journal list still waits; the design works under all three.
