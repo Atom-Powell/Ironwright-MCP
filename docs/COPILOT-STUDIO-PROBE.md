@@ -340,6 +340,68 @@ INC-2026-00001, client "Pilot Check 1118T1714", status Closed, disposition Resol
 the Incidents list in 3 Graph requests. The agent mapped "Service Desk" and "closed" to the right
 profile and label without being told either.
 
+### The first writes through Copilot Studio, and the input shape it could not fill
+
+The same evening, with the server started with writes on and only the Service Desk site's grant
+raised to write (it was put back to read when the server was stopped), the demo script's first
+steps were run in the test pane.
+
+- **Writes landed.** "Open an incident for client Northwind Dental: a suspicious inbox forwarding
+  rule was found on the office manager's mailbox." The agent first called
+  `describe_assessment_workflow`, chose the `service-desk-incidents` profile by itself, and called
+  `open_assessment`: INC-2026-00002, status Open, the list item and the workspace folders, read back
+  (20 Graph requests). "Open it again." returned the same incident and created nothing (8). "Record
+  the timeline: ..." saved `Record/INC-2026-00002_Timeline.md` and verified it (14). The server's own
+  log has one line per call with its outcome and Graph request count.
+- **A tool card's connection is separate from the test session's.** Deleting old connections left
+  the tool's own page saying "The connection for this tool is no longer valid (it may have been
+  deleted or its authorization revoked)", and picking the remaining connection there did not take.
+  The test pane still worked, because it uses the session's connection and lists the server's tools
+  afresh on every run; the write tools, which the server advertises only with writes on, were
+  available without refreshing the page.
+- **Copilot Studio cannot fill a list of records.** "Record a finding: ... Risk High.
+  Recommendation: ..." made the agent ask "Please provide the key for the findings within the
+  assessment, such as F-1". Told "Use F-1.", it answered "Sorry, something went wrong. Error code:
+  SystemError"; the activity view showed `record_findings` prepared with every value, a key it had
+  invented itself included, and "The tool action completed with status Failed. Consuming 0
+  tokens". Asked again, it asked for the key again. The server's log shows no `record_findings` call
+  at all: the failure is inside Copilot Studio, before sending. `findings` was the only input made
+  of a list of objects; every tool with flat inputs worked.
+- **The response.** `record_findings` now also accepts one finding as four plain top-level fields,
+  `findingKey`, `findingObservation`, `findingRisk` and `findingRecommendation`, beside the list,
+  with exactly one form per call. The prefix keeps `findingRisk` apart from `transition_assessment`'s
+  top-level `risk`, the assessment's overall risk. Recorded here before it has been tried in Copilot Studio; the next write session tries
+  it from step 5 of the demo script on INC-2026-00002.
+
+### The whole incident, end to end, through Copilot Studio
+
+A second write session the same night, after the plain-field form of `record_findings` was built,
+finished the demo script on INC-2026-00002. Every step below was a call from Copilot Studio's test
+pane to the server on the developer tenant.
+
+| Step | Asked | What happened |
+|---|---|---|
+| 5 | Record the finding, risk High | `record_findings` with the plain fields, key F-1 chosen by the agent without asking; F-1 created as item 2, the summary and stage FINDINGS recorded, in 1.77 s |
+| 6 | Save the containment notes, then mark it contained | the containment document saved and verified; status Open to Contained, disposition Resolved with follow up, risk High |
+| 7 | Close the incident | **refused**: "Expected: Postmortem present at its canonical path. Observed: Not present", with the exact path, and "No closure changes were made" |
+| 8a | Close it, after a file named `..._Postmortem.txt` was uploaded | **refused again**, 404 at the expected `..._Postmortem.docx`: the near miss did not count |
+| 8b | Close it, after the `.docx` was uploaded | closed, Contained to Closed, the postmortem verified |
+| 9 | The full record with findings and journal | status, the finding, each document present or absent with its size, and the journal with timestamps, ETags before and after, and the file hash |
+| 10 | Delete the incident and its documents | "Deletion unavailable ... No records or documents were deleted." There is no tool to call |
+
+What it showed besides the steps:
+
+- **Copilot Studio caches a tool's definitions** until the tool is added again. The plain fields did
+  not reach the agent until the tool was removed and re-added, under a new name, because the old
+  connector's name was still held in the environment ("A custom connector with display name ...
+  already exists"). A changed tool schema on the server needs the tool re-added in Copilot Studio.
+- **The journal lives in memory without a table store.** The record's journal held the six writes of
+  that server run; the open and the timeline, written before a restart, were not in it. A demo, or a
+  pilot, either runs in one server session or uses the table store.
+- **A long answer blocks the test pane.** The journal answer streamed for over a minute, and messages
+  sent meanwhile showed "Send failed" with **Retry**. Ask for a short journal summary in a demo.
+- The demo script was revised from this run.
+
 ## Running the probe server
 
 The probe server is `scripts/copilot-probe/`. It exposes two dummy tools (`get_fruit_stock` and
