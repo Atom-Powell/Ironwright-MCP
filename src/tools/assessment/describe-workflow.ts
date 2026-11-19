@@ -31,8 +31,9 @@ const WORKFLOW_SHAPE = {
       vendors: z.string().describe('The list of parties a case is about, for example "Vendors" or "Clients".'),
       assessments: z.string().describe('The list of cases, for example "Assessments" or "Incidents".'),
       findings: z.string().describe('The list of findings, for example "Findings".'),
+      journal: z.string().optional().describe('The list the journal is kept in, for example "Journal". Absent when the profile keeps its journal in the state store of the server.'),
     })
-    .describe('The three lists by display name, for example {"vendors": "Vendors", "assessments": "Assessments", "findings": "Findings"}.'),
+    .describe('The lists by display name, for example {"vendors": "Vendors", "assessments": "Assessments", "findings": "Findings"}, with "journal" when the profile keeps its journal in a list.'),
   artifacts: z.array(z.object(ARTIFACT_SHAPE)).describe("Every artifact kind the profile defines, in the profile's order, for example a dossier, an executive summary and a publication."),
   gates: z
     .object({
@@ -68,7 +69,12 @@ function workflowOf(profile: AssessmentProfile): Workflow {
     profileId: profile.profileId,
     siteUrl: profile.identity.siteUrl,
     library: profile.identity.library,
-    lists: { vendors: profile.lists.vendors.name, assessments: profile.lists.assessments.name, findings: profile.lists.findings.name },
+    lists: {
+      vendors: profile.lists.vendors.name,
+      assessments: profile.lists.assessments.name,
+      findings: profile.lists.findings.name,
+      ...(profile.lists.journal === undefined ? {} : { journal: profile.lists.journal.name }),
+    },
     artifacts: Object.entries(profile.workspace.artifacts).map(([kind, pathTemplate]) => ({ kind, pathTemplate, external: external.includes(kind), corrected: corrected.includes(kind) })),
     gates: { findings: [...gates.findings], provisional: [...gates.provisional], completed: [...gates.completed] },
     status: { inProgress: status.inProgress, provisional: status.provisional, completed: status.completed },

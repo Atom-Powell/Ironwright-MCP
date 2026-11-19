@@ -647,6 +647,36 @@ owns is the durable path that needs no Azure subscription. Azure Container Apps 
 cloud deployment. Plan 9d carries the full procedure for each; this phase builds the inbound key
 all three rely on.
 
+#### Keeping the journal in a list
+
+Without a table store, the assessment journal is held in memory and a restart loses it. An
+assessment profile that names a journal list keeps it on the workflow's own site instead, and it
+survives anything short of deleting the site. Add this to the profile's `lists`, with whatever list
+name and column names the site should use:
+
+```json
+"journal": {
+  "name": "Journal",
+  "columns": {
+    "assessmentId": "AssessmentId", "at": "At", "correlationId": "CorrelationId", "stage": "Stage",
+    "operation": "Operation", "target": "Target", "etagBefore": "EtagBefore", "etagAfter": "EtagAfter",
+    "contentHash": "ContentHash", "priorContentHash": "PriorContentHash", "versionId": "VersionId"
+  }
+}
+```
+
+`npm run department:setup` then creates it with the others, the assessment id column indexed. Each
+journaled write costs one more Graph request, which every tool's request count shows.
+
+**Then make the journal list read only for the site's people**, once per site. This was ruled on
+2026-11-18: the journal is an audit record, and a list inherits the site's permissions, so anyone
+who can edit the site could otherwise edit an entry. In the browser, open the journal list, then
+**Settings** (the gear), **List settings**, **Permissions for this list**. Choose **Stop Inheriting
+Permissions**, then change the site's **Members** group to **Read**. Leave the owners as they are.
+The server application keeps its write: its access comes from its own site grant, not from these
+groups. SharePoint's version history and the Microsoft 365 audit log still show any edit an owner
+makes.
+
 #### The container image
 
 The image is the unit of deployment. `Dockerfile` builds it in two stages: the first compiles with

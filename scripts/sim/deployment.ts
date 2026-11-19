@@ -50,6 +50,7 @@ export function createSimDeployment(options: SimDeploymentOptions = {}): SimDepl
       [profile.lists.vendors.name]: Object.values(profile.lists.vendors.columns),
       [profile.lists.assessments.name]: Object.values(profile.lists.assessments.columns),
       [profile.lists.findings.name]: Object.values(profile.lists.findings.columns),
+      ...(profile.lists.journal === undefined ? {} : { [profile.lists.journal.name]: Object.values(profile.lists.journal.columns) }),
     },
     ...(options.listFilterIgnoresCase === undefined ? {} : { listFilterIgnoresCase: options.listFilterIgnoresCase }),
     ...(options.latencyMs === undefined ? {} : { latencyMs: options.latencyMs }),
