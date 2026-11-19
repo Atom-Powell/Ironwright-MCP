@@ -1,8 +1,8 @@
 import { DeviceCodeCredential } from "@azure/identity";
 import { createFetchSetupGraph } from "./adapter.js";
 import {
-  acquireCredentialToken,
   type AppCredentialKind,
+  buildAppTokenAcquirers,
   describeBootstrapSuccess,
   describeDeleteBootstrapSuccess,
   describeDeleteServerAppOutcome,
@@ -18,9 +18,10 @@ import { runCreateBootstrap, runDeleteBootstrap, runDeleteServerApp, runSetup } 
 import { assertBootstrapToken } from "./steps.js";
 
 /**
- * The one client-credentials exchange this command needs, shared by the new
- * application's own token and the bootstrap application's token. Two copies of
- * this would be how one of them silently loses the propagation retry below.
+ * The one client-credentials request this command makes, shared by the new
+ * application's own token and the bootstrap application's token, one attempt
+ * with no retry. Which retry each gets is decided by buildAppTokenAcquirers in
+ * cli.ts, where that pairing is under test.
  *
  * `kind` names which application's credentials are being exchanged, and the
  * label derived from it is part of every failure, because both call sites
@@ -29,7 +30,7 @@ import { assertBootstrapToken } from "./steps.js";
  * that failure apart from a bad secret on the application this command just
  * created, and would go inspect the wrong one.
  */
-function acquireAppOnlyToken(
+async function exchangeClientCredentials(
   tenantId: string,
   clientId: string,
   secret: string,
@@ -40,36 +41,22 @@ function acquireAppOnlyToken(
       ? "The new application's credentials were rejected"
       : "The bootstrap application's credentials were rejected";
 
-  // The kind also picks the retry window. The new application's secret is
-  // seconds old and Entra has not always finished replicating it, so it waits
-  // up to about a minute and a half with a notice per wait; on 2026-11-19 nine
-  // seconds lost that race on a correct setup. The bootstrap secret is not new,
-  // so replication is not a plausible cause there, and it keeps the short
-  // window so a mistyped one is reported in about nine seconds.
-  return acquireCredentialToken(
-    kind,
-    async () => {
-      const body = new URLSearchParams({
-        client_id: clientId,
-        client_secret: secret,
-        scope: "https://graph.microsoft.com/.default",
-        grant_type: "client_credentials",
-      });
-      const response = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body,
-      });
-      try {
-        return extractAccessToken(response.status, await response.text());
-      } catch (error) {
-        throw new Error(`${label}: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    },
-    // Wait notices go to stderr with the other progress notices, so stdout
-    // still carries only the result an operator might capture.
-    { onNotice: (message) => console.error(message) },
-  );
+  const body = new URLSearchParams({
+    client_id: clientId,
+    client_secret: secret,
+    scope: "https://graph.microsoft.com/.default",
+    grant_type: "client_credentials",
+  });
+  const response = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  try {
+    return extractAccessToken(response.status, await response.text());
+  } catch (error) {
+    throw new Error(`${label}: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 // Read by the top-level catch below, which is outside main() and so cannot
@@ -89,6 +76,13 @@ async function main(): Promise<void> {
         : "setup";
   const { tenantId, siteUrl, displayName, write, clientId } = parsed;
 
+  const tokenAcquirers = buildAppTokenAcquirers(
+    (exchangeClientId, secret, kind) => exchangeClientCredentials(tenantId, exchangeClientId, secret, kind),
+    // Wait notices go to stderr with the other progress notices, so stdout
+    // still carries only the result an operator might capture.
+    { onNotice: (message) => console.error(message) },
+  );
+
   // Minted at most once per run. The preflight below needs this token only to
   // read its roles claim, and the per-site grant and that grant's rollback
   // delete both need one too, so without this a normal run would issue three
@@ -99,7 +93,7 @@ async function main(): Promise<void> {
         "No bootstrap credentials. Set IW_BOOTSTRAP_CLIENT_ID and IW_BOOTSTRAP_CLIENT_SECRET, or run this command once with --create-bootstrap to create the grant-issuing application. See docs/SETUP.md.",
       );
     }
-    return acquireAppOnlyToken(tenantId, parsed.bootstrap.clientId, parsed.bootstrap.clientSecret, "bootstrap");
+    return tokenAcquirers.acquireBootstrapToken(parsed.bootstrap.clientId, parsed.bootstrap.clientSecret);
   });
 
   // Checked before the interactive device-code sign-in below, not merely before
@@ -149,7 +143,7 @@ async function main(): Promise<void> {
 
   const graph = createFetchSetupGraph({
     adminToken: adminToken.token,
-    acquireAppToken: (appId, secret) => acquireAppOnlyToken(tenantId, appId, secret, "new-application"),
+    acquireAppToken: tokenAcquirers.acquireAppToken,
     acquireBootstrapToken,
   });
 

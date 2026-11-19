@@ -341,8 +341,8 @@ export async function acquireNewApplicationToken(
       },
       onWait: ({ delayMs, nextAttempt, attempts }) =>
         notice(
-          "The new application's credentials are not accepted yet; Entra can take a minute or more to replicate " +
-            `a new application and its secret. Waiting ${wholeSeconds(delayMs)} seconds before trying again ` +
+          "The new application's credentials are not accepted yet; Entra's replication of a new application and " +
+            `its secret is not instantaneous. Waiting ${wholeSeconds(delayMs)} seconds before trying again ` +
             `(attempt ${nextAttempt} of ${attempts}).`,
         ),
     });
@@ -352,10 +352,15 @@ export async function acquireNewApplicationToken(
     // as itself, and with no wait at all there was no race to lose.
     if (!isPropagationTokenError(error) || waitedMs === 0) throw error;
     const message = error instanceof Error ? error.message : String(error);
+    // "Credentials" rather than "secret": 700016, a service principal not
+    // found yet, is the same race and says nothing about the secret. The
+    // advice leads because the refusal it follows can carry a whole response
+    // body, and an operator reads the first sentence.
     throw new Error(
-      `${message} This command waited ${wholeSeconds(waitedMs)} seconds in total across ${attemptsMade} attempts ` +
-        "for Entra to accept the new secret, and it was still refused. A correct setup can still lose this race " +
-        "when replication is slow, so re-running setup once is reasonable before suspecting the secret.",
+      `This command waited ${wholeSeconds(waitedMs)} seconds in total across ${attemptsMade} attempts for Entra ` +
+        "to accept the new application's credentials, and they were still refused. A correct setup can still " +
+        "lose this race when replication is slow, so re-running setup once is reasonable before suspecting the " +
+        `secret. The last refusal: ${message}`,
       { cause: error },
     );
   }
@@ -363,12 +368,7 @@ export async function acquireNewApplicationToken(
 
 export type AppCredentialKind = "new-application" | "bootstrap";
 
-/**
- * Picks the retry for a client-credentials exchange by whose secret it is.
- * Kept here rather than in main.ts so the choice itself is under test: the
- * live failure this exists for was the new application getting the bootstrap's
- * short window.
- */
+/** Picks the retry for a client-credentials exchange by whose secret it is. */
 export function acquireCredentialToken(
   kind: AppCredentialKind,
   attempt: () => Promise<string>,
@@ -376,6 +376,34 @@ export function acquireCredentialToken(
 ): Promise<string> {
   if (kind === "new-application") return acquireNewApplicationToken(attempt, options);
   return acquireTokenWithRetry(attempt, { sleep: options.sleep });
+}
+
+/** One client-credentials request, no retry; the kind is passed for its error label. */
+export type CredentialExchange = (clientId: string, secret: string, kind: AppCredentialKind) => Promise<string>;
+
+/**
+ * The two token acquirers main.ts hands to the setup, each bound to its
+ * credential kind here rather than at the call sites in main.ts. The live
+ * failure this exists for was the new application getting the bootstrap's
+ * short window, and a kind chosen by a string literal in main.ts, which has no
+ * unit tests, could be swapped back with every test still passing. Binding it
+ * here puts the pairing of acquirer, kind and ladder under test.
+ */
+export function buildAppTokenAcquirers(
+  exchange: CredentialExchange,
+  options: NewApplicationTokenOptions = {},
+): {
+  /** For the application this command has just created; long ladder with notices. */
+  acquireAppToken: (appId: string, secret: string) => Promise<string>;
+  /** For the grant issuer, whose secret is not new; short ladder. */
+  acquireBootstrapToken: (clientId: string, secret: string) => Promise<string>;
+} {
+  return {
+    acquireAppToken: (appId, secret) =>
+      acquireCredentialToken("new-application", () => exchange(appId, secret, "new-application"), options),
+    acquireBootstrapToken: (clientId, secret) =>
+      acquireCredentialToken("bootstrap", () => exchange(clientId, secret, "bootstrap"), options),
+  };
 }
 
 /**

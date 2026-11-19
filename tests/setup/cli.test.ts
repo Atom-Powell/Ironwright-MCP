@@ -4,6 +4,8 @@ import {
   acquireCredentialToken,
   acquireNewApplicationToken,
   acquireTokenWithRetry,
+  type AppCredentialKind,
+  buildAppTokenAcquirers,
   NEW_APPLICATION_TOKEN_RETRY_DELAYS_MS,
   describeBootstrapSuccess,
   describeDeleteBootstrapSuccess,
@@ -875,7 +877,7 @@ describe("acquireNewApplicationToken", () => {
     expect(attempts).toBe(NEW_APPLICATION_TOKEN_RETRY_DELAYS_MS.length + 1);
   });
 
-  it("counts only the waits that actually happened when a different error ends the run early", async () => {
+  it("reports a different error that ends the run early as itself, without the re-run advice", async () => {
     let attempts = 0;
 
     const failure = acquireNewApplicationToken(
@@ -896,6 +898,102 @@ describe("acquireNewApplicationToken", () => {
     expect(message).toMatch(/AADSTS90002/);
     expect(message).not.toMatch(/re-running/);
     expect(attempts).toBe(2);
+  });
+
+  it("reports the wait it actually spent, not the ladder's full length, when the ladder is cut short", async () => {
+    const failure = acquireNewApplicationToken(
+      async () => {
+        throw propagationError();
+      },
+      { delaysMs: [3000], sleep: async () => {}, onNotice: () => {} },
+    );
+
+    await expect(failure).rejects.toThrow(/waited 3 seconds in total across 2 attempts/);
+  });
+
+  it("speaks of the new application's credentials, since a service principal not yet found is the same race", async () => {
+    const failure = acquireNewApplicationToken(
+      async () => {
+        throw new Error("The new application's credentials were rejected: AADSTS700016: Application not found.");
+      },
+      { sleep: async () => {}, onNotice: () => {} },
+    );
+
+    const message = await failure.then(
+      () => "resolved",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+    expect(message).toMatch(/new application's credentials/);
+    expect(message).not.toMatch(/new secret/);
+    // The advice comes first, so it is not buried after a raw response body.
+    expect(message.indexOf("re-running")).toBeLessThan(message.indexOf("AADSTS700016"));
+  });
+
+  it("does not put a figure on how long replication takes", async () => {
+    const notices: string[] = [];
+    let attempts = 0;
+
+    await acquireNewApplicationToken(
+      async () => {
+        attempts += 1;
+        if (attempts < 2) throw propagationError();
+        return "token-1";
+      },
+      { sleep: async () => {}, onNotice: (message) => void notices.push(message) },
+    );
+
+    expect(notices[0]).toMatch(/not instantaneous/);
+    expect(notices[0]).not.toMatch(/a minute/);
+  });
+});
+
+describe("buildAppTokenAcquirers", () => {
+  const refusedExchange =
+    (kinds: string[]) =>
+    async (_clientId: string, _secret: string, kind: AppCredentialKind): Promise<string> => {
+      kinds.push(kind);
+      throw new Error("client credentials request failed with 401: AADSTS7000215: Invalid client secret provided.");
+    };
+
+  it("exchanges the application this command created as new, on the long ladder", async () => {
+    const kinds: string[] = [];
+    const slept: number[] = [];
+    const acquirers = buildAppTokenAcquirers(refusedExchange(kinds), {
+      sleep: async (ms) => void slept.push(ms),
+      onNotice: () => {},
+    });
+
+    await expect(acquirers.acquireAppToken("app-1", "secret-1")).rejects.toThrow(/in total/);
+
+    expect(slept).toEqual([...NEW_APPLICATION_TOKEN_RETRY_DELAYS_MS]);
+    expect(new Set(kinds)).toEqual(new Set(["new-application"]));
+  });
+
+  it("exchanges the grant issuer as the bootstrap, on the short ladder", async () => {
+    const kinds: string[] = [];
+    const slept: number[] = [];
+    const acquirers = buildAppTokenAcquirers(refusedExchange(kinds), {
+      sleep: async (ms) => void slept.push(ms),
+      onNotice: () => {},
+    });
+
+    await expect(acquirers.acquireBootstrapToken("bootstrap-1", "secret-1")).rejects.toThrow(/AADSTS7000215/);
+
+    expect(slept).toEqual([3000, 6000]);
+    expect(new Set(kinds)).toEqual(new Set(["bootstrap"]));
+  });
+
+  it("passes each acquirer's own client id and secret to the exchange", async () => {
+    const seen: string[] = [];
+    const acquirers = buildAppTokenAcquirers(async (clientId, secret, kind) => {
+      seen.push(`${kind} ${clientId} ${secret}`);
+      return "token";
+    });
+
+    await acquirers.acquireAppToken("app-1", "secret-1");
+    await acquirers.acquireBootstrapToken("bootstrap-1", "secret-2");
+
+    expect(seen).toEqual(["new-application app-1 secret-1", "bootstrap bootstrap-1 secret-2"]);
   });
 });
 
