@@ -46,16 +46,17 @@ describe("a journal append that fails after Graph confirmed the write", () => {
     expect((await d.context.store.listJournal(PROFILE, assessmentId)).some((entry) => entry.target === path)).toBe(false);
   });
 
-  it("names the placeholder key for a write made before the assessment had an id", async () => {
+  it("stops at the first create, which is the assessment item, and names the id it is filed under", async () => {
     const d = createSimDeployment();
     failNextAppend(d);
 
     const result = await runOpenAssessment({ profileId: PROFILE, vendor: "Acme Corp", scope: "Security" }, d.context);
 
     expect(result.isError).toBe(true);
-    expect(resultText(result)).toContain("open_assessment stopped after a write it could not record: Graph confirmed list_item_created at Vendors/1");
-    expect(resultText(result)).toContain('the journal for (vendor) does not show it');
-    expect(d.sim.listItems("Vendors")).toHaveLength(1);
-    expect(d.sim.listItems("Assessments")).toHaveLength(0);
+    expect(resultText(result)).toContain("open_assessment stopped after a write it could not record: Graph confirmed list_item_created at Assessments/1");
+    expect(resultText(result)).toMatch(/the journal for ASM-\d{4}-00001 does not show it/);
+    // Nothing further: the vendor record and the id are not written once the journal has failed.
+    expect(d.sim.listItems("Assessments")).toHaveLength(1);
+    expect(d.sim.listItems("Vendors")).toHaveLength(0);
   });
 });

@@ -55,7 +55,9 @@ describe("the simulated server", () => {
       expect(state.notice).toBe(SIM_NOTICE);
       expect(state.lists.Assessments!.map((item) => item.fields.AssessmentId)).toEqual([id]);
       expect(state.library.map((entry) => entry.path)).toContain(`Assessments/Acme Corp/${id}/Research`);
-      expect(Object.keys(state.journal).sort()).toEqual(["(unassigned)", "(vendor)", id].sort());
+      // Every write of the open is filed under the id, the two creates before it included.
+      expect(Object.keys(state.journal)).toEqual([id]);
+      expect(state.journal[id]!.length).toBe(9);
     } finally {
       await client.close();
     }

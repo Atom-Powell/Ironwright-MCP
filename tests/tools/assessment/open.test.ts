@@ -42,13 +42,16 @@ describe("open_assessment", () => {
     expect(createFields).not.toHaveProperty("AssessmentId");
     expect(calls.find((call) => call.method === "patch")?.body).toEqual({ AssessmentId: "ASM-2026-00002" });
 
-    // The vendor and the pre-id assessment item are journaled under placeholder keys, because no id exists when they are written.
-    const vendorJournal = await context.store.listJournal(PROFILE, "(vendor)");
-    const unassignedJournal = await context.store.listJournal(PROFILE, "(unassigned)");
+    // Found live 2026-11-19: the two creates made before the id is written were journaled under
+    // placeholders no read by id returns. The assessment item is created first, so the id it will
+    // carry is known from its item id, and both creates are journaled under that id at once.
+    expect(await context.store.listJournal(PROFILE, "(vendor)")).toEqual([]);
+    expect(await context.store.listJournal(PROFILE, "(unassigned)")).toEqual([]);
     const keyedJournal = await context.store.listJournal(PROFILE, "ASM-2026-00002");
-    expect(vendorJournal.map((entry) => [entry.operation, entry.target])).toEqual([["list_item_created", "Vendors/7"]]);
-    expect(unassignedJournal.map((entry) => [entry.operation, entry.target])).toEqual([["list_item_created", "Assessments/2"]]);
-    expect(keyedJournal.map((entry) => entry.operation).sort()).toEqual(["list_item_updated", ...Array<string>(6).fill("folder_created")].sort());
+    expect(keyedJournal.filter((entry) => entry.operation === "list_item_created").map((entry) => entry.target)).toEqual(["Assessments/2", "Vendors/7"]);
+    const posts = calls.filter((call) => call.method === "post" && call.path.includes("/lists/")).map((call) => (call.path.includes("/lists/Assessments/") ? "Assessments" : "Vendors"));
+    expect(posts).toEqual(["Assessments", "Vendors"]);
+    expect(keyedJournal.map((entry) => entry.operation).sort()).toEqual(["list_item_created", "list_item_created", "list_item_updated", ...Array<string>(6).fill("folder_created")].sort());
     expect(keyedJournal.filter((entry) => entry.operation === "folder_created").map((entry) => entry.target).sort()).toEqual(
       [
         "Assessments",
@@ -59,7 +62,7 @@ describe("open_assessment", () => {
         "Assessments/Acme Corp/ASM-2026-00002/Published",
       ].sort(),
     );
-    const correlationIds = new Set([...vendorJournal, ...unassignedJournal, ...keyedJournal].map((entry) => entry.correlationId));
+    const correlationIds = new Set(keyedJournal.map((entry) => entry.correlationId));
     expect([...correlationIds]).toEqual([output.correlationId]);
   });
 
@@ -187,6 +190,53 @@ describe("open_assessment", () => {
     const journal = await context.store.listJournal(PROFILE, "ASM-2026-00003");
     expect(journal.filter((entry) => entry.operation === "folder_created")).toHaveLength(6);
     expect(journal.filter((entry) => entry.operation === "list_item_updated")).toHaveLength(1);
+  });
+
+  // Since 2026-11-19 the assessment item is created before the vendor record, so an open can die
+  // with the item written and no vendor. The retry finds the item and writes what the first call meant to.
+  it("resumes an open that died between the assessment create and the vendor create", async () => {
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([]),
+      vendorFolderQuery("Acme Corp", []),
+      assessmentsQuery("Acme Corp", [listItem("3", assessmentFields("Acme Corp"))]),
+      { method: "post", pathIncludes: "/lists/Vendors/items", response: listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" }) },
+      ...idWriteBack("Acme Corp", "3", "ASM-2026-00003"),
+      ...folderCreates("Acme Corp", "ASM-2026-00003"),
+      ...readBacks("Acme Corp", "ASM-2026-00003"),
+    ]);
+    const context = assessmentToolContext(graph);
+
+    const result = await runOpenAssessment(INPUT, context);
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toMatchObject({ assessmentId: "ASM-2026-00003", created: false, resumed: true });
+    expect(resultText(result)).toContain("this call created the vendor record in Vendors and wrote the assessment id to item 3");
+    expect(calls.filter((call) => call.method === "post" && call.path.includes("/lists/Assessments/"))).toEqual([]);
+    const journal = await context.store.listJournal(PROFILE, "ASM-2026-00003");
+    expect(journal.filter((entry) => entry.operation === "list_item_created").map((entry) => entry.target)).toEqual(["Vendors/7"]);
+  });
+
+  it("restores the vendor under the found assessment's name when the retry spells the vendor another way", async () => {
+    // "Acme Corp." files under "Acme Corp", where the item the dead call created already sits. The
+    // vendor record must match that item, or a later open under "Acme Corp" is refused.
+    const { graph, calls } = createScriptedGraph([
+      ...RESOLVE_DRIVE_SCRIPT,
+      vendorsQuery([], "Acme Corp."),
+      vendorFolderQuery("Acme Corp", []),
+      vendorsQuery([], "Acme Corp"),
+      assessmentsQuery("Acme Corp", [listItem("3", assessmentFields("Acme Corp"))]),
+      { method: "post", pathIncludes: "/lists/Vendors/items", response: listItem("7", { Title: "Acme Corp", FolderName: "Acme Corp" }) },
+      ...idWriteBack("Acme Corp", "3", "ASM-2026-00003"),
+      ...folderCreates("Acme Corp", "ASM-2026-00003"),
+      ...readBacks("Acme Corp", "ASM-2026-00003"),
+    ]);
+
+    const result = await runOpenAssessment({ ...INPUT, vendor: "Acme Corp." }, assessmentToolContext(graph));
+
+    expect(result.isError).toBeUndefined();
+    const vendor = calls.find((call) => call.method === "post" && call.path.includes("/lists/Vendors/items"))!;
+    expect((vendor.body as { fields: Record<string, unknown> }).fields).toEqual({ Title: "Acme Corp", FolderName: "Acme Corp" });
   });
 
   it("resumes an open that died between the id write and the folders, when the live read finds no root", async () => {
