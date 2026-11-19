@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_DEVICE_CODE_CLIENT_ID,
+  acquireCredentialToken,
+  acquireNewApplicationToken,
   acquireTokenWithRetry,
+  NEW_APPLICATION_TOKEN_RETRY_DELAYS_MS,
   describeBootstrapSuccess,
   describeDeleteBootstrapSuccess,
   describeDeleteServerAppOutcome,
@@ -778,6 +781,160 @@ describe("acquireTokenWithRetry", () => {
 
     expect(slept).toHaveLength(2);
     expect(slept.reduce((total, ms) => total + ms, 0)).toBeLessThanOrEqual(10_000);
+  });
+
+  it("reports each wait before sleeping it, numbered by the attempt that follows", async () => {
+    const events: string[] = [];
+    let attempts = 0;
+
+    await acquireTokenWithRetry(
+      async () => {
+        attempts += 1;
+        if (attempts < 3) throw new Error("AADSTS7000215: Invalid client secret.");
+        return "token-1";
+      },
+      {
+        sleep: async (ms) => void events.push(`sleep ${ms}`),
+        onWait: ({ delayMs, nextAttempt, attempts: total }) => void events.push(`wait ${delayMs} ${nextAttempt}/${total}`),
+      },
+    );
+
+    expect(events).toEqual(["wait 3000 2/3", "sleep 3000", "wait 6000 3/3", "sleep 6000"]);
+  });
+});
+
+describe("acquireNewApplicationToken", () => {
+  const propagationError = (): Error =>
+    new Error(
+      "The new application's credentials were rejected: client credentials request failed with 401: AADSTS7000215: Invalid client secret provided.",
+    );
+
+  it("waits on a ladder of roughly ninety seconds, far past the bootstrap's nine", () => {
+    const total = NEW_APPLICATION_TOKEN_RETRY_DELAYS_MS.reduce((sum, ms) => sum + ms, 0);
+    expect(total).toBeGreaterThanOrEqual(80_000);
+    expect(total).toBeLessThanOrEqual(120_000);
+  });
+
+  it("keeps retrying on the long ladder and returns a token that is accepted late", async () => {
+    let attempts = 0;
+    const slept: number[] = [];
+
+    const token = await acquireNewApplicationToken(
+      async () => {
+        attempts += 1;
+        if (attempts < 6) throw propagationError();
+        return "token-1";
+      },
+      { sleep: async (ms) => void slept.push(ms), onNotice: () => {} },
+    );
+
+    expect(token).toBe("token-1");
+    expect(attempts).toBe(6);
+    expect(slept).toEqual(NEW_APPLICATION_TOKEN_RETRY_DELAYS_MS.slice(0, 5));
+  });
+
+  it("prints one notice per wait that names the wait and the attempt, and does not vouch for the secret", async () => {
+    let attempts = 0;
+    const notices: string[] = [];
+    const total = NEW_APPLICATION_TOKEN_RETRY_DELAYS_MS.length + 1;
+
+    await acquireNewApplicationToken(
+      async () => {
+        attempts += 1;
+        if (attempts < 3) throw propagationError();
+        return "token-1";
+      },
+      { sleep: async () => {}, onNotice: (message) => void notices.push(message) },
+    );
+
+    expect(notices).toHaveLength(2);
+    expect(notices[0]).toMatch(/not accepted yet/);
+    expect(notices[0]).toMatch(new RegExp(`Waiting ${NEW_APPLICATION_TOKEN_RETRY_DELAYS_MS[0]! / 1000} seconds`));
+    expect(notices[0]).toMatch(new RegExp(`attempt 2 of ${total}`));
+    expect(notices[1]).toMatch(new RegExp(`attempt 3 of ${total}`));
+    for (const notice of notices) {
+      expect(notice).not.toMatch(/secret is (correct|valid)/i);
+    }
+  });
+
+  it("names the total wait when the last attempt is still refused, and says one re-run is reasonable", async () => {
+    let attempts = 0;
+    const totalSeconds = NEW_APPLICATION_TOKEN_RETRY_DELAYS_MS.reduce((sum, ms) => sum + ms, 0) / 1000;
+
+    const failure = acquireNewApplicationToken(
+      async () => {
+        attempts += 1;
+        throw propagationError();
+      },
+      { sleep: async () => {}, onNotice: () => {} },
+    );
+
+    await expect(failure).rejects.toThrow(/AADSTS7000215/);
+    await expect(failure).rejects.toThrow(new RegExp(`${totalSeconds} seconds in total`));
+    await expect(failure).rejects.toThrow(/re-running setup once/);
+    expect(attempts).toBe(NEW_APPLICATION_TOKEN_RETRY_DELAYS_MS.length + 1);
+  });
+
+  it("counts only the waits that actually happened when a different error ends the run early", async () => {
+    let attempts = 0;
+
+    const failure = acquireNewApplicationToken(
+      async () => {
+        attempts += 1;
+        if (attempts < 2) throw propagationError();
+        throw new Error("client credentials request failed with 400: AADSTS90002: Tenant not found.");
+      },
+      { sleep: async () => {}, onNotice: () => {} },
+    );
+
+    // A different error is a real configuration problem, so it is reported as
+    // itself, without the advice that a re-run may win a replication race.
+    const message = await failure.then(
+      () => "resolved",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+    expect(message).toMatch(/AADSTS90002/);
+    expect(message).not.toMatch(/re-running/);
+    expect(attempts).toBe(2);
+  });
+});
+
+describe("acquireCredentialToken", () => {
+  const alwaysRefused = async (): Promise<string> => {
+    throw new Error("client credentials request failed with 401: AADSTS7000215: Invalid client secret provided.");
+  };
+
+  it("gives the new application's secret the long ladder, with notices", async () => {
+    const slept: number[] = [];
+    const notices: string[] = [];
+
+    await expect(
+      acquireCredentialToken("new-application", alwaysRefused, {
+        sleep: async (ms) => void slept.push(ms),
+        onNotice: (message) => void notices.push(message),
+      }),
+    ).rejects.toThrow(/in total/);
+
+    expect(slept).toEqual([...NEW_APPLICATION_TOKEN_RETRY_DELAYS_MS]);
+    expect(notices).toHaveLength(NEW_APPLICATION_TOKEN_RETRY_DELAYS_MS.length);
+  });
+
+  it("keeps the bootstrap secret, which is not new, on the short ladder so a mistyped one fails fast", async () => {
+    const slept: number[] = [];
+    const notices: string[] = [];
+
+    const message = await acquireCredentialToken("bootstrap", alwaysRefused, {
+      sleep: async (ms) => void slept.push(ms),
+      onNotice: (notice) => void notices.push(notice),
+    }).then(
+      () => "resolved",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+
+    expect(slept).toEqual([3000, 6000]);
+    expect(notices).toEqual([]);
+    expect(message).toMatch(/AADSTS7000215/);
+    expect(message).not.toMatch(/re-running/);
   });
 });
 

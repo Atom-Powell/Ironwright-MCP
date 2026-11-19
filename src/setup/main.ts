@@ -1,7 +1,8 @@
 import { DeviceCodeCredential } from "@azure/identity";
 import { createFetchSetupGraph } from "./adapter.js";
 import {
-  acquireTokenWithRetry,
+  acquireCredentialToken,
+  type AppCredentialKind,
   describeBootstrapSuccess,
   describeDeleteBootstrapSuccess,
   describeDeleteServerAppOutcome,
@@ -21,39 +22,54 @@ import { assertBootstrapToken } from "./steps.js";
  * application's own token and the bootstrap application's token. Two copies of
  * this would be how one of them silently loses the propagation retry below.
  *
- * `label` names which application's credentials are being exchanged, because
- * both call sites otherwise report an identical "client credentials request
- * failed" message: an operator with a mistyped IW_BOOTSTRAP_CLIENT_SECRET would
- * have no way to tell that failure apart from a bad secret on the application
- * this command just created, and would go inspect the wrong one.
+ * `kind` names which application's credentials are being exchanged, and the
+ * label derived from it is part of every failure, because both call sites
+ * otherwise report an identical "client credentials request failed" message: an
+ * operator with a mistyped IW_BOOTSTRAP_CLIENT_SECRET would have no way to tell
+ * that failure apart from a bad secret on the application this command just
+ * created, and would go inspect the wrong one.
  */
-function acquireAppOnlyToken(tenantId: string, clientId: string, secret: string, label: string): Promise<string> {
-  // Retried for the new application's own credentials, which are seconds old
-  // when this runs and which Entra has not always finished replicating; without
-  // the retry a correct setup intermittently reports an invalid client secret
-  // and sends the operator after a problem that does not exist. The bootstrap
-  // application's secret is not new, so replication is not a plausible cause
-  // there and the retry buys it nothing: a mistyped bootstrap secret returns
-  // AADSTS7000215 too and costs about nine seconds before it is reported. That
-  // is the accepted price of one shared implementation rather than two.
-  return acquireTokenWithRetry(async () => {
-    const body = new URLSearchParams({
-      client_id: clientId,
-      client_secret: secret,
-      scope: "https://graph.microsoft.com/.default",
-      grant_type: "client_credentials",
-    });
-    const response = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body,
-    });
-    try {
-      return extractAccessToken(response.status, await response.text());
-    } catch (error) {
-      throw new Error(`${label}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  });
+function acquireAppOnlyToken(
+  tenantId: string,
+  clientId: string,
+  secret: string,
+  kind: AppCredentialKind,
+): Promise<string> {
+  const label =
+    kind === "new-application"
+      ? "The new application's credentials were rejected"
+      : "The bootstrap application's credentials were rejected";
+
+  // The kind also picks the retry window. The new application's secret is
+  // seconds old and Entra has not always finished replicating it, so it waits
+  // up to about a minute and a half with a notice per wait; on 2026-11-19 nine
+  // seconds lost that race on a correct setup. The bootstrap secret is not new,
+  // so replication is not a plausible cause there, and it keeps the short
+  // window so a mistyped one is reported in about nine seconds.
+  return acquireCredentialToken(
+    kind,
+    async () => {
+      const body = new URLSearchParams({
+        client_id: clientId,
+        client_secret: secret,
+        scope: "https://graph.microsoft.com/.default",
+        grant_type: "client_credentials",
+      });
+      const response = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body,
+      });
+      try {
+        return extractAccessToken(response.status, await response.text());
+      } catch (error) {
+        throw new Error(`${label}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+    // Wait notices go to stderr with the other progress notices, so stdout
+    // still carries only the result an operator might capture.
+    { onNotice: (message) => console.error(message) },
+  );
 }
 
 // Read by the top-level catch below, which is outside main() and so cannot
@@ -83,12 +99,7 @@ async function main(): Promise<void> {
         "No bootstrap credentials. Set IW_BOOTSTRAP_CLIENT_ID and IW_BOOTSTRAP_CLIENT_SECRET, or run this command once with --create-bootstrap to create the grant-issuing application. See docs/SETUP.md.",
       );
     }
-    return acquireAppOnlyToken(
-      tenantId,
-      parsed.bootstrap.clientId,
-      parsed.bootstrap.clientSecret,
-      "The bootstrap application's credentials were rejected",
-    );
+    return acquireAppOnlyToken(tenantId, parsed.bootstrap.clientId, parsed.bootstrap.clientSecret, "bootstrap");
   });
 
   // Checked before the interactive device-code sign-in below, not merely before
@@ -138,8 +149,7 @@ async function main(): Promise<void> {
 
   const graph = createFetchSetupGraph({
     adminToken: adminToken.token,
-    acquireAppToken: (appId, secret) =>
-      acquireAppOnlyToken(tenantId, appId, secret, "The new application's credentials were rejected"),
+    acquireAppToken: (appId, secret) => acquireAppOnlyToken(tenantId, appId, secret, "new-application"),
     acquireBootstrapToken,
   });
 

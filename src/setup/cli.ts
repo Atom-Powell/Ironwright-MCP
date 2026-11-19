@@ -237,14 +237,37 @@ export function extractAccessToken(status: number, text: string): string {
 // configuration error that more attempts cannot fix.
 const PROPAGATION_TOKEN_ERROR_CODES = ["AADSTS7000215", "AADSTS700016"] as const;
 
-// Three attempts across roughly ten seconds. A genuinely wrong secret also
-// returns 7000215, so the retry is bounded: it has to outlast replication
-// without turning a wrong credential into a hang.
+// Three attempts across roughly ten seconds, for a secret that is not new: the
+// bootstrap application's. A genuinely wrong secret also returns 7000215, so
+// the retry is bounded, and for a secret that has existed for days replication
+// is not a plausible cause, so the window stays short and a mistyped
+// IW_BOOTSTRAP_CLIENT_SECRET is reported in about nine seconds.
 const DEFAULT_RETRY_DELAYS_MS = [3000, 6000] as const;
+
+// Eight attempts across 94 seconds, for the secret this command created
+// seconds earlier. On 2026-11-19 a correct setup lost the race against the nine
+// second ladder above and rolled back a good application, so nine seconds is
+// known to be too short and this is set an order of magnitude past it rather
+// than at a measured replication time, which nobody here has. The early steps
+// stay short because most runs are accepted within a few seconds and should
+// not idle; the tail is capped at 20 seconds so a secret that becomes valid
+// mid-wait is picked up soon after. The cost of the length falls only on a
+// wrong secret, which cannot happen to one this command generated itself.
+export const NEW_APPLICATION_TOKEN_RETRY_DELAYS_MS = [3000, 6000, 10_000, 15_000, 20_000, 20_000, 20_000] as const;
+
+export interface RetryWait {
+  delayMs: number;
+  /** The 1-based number of the attempt that will follow this wait. */
+  nextAttempt: number;
+  /** How many attempts the ladder allows in all. */
+  attempts: number;
+}
 
 export interface RetryOptions {
   delaysMs?: readonly number[];
   sleep?: (ms: number) => Promise<void>;
+  /** Called before each wait, so a caller can say why the command is idle. */
+  onWait?: (wait: RetryWait) => void;
 }
 
 function isPropagationTokenError(error: unknown): boolean {
@@ -252,12 +275,16 @@ function isPropagationTokenError(error: unknown): boolean {
   return PROPAGATION_TOKEN_ERROR_CODES.some((code) => message.includes(code));
 }
 
+function realSleep(ms: number): Promise<void> {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
 export async function acquireTokenWithRetry(
   attempt: () => Promise<string>,
   options: RetryOptions = {},
 ): Promise<string> {
   const delaysMs = options.delaysMs ?? DEFAULT_RETRY_DELAYS_MS;
-  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const sleep = options.sleep ?? realSleep;
 
   for (let index = 0; ; index += 1) {
     try {
@@ -265,9 +292,90 @@ export async function acquireTokenWithRetry(
     } catch (error) {
       const delay = delaysMs[index];
       if (delay === undefined || !isPropagationTokenError(error)) throw error;
+      options.onWait?.({ delayMs: delay, nextAttempt: index + 2, attempts: delaysMs.length + 1 });
       await sleep(delay);
     }
   }
+}
+
+function wholeSeconds(ms: number): number {
+  return Math.round(ms / 1000);
+}
+
+export interface NewApplicationTokenOptions {
+  delaysMs?: readonly number[];
+  sleep?: (ms: number) => Promise<void>;
+  onNotice?: (message: string) => void;
+}
+
+/**
+ * The token exchange for the application this command has just created, whose
+ * secret is seconds old. It waits on the long ladder and says so on each wait,
+ * because an operator watching a device code session sees nothing else for up
+ * to a minute and a half and would reasonably conclude the command had hung.
+ *
+ * The notice says the secret is not accepted yet and nothing more. A wrong
+ * secret is refused with the same code, so this function cannot know which it
+ * is looking at, and the notice must not imply the secret is good.
+ */
+export async function acquireNewApplicationToken(
+  attempt: () => Promise<string>,
+  options: NewApplicationTokenOptions = {},
+): Promise<string> {
+  const delaysMs = options.delaysMs ?? NEW_APPLICATION_TOKEN_RETRY_DELAYS_MS;
+  const sleep = options.sleep ?? realSleep;
+  const notice = options.onNotice ?? ((): void => {});
+
+  // Summed after each sleep returns, not from the ladder, so the total the
+  // final error reports is the time this run actually spent waiting.
+  let waitedMs = 0;
+  let attemptsMade = 1;
+
+  try {
+    return await acquireTokenWithRetry(attempt, {
+      delaysMs,
+      sleep: async (ms) => {
+        await sleep(ms);
+        waitedMs += ms;
+        attemptsMade += 1;
+      },
+      onWait: ({ delayMs, nextAttempt, attempts }) =>
+        notice(
+          "The new application's credentials are not accepted yet; Entra can take a minute or more to replicate " +
+            `a new application and its secret. Waiting ${wholeSeconds(delayMs)} seconds before trying again ` +
+            `(attempt ${nextAttempt} of ${attempts}).`,
+        ),
+    });
+  } catch (error) {
+    // Only a propagation error that outlasted every wait gets the re-run
+    // advice. Any other error is a real configuration problem and is reported
+    // as itself, and with no wait at all there was no race to lose.
+    if (!isPropagationTokenError(error) || waitedMs === 0) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `${message} This command waited ${wholeSeconds(waitedMs)} seconds in total across ${attemptsMade} attempts ` +
+        "for Entra to accept the new secret, and it was still refused. A correct setup can still lose this race " +
+        "when replication is slow, so re-running setup once is reasonable before suspecting the secret.",
+      { cause: error },
+    );
+  }
+}
+
+export type AppCredentialKind = "new-application" | "bootstrap";
+
+/**
+ * Picks the retry for a client-credentials exchange by whose secret it is.
+ * Kept here rather than in main.ts so the choice itself is under test: the
+ * live failure this exists for was the new application getting the bootstrap's
+ * short window.
+ */
+export function acquireCredentialToken(
+  kind: AppCredentialKind,
+  attempt: () => Promise<string>,
+  options: NewApplicationTokenOptions = {},
+): Promise<string> {
+  if (kind === "new-application") return acquireNewApplicationToken(attempt, options);
+  return acquireTokenWithRetry(attempt, { sleep: options.sleep });
 }
 
 /**
