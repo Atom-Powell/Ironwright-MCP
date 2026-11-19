@@ -373,6 +373,35 @@ steps were run in the test pane.
   top-level `risk`, the assessment's overall risk. Recorded here before it has been tried in Copilot Studio; the next write session tries
   it from step 5 of the demo script on INC-2026-00002.
 
+### The whole incident, end to end, through Copilot Studio
+
+A second write session the same night, after the plain-field form of `record_findings` was built,
+finished the demo script on INC-2026-00002. Every step below was a call from Copilot Studio's test
+pane to the server on the developer tenant.
+
+| Step | Asked | What happened |
+|---|---|---|
+| 5 | Record the finding, risk High | `record_findings` with the plain fields, key F-1 chosen by the agent without asking; F-1 created as item 2, the summary and stage FINDINGS recorded, in 1.77 s |
+| 6 | Save the containment notes, then mark it contained | the containment document saved and verified; status Open to Contained, disposition Resolved with follow up, risk High |
+| 7 | Close the incident | **refused**: "Expected: Postmortem present at its canonical path. Observed: Not present", with the exact path, and "No closure changes were made" |
+| 8a | Close it, after a file named `..._Postmortem.txt` was uploaded | **refused again**, 404 at the expected `..._Postmortem.docx`: the near miss did not count |
+| 8b | Close it, after the `.docx` was uploaded | closed, Contained to Closed, the postmortem verified |
+| 9 | The full record with findings and journal | status, the finding, each document present or absent with its size, and the journal with timestamps, ETags before and after, and the file hash |
+| 10 | Delete the incident and its documents | "Deletion unavailable ... No records or documents were deleted." There is no tool to call |
+
+What it showed besides the steps:
+
+- **Copilot Studio caches a tool's definitions** until the tool is added again. The plain fields did
+  not reach the agent until the tool was removed and re-added, under a new name, because the old
+  connector's name was still held in the environment ("A custom connector with display name ...
+  already exists"). A changed tool schema on the server needs the tool re-added in Copilot Studio.
+- **The journal lives in memory without a table store.** The record's journal held the six writes of
+  that server run; the open and the timeline, written before a restart, were not in it. A demo, or a
+  pilot, either runs in one server session or uses the table store.
+- **A long answer blocks the test pane.** The journal answer streamed for over a minute, and messages
+  sent meanwhile showed "Send failed" with **Retry**. Ask for a short journal summary in a demo.
+- The demo script was revised from this run.
+
 ## Running the probe server
 
 The probe server is `scripts/copilot-probe/`. It exposes two dummy tools (`get_fruit_stock` and
