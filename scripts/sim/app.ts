@@ -16,10 +16,9 @@ export async function simState(deployment: SimDeployment): Promise<Record<string
   const names = [profile.lists.vendors.name, profile.lists.assessments.name, profile.lists.findings.name, ...(profile.lists.journal === undefined ? [] : [profile.lists.journal.name])];
   for (const name of names) lists[name] = sim.listItems(name);
 
-  // The journal is keyed by assessment id, and by two placeholders for the writes an open makes
-  // before the id exists.
+  // The journal is keyed by assessment id, the writes an open makes before the id is written included.
   const idColumn = profile.lists.assessments.columns.assessmentId;
-  const keys = ["(vendor)", "(unassigned)", ...sim.listItems(profile.lists.assessments.name).flatMap((item) => (typeof item.fields[idColumn] === "string" ? [item.fields[idColumn]] : []))];
+  const keys = [...sim.listItems(profile.lists.assessments.name).flatMap((item) => (typeof item.fields[idColumn] === "string" ? [item.fields[idColumn]] : []))];
   const journal: Record<string, JournalEntry[]> = {};
   for (const key of keys) {
     // Through the journal's own reader, so a profile that keeps it in a list is shown from the list.

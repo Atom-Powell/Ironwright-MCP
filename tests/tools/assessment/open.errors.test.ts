@@ -65,8 +65,8 @@ describe("open_assessment failures", () => {
     expect(text).toContain('read back as "ASM-2026-99999"');
     expect(text).toContain("No folder was created.");
     expect(calls.some((call) => call.path.endsWith("/children"))).toBe(false);
-    expect((await context.store.listJournal(PROFILE, "(unassigned)")).map((entry) => entry.operation)).toEqual(["list_item_created"]);
-    expect((await context.store.listJournal(PROFILE, "ASM-2026-00002")).map((entry) => entry.operation)).toEqual(["list_item_updated"]);
+    expect(await context.store.listJournal(PROFILE, "(unassigned)")).toEqual([]);
+    expect((await context.store.listJournal(PROFILE, "ASM-2026-00002")).map((entry) => entry.operation)).toEqual(["list_item_created", "list_item_updated"]);
   });
 
   // Measured 2026-11-17 (L4a). The item was created a moment before, and something changed it
@@ -90,8 +90,10 @@ describe("open_assessment failures", () => {
         "No folder was created. The journal records what this call did write.",
     );
     expect(calls.some((call) => call.path.endsWith("/children"))).toBe(false);
-    expect((await context.store.listJournal(PROFILE, "(unassigned)")).map((entry) => entry.operation)).toEqual(["list_item_created"]);
-    expect(await context.store.listJournal(PROFILE, "ASM-2026-00002")).toEqual([]);
+    // The create is filed under the id the item would have carried, which a retry renders again
+    // from the same item id; the id itself was never written, so no update entry.
+    expect(await context.store.listJournal(PROFILE, "(unassigned)")).toEqual([]);
+    expect((await context.store.listJournal(PROFILE, "ASM-2026-00002")).map((entry) => entry.operation)).toEqual(["list_item_created"]);
   });
 
   it("stops before any folder when the item to finish was read without an eTag", async () => {

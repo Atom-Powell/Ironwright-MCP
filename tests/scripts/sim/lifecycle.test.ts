@@ -83,9 +83,9 @@ describe("the assessment lifecycle against the simulated tenant", () => {
     const got = structured(await runGetAssessment({ profileId: PROFILE, assessmentId: id }, d.context));
     expect(got.assessment).toMatchObject({ status: "Completed", disposition: "Approved with conditions", risk: "Medium" });
     expect((got.artifacts as { present: boolean }[]).every((artifact) => artifact.present)).toBe(true);
-    // Every write the server made is in the journal: the id, six folders, two files and their
-    // stage updates, two findings and their summary, and the transition.
-    expect((got.journal as { entries: number }).entries).toBe(15);
+    // Every write the server made is in the journal: the assessment and vendor creates, the id, six
+    // folders, two files and their stage updates, two findings and their summary, and the transition.
+    expect((got.journal as { entries: number }).entries).toBe(17);
   });
 
   it("writes nothing when each step is called a second time", async () => {

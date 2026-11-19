@@ -91,6 +91,13 @@ async function openAssessment(args: z.infer<typeof InputObject>, context: ToolCo
       let vendorCreated = false;
       let wroteId = false;
       let foldersCreated = 0;
+      // Found live 2026-11-19: the vendor and the assessment item were journaled under placeholder
+      // keys, since they were written before the id, and no read by id ever returned them. The id is
+      // rendered from the assessment item's id, so the item is created first and every entry of this
+      // call is filed under the id it carries or will carry. The vendor record is created after it,
+      // and a crash between the two is resumed by the next open, which finds the item and no vendor.
+      // Each entry is still appended as its write is confirmed, so a journal that fails stops the call
+      // before its next write.
       if (!vendor.found) {
         // No record has this Title, but one may already file under the folder this name sanitizes
         // to, "Acme Inc" for "Acme Inc.". Assessments are found by folder, so a second record there
@@ -111,9 +118,6 @@ async function openAssessment(args: z.infer<typeof InputObject>, context: ToolCo
             ],
           };
         }
-        const created = await createListItem(context.graph, { siteId: ac.siteId, listName: lists.vendors.name, fields: { Title: args.vendor, [lists.vendors.columns.folderName]: vendorFolder } });
-        await appendJournal(context, ac, "(vendor)", { stage: STAGE, operation: "list_item_created", target: `${lists.vendors.name}/${created.id}`, etagAfter: created.eTag });
-        vendorCreated = true;
       }
 
       // Retry rule: an assessment already open for this vendor and scope, in progress or parked as
@@ -126,14 +130,30 @@ async function openAssessment(args: z.infer<typeof InputObject>, context: ToolCo
           listName: lists.assessments.name,
           fields: { Title: vendorTitle, ...fieldsFor(columns, { vendorFolder: folder, scope: args.scope, status: labels.inProgress, state: STAGE }) },
         });
-        await appendJournal(context, ac, "(unassigned)", { stage: STAGE, operation: "list_item_created", target: `${lists.assessments.name}/${item.id}`, etagAfter: item.eTag });
         record = recordFromFields(item.fields, item.id, item.eTag, columns);
         created = true;
+      }
+      // The id the item carries, or the one rendered from its item id and written below. When that
+      // write is refused, a retry renders the same id from the same item id, so these entries are
+      // under the id the item will carry; only a retry in another month or year, under a template
+      // holding {mm} or {yyyy}, would render another.
+      const journalId = record.assessmentId ?? renderAssessmentId(ac.profile.assessmentId.template, { prefix: ac.profile.assessmentId.prefix, itemId: Number(record.itemId), now: ac.now });
+      if (created) {
+        await appendJournal(context, ac, journalId, { stage: STAGE, operation: "list_item_created", target: `${lists.assessments.name}/${record.itemId}`, ...(record.etag !== undefined ? { etagAfter: record.etag } : {}) });
+      }
+      if (!vendor.found) {
+        // A found item is one an earlier open created before it died, perhaps under another spelling
+        // of the name. The vendor record takes the item's name and folder, so the two agree and a
+        // later open under that name finds both.
+        const vendorFields = created ? { title: args.vendor, folder: vendorFolder } : { title: record.vendorTitle ?? args.vendor, folder: record.vendorFolder ?? vendorFolder };
+        const vendorItem = await createListItem(context.graph, { siteId: ac.siteId, listName: lists.vendors.name, fields: { Title: vendorFields.title, [lists.vendors.columns.folderName]: vendorFields.folder } });
+        await appendJournal(context, ac, journalId, { stage: STAGE, operation: "list_item_created", target: `${lists.vendors.name}/${vendorItem.id}`, etagAfter: vendorItem.eTag });
+        vendorCreated = true;
       }
 
       // The id is rendered from the item id and written back before any folder exists.
       if (record.assessmentId === undefined) {
-        const rendered = renderAssessmentId(ac.profile.assessmentId.template, { prefix: ac.profile.assessmentId.prefix, itemId: Number(record.itemId), now: ac.now });
+        const rendered = journalId;
         // Written only onto the item as this call created or found it. The eTag is the create's
         // own answer or the query's, and an item changed since then is not written over.
         const itemEtag = record.etag;

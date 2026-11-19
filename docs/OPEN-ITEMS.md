@@ -50,7 +50,7 @@ sections below say what was proven and what was not. Last updated 2026-11-18.
 | `describe_assessment_workflow` | Built 2026-11-17: a read tool that answers, from the loaded profiles and with no Graph request, which assessment workflows the server offers and what each needs. Unit tests and the simulated walkthrough; not called on a deployed server | paragraph in the department section below |
 | `npm run department:setup` | Built 2026-11-17: grants the server application on a profile's site, creates its lists and checks their columns, with a dry run. Tested against a scripted Graph client, and its refusals were run; it has not been run against a tenant as a command | `docs/SETUP.md`, the assessment profiles section |
 | A site per department | Built 2026-11-17: the server accepts several granted sites, each profile on one of them, and `npm run sitting` grants, provisions and runs every department profile it finds. Three department sites exist in the developer tenant, Technology Success, Service Desk and Professional Services, with a local profile each. Verified live 2026-11-18: one server under one token ran a case from open to completed on each of the three department sites, beside its own, and every grant was put back to read | sitting section below; `docs/superpowers/specs/evidence/2026-11-18-third-sitting/`; spec amendment of 2026-11-17 in `docs/superpowers/specs/2026-11-17-profile-defined-lifecycle-design.md`; `scripts/pre-eon/department.ts` |
-| Journal in a SharePoint list | Designed 2026-11-18 on the operator's choice of option A, so the journal survives a restart without Azure: a fourth list per workflow, named in the profile, the store kept for profiles without one. Probed live 2026-11-18, every assumption held (J1 to J5: the list created with the id column indexed, a 400 character target read back whole, 60 entries filtered across pages without the non-indexed header, all written by the server application). Built 2026-11-18 against the fakes and the simulated tenant: `lists.journal` in an assessment profile, one item per entry, read back by `get_assessment`, created by `department:setup`; a test shows a restarted server with an empty store still reads every entry. Ruled the same day: the journal list is read only for site members, set by hand once per site (`docs/SETUP.md`). Verified live 2026-11-19 on Service Desk through Copilot Studio: the list set read only for members, an incident opened, its journal read, the server restarted with an empty store, and the same six entries read back from the list. Found in that run: the two creates before the id exists are journaled under placeholders, an open item below | `docs/superpowers/specs/evidence/2026-11-19-journal-list-live/`; `docs/superpowers/specs/evidence/2026-11-18-journal-probe/`; `docs/superpowers/specs/2026-11-18-journal-in-a-sharepoint-list-design.md` |
+| Journal in a SharePoint list | Designed 2026-11-18 on the operator's choice of option A, so the journal survives a restart without Azure: a fourth list per workflow, named in the profile, the store kept for profiles without one. Probed live 2026-11-18, every assumption held (J1 to J5: the list created with the id column indexed, a 400 character target read back whole, 60 entries filtered across pages without the non-indexed header, all written by the server application). Built 2026-11-18 against the fakes and the simulated tenant: `lists.journal` in an assessment profile, one item per entry, read back by `get_assessment`, created by `department:setup`; a test shows a restarted server with an empty store still reads every entry. Ruled the same day: the journal list is read only for site members, set by hand once per site (`docs/SETUP.md`). Verified live 2026-11-19 on Service Desk through Copilot Studio: the list set read only for members, an incident opened, its journal read, the server restarted with an empty store, and the same six entries read back from the list. Found in that run: the two creates before the id exists were journaled under placeholders; ruled and built the same day, so an open now files them under the id (item below), not yet run live | `docs/superpowers/specs/evidence/2026-11-19-journal-list-live/`; `docs/superpowers/specs/evidence/2026-11-18-journal-probe/`; `docs/superpowers/specs/2026-11-18-journal-in-a-sharepoint-list-design.md` |
 | 9d Ingress and Copilot Studio contact | A3 and B1 answered on screen 2026-11-18: Copilot Studio offers None, API key (header or query, a name we choose) and OAuth 2.0, and accepts a Cloudflare hostname on an owned domain. The Cloudflare Tunnel path is set up for the developer server. Not yet documented as a procedure in `docs/SETUP.md`, and dev tunnels and Container Apps are untried | same spec |
 | Rollback of lifecycle writes | Held 2026-11-06: would be this server's first delete | same spec |
 | CPA practice domain (multi-site scan and queries, grant issuer loop over a sites file, folder template taxonomy) | Not started; the phase after 9 | same spec |
@@ -59,10 +59,24 @@ Still open from the parent spec's pre-phase-2 decisions: which delegated scopes 
 command's device-code sign-in must request. It governs that sign-in rather than the server's own
 Graph access, so it has blocked no phase.
 
-## Decision required: the two creates journaled before an assessment has its id
+## RULED 2026-11-19 and built: the two creates journaled before an assessment has its id
 
-Found live 2026-11-19 (`docs/superpowers/specs/evidence/2026-11-19-journal-list-live/`). Open,
-and the operator's to make.
+Found live 2026-11-19 (`docs/superpowers/specs/evidence/2026-11-19-journal-list-live/`). The
+operator took the recommendation the same day. As built it is better than holding the entries:
+`open_assessment` now creates the assessment item before the vendor record, renders the id from the
+item id at once, and appends each create under that id as its write is confirmed. Nothing is held,
+so a journal that fails still stops the call before its next write, and no placeholder key is
+written. A crash between the two creates is resumed by the next open, which finds the item and no
+vendor; that retry creates the vendor under the found item's name and folder, so a retry under
+another spelling cannot leave the two disagreeing (found by the review, tested). Entries written
+before this change keep their placeholder keys.
+
+Left by the review, low and not built: a journal failure on the first create names the rendered id
+before any item carries it, so a search for that id finds nothing; a Graph failure on the vendor
+create leaves an assessment item without an id or a vendor, described only by the generic Graph
+text, as the old order left a vendor without an item; and under a template with `{mm}` or `{yyyy}`
+a retry in a later month renders another id, which rendering from the item's `createdDateTime`
+would close. The question as it was put follows.
 
 **What happens.** `open_assessment` creates the vendor item and the assessment item before it can
 render the id, which comes from the item id. It journals those two creates at once, under the
