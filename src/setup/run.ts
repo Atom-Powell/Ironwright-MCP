@@ -97,10 +97,12 @@ async function rollbackApplication(
   }
 }
 
-// Three attempts across roughly nine seconds, matching the delays cli.ts uses
-// for the token exchange's own replication-lag retry (AADSTS7000215 /
+// Three attempts across roughly nine seconds, matching the short ladder cli.ts
+// uses for the bootstrap token exchange's replication-lag retry (AADSTS7000215 /
 // AADSTS700016): both problems are the same directory-replication lag showing
-// up at a different call. Shared by the two calls in this file that race the
+// up at a different call. The new application's own token exchange waits much
+// longer, since 2026-11-19, because a new secret's replication outlasted nine
+// seconds on a live tenant; neither call here has been seen to. Shared by the two calls in this file that race the
 // directory: POST /servicePrincipals right after POST /applications, and the
 // purge right after the delete. Nothing else is retried, because every other
 // failure from either call is a real configuration or permissions error that
