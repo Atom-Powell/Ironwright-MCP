@@ -402,6 +402,20 @@ What it showed besides the steps:
   sent meanwhile showed "Send failed" with **Retry**. Ask for a short journal summary in a demo.
 - The demo script was revised from this run.
 
+### Which other inputs Copilot Studio may not fill
+
+After `record_findings` failed on a list of records, every tool's advertised input schema was
+walked on 2026-11-18 for the same shapes: a list of objects, a nested object, a union, a reference.
+Apart from `record_findings`, now also served by plain fields, two inputs have them, and neither is
+on the case workflow path:
+
+- `generate_custom_plan.steps`, a list of steps, each holding a selector and a rename object. An
+  operator's library tool; flattening it would be a redesign, left until an agent needs it.
+- `describe_workbook.source`, one nested object naming a sheet or a table. A compliance setup tool an
+  operator runs.
+
+Every case workflow tool's input is flat.
+
 ## Running the probe server
 
 The probe server is `scripts/copilot-probe/`. It exposes two dummy tools (`get_fruit_stock` and
