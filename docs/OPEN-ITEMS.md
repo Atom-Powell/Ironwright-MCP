@@ -645,6 +645,28 @@ retain the grant issuer when it can see that a server application still holds a 
 later need to revoke. The second is the more interesting question, because the current advice to
 delete the grant issuer immediately is what creates the ordering problem.
 
+## Teardown across every granted site: code closed 2026-11-19, not verified live
+
+Found 2026-11-19, once the server ran with a grant on each of several department sites.
+`--delete-server-app` took one `--site`, revoked the server application's entry there, then
+deleted and purged the application. The grants on the other sites were left behind naming a
+deleted application, and with the application gone nothing could find them by its id again:
+the teardown hole above, reopened by the move to a site per department.
+
+**The code side is closed on branch `feat/teardown-all-sites`.** In `--delete-server-app` mode
+`--site` now takes a comma-separated list of every granted site. Every site is resolved and its
+permissions listed before anything is written, and a failed read stops the run with nothing
+changed and names the site. With `--confirm` each entry is revoked in the order given; a revoke
+that fails stops the run before the application is deleted, because the application's id is the
+only key a re-run has to find the entries still standing, and the failure names the sites
+revoked, the one that failed and the ones not yet attempted. The preview and the outcome name
+each site. A single `--site` reads as it did. `docs/SETUP.md` describes it.
+
+**Not verified live.** This is known from the code and from tests against a fake `SetupGraph`
+(`tests/setup/delete-server-app.sites.test.ts`); no multi-site teardown has run against a tenant.
+A live rehearsal on the developer tenant's department sites is planned and is what would close
+this item.
+
 ## CLOSED: an already-absent grant issuer reports success, not failure
 
 **CLOSED by Task 1 of the server application teardown plan, commit `0a50aed`, "fix: treat an
