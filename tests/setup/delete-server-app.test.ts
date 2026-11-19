@@ -92,7 +92,7 @@ describe("runDeleteServerApp", () => {
     });
 
     const outcome = await runDeleteServerApp(graph, {
-      siteUrl: "https://contoso.sharepoint.com/sites/Example",
+      siteUrls: ["https://contoso.sharepoint.com/sites/Example"],
       displayName: "Ironwright Repository Reconciliation",
       confirm: false,
       forceOrphan: false,
@@ -103,7 +103,7 @@ describe("runDeleteServerApp", () => {
       kind: "planned",
       appId: "app-1",
       objectId: "obj-1",
-      permissionId: "perm-1",
+      sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permissionId: "perm-1" }],
       permissionsInspected: true,
     });
     // The exact list, not three not.toContain assertions against named
@@ -126,7 +126,7 @@ describe("runDeleteServerApp", () => {
     });
 
     const outcome = await runDeleteServerApp(graph, {
-      siteUrl: "https://contoso.sharepoint.com/sites/Example",
+      siteUrls: ["https://contoso.sharepoint.com/sites/Example"],
       displayName: "Ironwright Repository Reconciliation",
       confirm: false,
       forceOrphan: false,
@@ -137,7 +137,7 @@ describe("runDeleteServerApp", () => {
       kind: "planned",
       appId: "app-1",
       objectId: "obj-1",
-      permissionId: undefined,
+      sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permissionId: undefined }],
       permissionsInspected: true,
     });
   });
@@ -149,7 +149,7 @@ describe("runDeleteServerApp", () => {
     });
 
     const outcome = await runDeleteServerApp(graph, {
-      siteUrl: "https://contoso.sharepoint.com/sites/Example",
+      siteUrls: ["https://contoso.sharepoint.com/sites/Example"],
       displayName: "Ironwright Repository Reconciliation",
       confirm: true,
       forceOrphan: false,
@@ -160,7 +160,7 @@ describe("runDeleteServerApp", () => {
       kind: "torn-down",
       appId: "app-1",
       objectId: "obj-1",
-      permissionRevoked: true,
+      sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permissionRevoked: true }],
       orphanedPermission: false,
       applicationDeleted: true,
       purgeConfirmed: true,
@@ -178,7 +178,7 @@ describe("runDeleteServerApp", () => {
     const { graph, calls } = fakeGraph({ app: undefined, permissions: [] });
 
     const outcome = await runDeleteServerApp(graph, {
-      siteUrl: "https://contoso.sharepoint.com/sites/Example",
+      siteUrls: ["https://contoso.sharepoint.com/sites/Example"],
       displayName: "Ironwright Repository Reconciliation",
       confirm: true,
       forceOrphan: false,
@@ -196,13 +196,13 @@ describe("runDeleteServerApp", () => {
     });
 
     const outcome = await runDeleteServerApp(graph, {
-      siteUrl: "https://contoso.sharepoint.com/sites/Example",
+      siteUrls: ["https://contoso.sharepoint.com/sites/Example"],
       displayName: "Ironwright Repository Reconciliation",
       confirm: true,
       forceOrphan: false,
       hasGrantIssuer: true,
     });
 
-    expect(outcome).toMatchObject({ kind: "torn-down", permissionRevoked: false, orphanedPermission: false });
+    expect(outcome).toMatchObject({ kind: "torn-down", sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permissionRevoked: false }], orphanedPermission: false });
   });
 });

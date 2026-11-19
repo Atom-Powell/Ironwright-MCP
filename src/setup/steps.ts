@@ -188,6 +188,16 @@ export function siteIdPathFromUrl(siteUrl: string): string {
   return path === "" ? url.host : `${url.host}:${path}`;
 }
 
+/**
+ * Site URLs joined for a message: "A", "A and B", "A, B and C". Shared by the
+ * teardown's errors and its printed outcome so a site list reads the same on
+ * stderr and stdout.
+ */
+export function listSiteUrls(urls: readonly string[]): string {
+  if (urls.length <= 1) return urls[0] ?? "";
+  return `${urls.slice(0, -1).join(", ")} and ${urls[urls.length - 1]}`;
+}
+
 export { appRolesFromAccessToken } from "../graph/roles.js";
 
 /**

@@ -197,11 +197,17 @@ async function main(): Promise<void> {
 
     const result = await runDeleteServerApp(
       graph,
-      { siteUrl, displayName, confirm: parsed.confirm, forceOrphan: parsed.forceOrphan, hasGrantIssuer },
+      {
+        siteUrls: parsed.siteUrls,
+        displayName,
+        confirm: parsed.confirm,
+        forceOrphan: parsed.forceOrphan,
+        hasGrantIssuer,
+      },
       { onNotice: (message) => console.error(message) },
     );
 
-    console.log(describeDeleteServerAppOutcome(result, siteUrl));
+    console.log(describeDeleteServerAppOutcome(result, parsed.siteUrls));
     return;
   }
 

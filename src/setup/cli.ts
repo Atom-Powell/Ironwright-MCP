@@ -6,11 +6,18 @@
 import { SetupFailedError } from "./errors.js";
 import { GraphRequestError } from "../graph/errors.js";
 import type { DeleteBootstrapOutcome, DeleteServerAppOutcome } from "./run.js";
-import { BOOTSTRAP_SECRET_LIFETIME_DAYS } from "./steps.js";
+import { BOOTSTRAP_SECRET_LIFETIME_DAYS, listSiteUrls } from "./steps.js";
 
 export interface ParsedArgs {
   tenantId: string;
+  /** The one site a normal run grants, or the --site value as typed in the other modes. */
   siteUrl: string;
+  /**
+   * Every site --site names. More than one only in --delete-server-app mode,
+   * which has to revoke the server application's entry on each site it was
+   * granted before deleting the one identity those entries can be found by.
+   */
+  siteUrls: string[];
   displayName: string;
   write: boolean;
   clientId: string;
@@ -114,10 +121,29 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   // deletion acts on the grant issuer application itself, not on any site it
   // was ever used against.
   const bootstrapMode = createBootstrap || deleteBootstrap;
+  const tenantId = requiredValue(argv, "tenant");
+  const siteUrl = bootstrapMode ? (findValue(argv, "site") ?? "") : requiredValue(argv, "site");
+
+  let siteUrls: string[];
+  if (deleteServerApp) {
+    siteUrls = parseTeardownSites(siteUrl);
+  } else if (!bootstrapMode && siteUrl.includes(",")) {
+    // A normal run grants exactly one site per invocation. Splitting here and
+    // granting the first would leave the rest ungranted with nothing said, and
+    // passing the whole string on yields a resolveSite failure that blames
+    // the URL's shape rather than the list.
+    throw new Error(
+      `--site takes one site for setup, and "${siteUrl}" holds a comma. Run setup once per site; only ` +
+        "--delete-server-app takes a comma-separated list, because a teardown has to revoke every site's grant.",
+    );
+  } else {
+    siteUrls = siteUrl === "" ? [] : [siteUrl];
+  }
 
   return {
-    tenantId: requiredValue(argv, "tenant"),
-    siteUrl: bootstrapMode ? (findValue(argv, "site") ?? "") : requiredValue(argv, "site"),
+    tenantId,
+    siteUrl,
+    siteUrls,
     displayName:
       findValue(argv, "name") ?? (bootstrapMode ? DEFAULT_BOOTSTRAP_DISPLAY_NAME : DEFAULT_DISPLAY_NAME),
     write: argv.includes("--write"),
@@ -129,6 +155,34 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     forceOrphan: argv.includes("--force-orphan"),
     bootstrap: resolveBootstrapCredentials(argv, env),
   };
+}
+
+/**
+ * The --delete-server-app site list. Split on commas only, unlike IW_SITE_URL,
+ * which also splits on whitespace: on a command line a space has already ended
+ * the argument, so the only whitespace left inside it is padding around a
+ * comma. A duplicate is refused rather than silently collapsed the way
+ * IW_SITE_URL collapses one, because here each entry drives a revoke and a
+ * repeated site usually means a different one was meant.
+ */
+function parseTeardownSites(value: string): string[] {
+  const urls = value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  if (urls.length === 0) throw new Error("missing required argument --site=<value>");
+  const seen = new Set<string>();
+  for (const url of urls) {
+    // SharePoint host names and site paths are case-insensitive, and a
+    // trailing slash names the same site, so either spelling reaches the same
+    // permission entry.
+    const key = url.toLowerCase().replace(/\/+$/, "");
+    if (seen.has(key)) {
+      throw new Error(`--site names ${url} twice. List each granted site once, separated by commas.`);
+    }
+    seen.add(key);
+  }
+  return urls;
 }
 
 interface TokenErrorBody {
@@ -435,13 +489,19 @@ export function describeDeleteBootstrapSuccess(result: DeleteBootstrapOutcome): 
  * single sentence covering both told an operator a secret was unrecoverable on
  * a run that had watched neither step happen.
  */
-export function describeDeleteServerAppOutcome(outcome: DeleteServerAppOutcome, siteUrl: string): string {
+export function describeDeleteServerAppOutcome(outcome: DeleteServerAppOutcome, siteUrls: readonly string[]): string {
+  // One site reads exactly as it did before several were accepted; several
+  // name each site, and "each of" keeps a residue clause from reading as
+  // though the entry sits on only one of them.
+  const several = siteUrls.length > 1;
+  const everySite = several ? `each of ${listSiteUrls(siteUrls)}` : (siteUrls[0] ?? "");
+
   if (outcome.kind === "already-absent") {
     return (
       `No application named "${outcome.displayName}" exists in this tenant, so there was nothing to do and ` +
       "nothing was deleted. If it was created under a different name, re-run with the same --name it was " +
       "created with. If it was already removed, this is the finished state. A permission entry granted to it " +
-      `may still sit on ${siteUrl}, and this command cannot find it once the application it named is gone: ` +
+      `may still sit on ${everySite}, and this command cannot find it once the application it named is gone: ` +
       // Same residue and the same command as the torn-down branch's
       // orphaned clause below, so the advice has to match it. This branch used
       // to name only the manual identification and omit the grant issuer, which
@@ -457,13 +517,28 @@ export function describeDeleteServerAppOutcome(outcome: DeleteServerAppOutcome, 
     // looked, and reporting that as an absence would assert something this run
     // never observed. Task 4's review added permissionsInspected for exactly
     // this distinction.
+    const plannedUrls = outcome.sites.map((site) => site.siteUrl);
+    const only = outcome.sites[0];
     const permission = !outcome.permissionsInspected
-      ? `The site's permissions on ${siteUrl} were not inspected, because --force-orphan was given and ` +
-        "inspecting them needs a grant issuer. If an entry is granted to this application it would be " +
-        "left behind."
-      : outcome.permissionId === undefined
-        ? `No permission entry on ${siteUrl} is granted to it, so there would be nothing to revoke.`
-        : `It would first revoke permission entry ${outcome.permissionId} on ${siteUrl}.`;
+      ? several
+        ? `The permissions on ${listSiteUrls(plannedUrls)} were not inspected, because --force-orphan was given ` +
+          "and inspecting them needs a grant issuer. If an entry on any of them is granted to this application " +
+          "it would be left behind."
+        : `The site's permissions on ${only?.siteUrl} were not inspected, because --force-orphan was given and ` +
+          "inspecting them needs a grant issuer. If an entry is granted to this application it would be " +
+          "left behind."
+      : several
+        ? `It would first work through ${outcome.sites.length} sites in this order. ` +
+          outcome.sites
+            .map((site) =>
+              site.permissionId === undefined
+                ? `On ${site.siteUrl} no permission entry is granted to it, so there would be nothing to revoke there.`
+                : `On ${site.siteUrl} it would revoke permission entry ${site.permissionId}.`,
+            )
+            .join(" ")
+        : only?.permissionId === undefined
+          ? `No permission entry on ${only?.siteUrl} is granted to it, so there would be nothing to revoke.`
+          : `It would first revoke permission entry ${only.permissionId} on ${only.siteUrl}.`;
 
     return (
       `This was a dry run and nothing was changed. Application ${outcome.appId}, object id ${outcome.objectId}, ` +
@@ -480,21 +555,33 @@ export function describeDeleteServerAppOutcome(outcome: DeleteServerAppOutcome, 
   // otherwise both fire on every --force-orphan teardown, one asserting no
   // permission was granted and the other saying nobody looked. Only one of
   // those is ever actually observed.
+  const tornDownUrls = outcome.sites.map((site) => site.siteUrl);
   const revoked = outcome.orphanedPermission
-    ? `Nothing was revoked: the site's permissions on ${siteUrl} were never inspected, because --force-orphan ` +
-      "ran this teardown without a grant issuer."
-    : outcome.permissionRevoked
-      ? `Revoked its permission entry on ${siteUrl}.`
-      : `No permission entry on ${siteUrl} was granted to it, so none was revoked.`;
+    ? `Nothing was revoked: ${several ? "the permissions on" : "the site's permissions on"} ` +
+      `${listSiteUrls(tornDownUrls)} were never inspected, because --force-orphan ran this teardown without a ` +
+      "grant issuer."
+    : outcome.sites
+        .map((site) =>
+          site.permissionRevoked
+            ? `Revoked its permission entry on ${site.siteUrl}.`
+            : // "there" only with several sites, where it says which one;
+              // with one site the sentence reads as it always has.
+              `No permission entry on ${site.siteUrl} was granted to it, so none was revoked${several ? " there" : ""}.`,
+        )
+        .join(" ");
 
   // The reason nothing was revoked already sits in the revoked clause above, so
   // this only adds what that clause does not: what the entry means if one
   // remains, and what removing it needs.
-  const residue = outcome.orphanedPermission
-    ? ` A permission entry for this application may still remain on ${siteUrl}. If one remains it now names an ` +
-      "identity that no longer exists, so it grants access to nothing, and removing it needs a grant issuer " +
-      "created with --create-bootstrap and the entry identified by hand."
-    : "";
+  const residue = !outcome.orphanedPermission
+    ? ""
+    : several
+      ? ` A permission entry for this application may still remain on each of ${listSiteUrls(tornDownUrls)}. Any ` +
+        "that remains now names an identity that no longer exists, so it grants access to nothing, and removing " +
+        "it needs a grant issuer created with --create-bootstrap and the entry identified by hand on each site."
+      : ` A permission entry for this application may still remain on ${tornDownUrls[0]}. If one remains it now ` +
+        "names an identity that no longer exists, so it grants access to nothing, and removing it needs a grant " +
+        "issuer created with --create-bootstrap and the entry identified by hand.";
 
   // The delete and the purge each get their own clause, because each can end in
   // a 404 that this command tolerates, and both 404s used to fall through to the
@@ -531,8 +618,8 @@ export function describeDeleteServerAppOutcome(outcome: DeleteServerAppOutcome, 
       "credential as gone.";
 
   return (
-    `${deleted} ${purged} ${revoked}${residue} Onboarding this site again needs a fresh application, so run ` +
-    "this command without --delete-server-app when you do."
+    `${deleted} ${purged} ${revoked}${residue} Onboarding ${several ? "these sites" : "this site"} again needs a ` +
+    "fresh application, so run this command without --delete-server-app when you do."
   );
 }
 

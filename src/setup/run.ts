@@ -12,6 +12,7 @@ import {
   buildServerPasswordCredential,
   buildSitePermissionRequest,
   interpretVerification,
+  listSiteUrls,
   siteIdPathFromUrl,
 } from "./steps.js";
 
@@ -360,7 +361,12 @@ export async function runCreateBootstrap(
 }
 
 export interface DeleteServerAppArgs {
-  siteUrl: string;
+  /**
+   * Every site the application was granted, in the order the operator gave.
+   * One run has to cover all of them: the entries are found by app id, and
+   * once the application is deleted nothing can find the ones left behind.
+   */
+  siteUrls: string[];
   displayName: string;
   confirm: boolean;
   forceOrphan: boolean;
@@ -373,9 +379,10 @@ export type DeleteServerAppOutcome =
       kind: "planned";
       appId: string;
       objectId: string;
-      permissionId: string | undefined;
+      /** One entry per site, in the order given; `permissionId` is this application's entry there. */
+      sites: Array<{ siteUrl: string; permissionId: string | undefined }>;
       /**
-       * False when --force-orphan skipped the listing, so `permissionId` being
+       * False when --force-orphan skipped the listing, so a `permissionId` being
        * undefined means "not looked at" rather than "not there". Without this a
        * consumer cannot tell those apart, and the difference is the whole
        * distinction between reporting an absence and asserting one.
@@ -386,7 +393,12 @@ export type DeleteServerAppOutcome =
       kind: "torn-down";
       appId: string;
       objectId: string;
-      permissionRevoked: boolean;
+      /**
+       * One entry per site, in the order given. `permissionRevoked` is false
+       * both where the listing found no entry and, under orphanedPermission,
+       * where nobody listed; orphanedPermission is what tells those apart.
+       */
+      sites: Array<{ siteUrl: string; permissionRevoked: boolean }>;
       orphanedPermission: boolean;
       /**
        * False when deleteApplication answered 404: the application was already
@@ -462,15 +474,20 @@ async function purgeDeletedApplicationWithRetry(
 }
 
 /**
- * Removes a server application and the per-site permission it was granted.
+ * Removes a server application and the per-site permission it was granted on
+ * every site named.
  *
- * The order is forced rather than chosen. The permission entry is matched to
- * the application by app id, so the revoke has to happen while that identity
- * still exists; deleting first leaves an entry naming an identity that is gone,
+ * The order is forced rather than chosen. The permission entries are matched to
+ * the application by app id, so every revoke has to happen while that identity
+ * still exists; deleting first leaves entries naming an identity that is gone,
  * which is the residue this mode exists to stop producing. The purge is what
  * actually ends the credential's life: Entra's delete is a soft delete with a
  * 30 day restore window, so stopping at the delete schedules the removal rather
  * than performing it.
+ *
+ * Every site is read before anything is written. A deployment granted on
+ * several sites would otherwise revoke the first site's entry and then fail to
+ * resolve the third, leaving a partial teardown that a typo caused.
  */
 export async function runDeleteServerApp(
   graph: SetupGraph,
@@ -479,6 +496,7 @@ export async function runDeleteServerApp(
 ): Promise<DeleteServerAppOutcome> {
   const notice = hooks.onNotice ?? ((): void => {});
   const sleep = hooks.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const several = args.siteUrls.length > 1;
 
   const existing = await graph.findApplicationByDisplayName(args.displayName);
   if (existing === undefined) {
@@ -487,25 +505,56 @@ export async function runDeleteServerApp(
     return { kind: "already-absent", displayName: args.displayName };
   }
 
-  // resolveSite takes the hostname-and-server-relative form, not the URL as
-  // typed. runSetup builds it the same way; passing the raw URL yields a 400.
-  const { siteId } = await graph.resolveSite(siteIdPathFromUrl(args.siteUrl));
-
-  let permissionId: string | undefined;
-  if (args.hasGrantIssuer) {
-    const permissions = await graph.listSitePermissions(siteId);
-    permissionId = permissions.find((entry) => entry.appIds.includes(existing.appId))?.permissionId;
-  } else if (!args.forceOrphan) {
-    // Reached only when no grant issuer is configured, which is exactly when
-    // the listing above did not run. So this branch cannot know whether a grant
-    // exists, and saying it does would assert something nobody looked for.
+  if (!args.hasGrantIssuer && !args.forceOrphan) {
+    // Without a grant issuer the listing below cannot run, so this cannot know
+    // whether a grant exists, and saying it does would assert something nobody
+    // looked for. Checked before resolving any site, which this refusal does
+    // not need.
+    const where = several ? `any of ${listSiteUrls(args.siteUrls)}` : args.siteUrls[0];
     throw new Error(
       `Revoking a site permission needs a grant issuer's app-only token, and none was configured, so nothing ` +
         `was touched: application ${existing.appId} still exists, and whether it still holds a permission on ` +
-        `${args.siteUrl} was not checked, because checking needs the grant issuer this run does not have. ` +
+        `${where} was not checked, because checking needs the grant issuer this run does not have. ` +
         "Create one with --create-bootstrap and re-run, or pass --force-orphan to delete and purge the " +
         "application anyway and leave any permission entry behind.",
     );
+  }
+
+  // With one site a raw Graph failure already names the only site there is,
+  // and describeSetupFailure gives it the path-specific remedy and response
+  // body it always has. With several, the operator has to be told which one
+  // failed and that the earlier ones were only read, not changed.
+  const readFailure = (step: string, siteUrl: string, error: unknown): unknown =>
+    several
+      ? new Error(
+          `${step} ${siteUrl} failed, so nothing was changed: no permission was revoked on any site and ` +
+            `application ${existing.appId} still exists. Every site is read before any is written, so a re-run ` +
+            `after fixing this starts from the same point. Underlying failure: ${detail(error)}`,
+          { cause: error },
+        )
+      : error;
+
+  const sites: Array<{ siteUrl: string; siteId: string; permissionId: string | undefined }> = [];
+  for (const siteUrl of args.siteUrls) {
+    let siteId: string;
+    try {
+      // resolveSite takes the hostname-and-server-relative form, not the URL as
+      // typed. runSetup builds it the same way; passing the raw URL yields a 400.
+      ({ siteId } = await graph.resolveSite(siteIdPathFromUrl(siteUrl)));
+    } catch (error) {
+      throw readFailure("Resolving", siteUrl, error);
+    }
+
+    let permissionId: string | undefined;
+    if (args.hasGrantIssuer) {
+      try {
+        const permissions = await graph.listSitePermissions(siteId);
+        permissionId = permissions.find((entry) => entry.appIds.includes(existing.appId))?.permissionId;
+      } catch (error) {
+        throw readFailure("Listing the permissions on", siteUrl, error);
+      }
+    }
+    sites.push({ siteUrl, siteId, permissionId });
   }
 
   if (!args.confirm) {
@@ -513,19 +562,47 @@ export async function runDeleteServerApp(
       kind: "planned",
       appId: existing.appId,
       objectId: existing.objectId,
-      permissionId,
+      sites: sites.map(({ siteUrl, permissionId }) => ({ siteUrl, permissionId })),
       permissionsInspected: args.hasGrantIssuer,
     };
   }
 
-  let permissionRevoked = false;
-  if (permissionId !== undefined) {
+  const revoked: string[] = [];
+  const results: Array<{ siteUrl: string; permissionRevoked: boolean }> = [];
+  for (const [index, site] of sites.entries()) {
+    if (site.permissionId === undefined) {
+      results.push({ siteUrl: site.siteUrl, permissionRevoked: false });
+      continue;
+    }
     // Named by the site URL the operator typed, not by siteId: every other
     // message in this mode uses the URL, and mixing the two made stderr and
     // stdout read as though they were about two different sites.
-    notice(`Revoking site permission ${permissionId} on ${args.siteUrl}.`);
-    await graph.deleteSitePermission(siteId, permissionId);
-    permissionRevoked = true;
+    notice(`Revoking site permission ${site.permissionId} on ${site.siteUrl}.`);
+    try {
+      await graph.deleteSitePermission(site.siteId, site.permissionId);
+    } catch (error) {
+      // The application is deliberately left in place. Its app id is the only
+      // thing a re-run can match the remaining entries by, so deleting it now
+      // would turn a recoverable stop into permanent residue on every site
+      // after this one.
+      const remaining = sites.slice(index + 1).filter((later) => later.permissionId !== undefined);
+      const remainingUrls = remaining.map((later) => later.siteUrl);
+      throw new Error(
+        `Revoking permission entry ${site.permissionId} on ${site.siteUrl} failed, so this run stopped there ` +
+          `and did not delete the application: application ${existing.appId} still exists, and it is the only ` +
+          "key a re-run has to find the remaining entries by. " +
+          `Already revoked: ${revoked.length === 0 ? "none" : listSiteUrls(revoked)}. ` +
+          `Not yet attempted: ${remainingUrls.length === 0 ? "none" : listSiteUrls(remainingUrls)}. ` +
+          "Re-running is safe: it reads every site again, revokes what is still there, then deletes and purges " +
+          `the application. Underlying failure: ${detail(error)}`,
+        // Preserved so describeSetupFailure can still reach the site
+        // permissions remedy, which names the grant issuer's consent as the
+        // likely cause of a 403 on this call.
+        { cause: error },
+      );
+    }
+    revoked.push(site.siteUrl);
+    results.push({ siteUrl: site.siteUrl, permissionRevoked: true });
   }
 
   notice(`Deleting application ${existing.appId} (object id ${existing.objectId}).`);
@@ -534,9 +611,15 @@ export async function runDeleteServerApp(
     await graph.deleteApplication(existing.objectId);
   } catch (error) {
     if (statusOf(error) !== 404) {
-      const state = permissionRevoked
-        ? "The site permission was revoked, and the application still exists"
-        : "No site permission was revoked, and the application still exists";
+      // The single-site wording is kept as it was. Several sites name which
+      // ones were revoked, since those are the ones a re-run finds nothing on.
+      const state =
+        revoked.length === 0
+          ? "No site permission was revoked, and the application still exists"
+          : !several
+            ? "The site permission was revoked, and the application still exists"
+            : `The site permission${revoked.length === 1 ? "" : "s"} on ${listSiteUrls(revoked)} ` +
+              `${revoked.length === 1 ? "was" : "were"} revoked, and the application still exists`;
       throw new Error(
         `${state}: deleting ${existing.appId} failed. Re-running is safe and will finish the job. ` +
           `Underlying failure: ${detail(error)}`,
@@ -582,7 +665,7 @@ export async function runDeleteServerApp(
     kind: "torn-down",
     appId: existing.appId,
     objectId: existing.objectId,
-    permissionRevoked,
+    sites: results,
     orphanedPermission: !args.hasGrantIssuer,
     applicationDeleted,
     purgeConfirmed,

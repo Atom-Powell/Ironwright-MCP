@@ -67,6 +67,34 @@ describe("parseArgs", () => {
     expect(parsed.displayName).toBe("Ironwright Repository Reconciliation");
   });
 
+  it("reads a comma-separated site list in teardown mode, trimmed and in the order given", () => {
+    const parsed = parseArgs([
+      "node",
+      "main.js",
+      "--tenant=contoso.onmicrosoft.com",
+      "--site= https://contoso.sharepoint.com/sites/Finance , ,https://contoso.sharepoint.com/sites/Legal",
+      "--delete-server-app",
+    ]);
+
+    expect(parsed.siteUrls).toEqual([
+      "https://contoso.sharepoint.com/sites/Finance",
+      "https://contoso.sharepoint.com/sites/Legal",
+    ]);
+  });
+
+  it("reads a single teardown site as a list of one", () => {
+    const parsed = parseArgs([
+      "node",
+      "main.js",
+      "--tenant=contoso.onmicrosoft.com",
+      "--site=https://contoso.sharepoint.com/sites/Example",
+      "--delete-server-app",
+    ]);
+
+    expect(parsed.siteUrls).toEqual(["https://contoso.sharepoint.com/sites/Example"]);
+    expect(parsed.siteUrl).toBe("https://contoso.sharepoint.com/sites/Example");
+  });
+
   it("reads the confirm and force-orphan flags", () => {
     const parsed = parseArgs([
       "node",
@@ -524,8 +552,8 @@ describe("grant issuer teardown note is confined to the normal run's success bui
 describe("describeDeleteServerAppOutcome", () => {
   it("previews what it would remove without claiming it removed anything", () => {
     const message = describeDeleteServerAppOutcome(
-      { kind: "planned", appId: "app-1", objectId: "obj-1", permissionId: "perm-1", permissionsInspected: true },
-      "https://contoso.sharepoint.com/sites/Example",
+      { kind: "planned", appId: "app-1", objectId: "obj-1", sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permissionId: "perm-1" }], permissionsInspected: true },
+      ["https://contoso.sharepoint.com/sites/Example"],
     );
 
     expect(message).toMatch(/would/i);
@@ -537,8 +565,8 @@ describe("describeDeleteServerAppOutcome", () => {
 
   it("says the permission entry is not there when the listing ran and matched nothing", () => {
     const message = describeDeleteServerAppOutcome(
-      { kind: "planned", appId: "app-1", objectId: "obj-1", permissionId: undefined, permissionsInspected: true },
-      "https://contoso.sharepoint.com/sites/Example",
+      { kind: "planned", appId: "app-1", objectId: "obj-1", sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permissionId: undefined }], permissionsInspected: true },
+      ["https://contoso.sharepoint.com/sites/Example"],
     );
 
     expect(message).toMatch(/no permission entry/i);
@@ -546,8 +574,8 @@ describe("describeDeleteServerAppOutcome", () => {
 
   it("says the permissions were not inspected when --force-orphan skipped the listing", () => {
     const message = describeDeleteServerAppOutcome(
-      { kind: "planned", appId: "app-1", objectId: "obj-1", permissionId: undefined, permissionsInspected: false },
-      "https://contoso.sharepoint.com/sites/Example",
+      { kind: "planned", appId: "app-1", objectId: "obj-1", sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permissionId: undefined }], permissionsInspected: false },
+      ["https://contoso.sharepoint.com/sites/Example"],
     );
 
     // The distinction this test exists for: an uninspected site must not be
@@ -562,13 +590,13 @@ describe("describeDeleteServerAppOutcome", () => {
         kind: "torn-down",
         appId: "app-1",
         objectId: "obj-1",
-        permissionRevoked: true,
+        sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permissionRevoked: true }],
         orphanedPermission: false,
         applicationDeleted: true,
         purgeConfirmed: true,
         purgeRetried: false,
       },
-      "https://contoso.sharepoint.com/sites/Example",
+      ["https://contoso.sharepoint.com/sites/Example"],
     );
 
     expect(message).toMatch(/revoked/i);
@@ -590,13 +618,13 @@ describe("describeDeleteServerAppOutcome", () => {
         kind: "torn-down",
         appId: "app-1",
         objectId: "obj-1",
-        permissionRevoked: true,
+        sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permissionRevoked: true }],
         orphanedPermission: false,
         applicationDeleted: true,
         purgeConfirmed: false,
         purgeRetried: false,
       },
-      "https://contoso.sharepoint.com/sites/Example",
+      ["https://contoso.sharepoint.com/sites/Example"],
     );
 
     expect(message).toMatch(/purge returned not found/i);
@@ -609,13 +637,13 @@ describe("describeDeleteServerAppOutcome", () => {
         kind: "torn-down",
         appId: "app-1",
         objectId: "obj-1",
-        permissionRevoked: true,
+        sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permissionRevoked: true }],
         orphanedPermission: false,
         applicationDeleted: true,
         purgeConfirmed: false,
         purgeRetried: true,
       },
-      "https://contoso.sharepoint.com/sites/Example",
+      ["https://contoso.sharepoint.com/sites/Example"],
     );
 
     expect(message).toMatch(/purge returned not found/i);
@@ -628,13 +656,13 @@ describe("describeDeleteServerAppOutcome", () => {
         kind: "torn-down",
         appId: "app-1",
         objectId: "obj-1",
-        permissionRevoked: false,
+        sites: [{ siteUrl: "https://contoso.sharepoint.com/sites/Example", permissionRevoked: false }],
         orphanedPermission: true,
         applicationDeleted: true,
         purgeConfirmed: true,
         purgeRetried: false,
       },
-      "https://contoso.sharepoint.com/sites/Example",
+      ["https://contoso.sharepoint.com/sites/Example"],
     );
 
     // "may still remain", not "remains": with --force-orphan the site's
@@ -655,7 +683,7 @@ describe("describeDeleteServerAppOutcome", () => {
   it("says nothing was deleted when the application was already gone", () => {
     const message = describeDeleteServerAppOutcome(
       { kind: "already-absent", displayName: "Ironwright Repository Reconciliation" },
-      "https://contoso.sharepoint.com/sites/Example",
+      ["https://contoso.sharepoint.com/sites/Example"],
     );
 
     expect(message).toMatch(/nothing to do/i);
