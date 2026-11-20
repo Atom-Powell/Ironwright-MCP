@@ -700,7 +700,10 @@ what it changed:
   tunnel and a wrong key 401. The agent listed the three workflows, then read each site's cases.
 - **A write session** on Service Desk: grant widened with `probe:assessment:grant`, server
   restarted with writes on, tool re-added in Studio, one incident opened with its workspace, then
-  the grant narrowed and the server restarted read only.
+  the grant narrowed and the server restarted read only. The opening wrote eight journal entries
+  (two items created, one updated, five folders) to the Incident Journal list after members had
+  been set to read on it, and `get_assessment` read them back through Studio: the per-list
+  permissions do not touch the server, whose access is its own site grant.
 
 One operator pitfall worth carrying into the runbook, and now carried: a PowerShell window that
 once ran a write session keeps `IW_ALLOW_WRITES=true`, and a later start that leaves the variable
