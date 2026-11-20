@@ -13,7 +13,7 @@ ordered by when they will matter, not by when they were written.
 This table is the one place status lives. `CLAUDE.md`, the README and the PAI vault note point
 here and restate none of it, so a change of state is one edit in one file, made in the same commit
 as the sitting, merge, or decision that caused it. The table says where each phase is; the dated
-sections below say what was proven and what was not. Last updated 2026-11-18.
+sections below say what was proven and what was not. Last updated 2026-11-19.
 
 | Phase | State | Evidence |
 |---|---|---|
@@ -35,7 +35,7 @@ sections below say what was proven and what was not. Last updated 2026-11-18.
 | 6b-2 Cross-library moves | Held: begins with a live probe; waits on the decision below | |
 | 6c `replicate_template` and folder creation | Held | |
 | `$batch` | Held: no caller yet whose measured cost justifies it | |
-| 7 Copilot Studio integration and governance | In progress. First contact 2026-11-18: a standard agent in the developer tenant reached the probe server, then the real server, over Cloudflare Tunnel on the operator's domain with the inbound key in a header; tool discovery, three probe calls, `describe_assessment_workflow` and an error result all observed. A read reached SharePoint through Copilot Studio the same afternoon: `get_assessment` listed the Technology Success site's assessments by status and returned the case the morning's sitting completed. Writes through Copilot Studio the same night: a Service Desk incident taken from open to closed by the agent, with a finding (after `record_findings` gained a plain-field form, since Copilot Studio cannot fill a list of records), containment, two refused closings (postmortem missing, then misnamed) and a close once it was present; a delete request found no tool to call. A journal that survives a restart, verified 2026-11-19 through the journal list (see that row). Not yet: publishing (the license allows testing only) | `docs/superpowers/specs/2026-10-11-copilot-studio-integration-design.md`; `docs/COPILOT-STUDIO-PROBE.md` |
+| 7 Copilot Studio integration and governance | In progress. First contact 2026-11-18: a standard agent in the developer tenant reached the probe server, then the real server, over Cloudflare Tunnel on the operator's domain with the inbound key in a header; tool discovery, three probe calls, `describe_assessment_workflow` and an error result all observed. A read reached SharePoint through Copilot Studio the same afternoon: `get_assessment` listed the Technology Success site's assessments by status and returned the case the morning's sitting completed. Writes through Copilot Studio the same night: a Service Desk incident taken from open to closed by the agent, with a finding (after `record_findings` gained a plain-field form, since Copilot Studio cannot fill a list of records), containment, two refused closings (postmortem missing, then misnamed) and a close once it was present; a delete request found no tool to call. A journal that survives a restart, verified 2026-11-19 through the journal list (see that row). The whole deployment rehearsed end to end the same day, removal through a write session (section "Full deployment rehearsal, 2026-11-19"). Not yet: publishing (the license allows testing only) | `docs/superpowers/specs/2026-10-11-copilot-studio-integration-design.md`; `docs/COPILOT-STUDIO-PROBE.md` |
 | 8 Evaluation suite | Not started; questions written in `docs/EVALUATION-QUESTIONS.md` | |
 | 9a Probes and the grant | Complete: probes L and F run live 2026-11-07, fifteen of seventeen steps as designed and the spec amended on the other two (`If-Match` on a content PUT does not guard an absent path; a filtered list query needs the non-indexed header); A3 and B1 stay unverified until 9d | `docs/superpowers/specs/evidence/2026-11-07-assessment-probe/`; sitting below; PR #24 |
 | 9b Core: modules, site sets, inbound authentication, lifecycle kind, journal | Complete against fakes, merged 2026-11-07; nothing in it has met a live tenant yet | PR #22, merged 2026-11-07 |
@@ -645,7 +645,7 @@ retain the grant issuer when it can see that a server application still holds a 
 later need to revoke. The second is the more interesting question, because the current advice to
 delete the grant issuer immediately is what creates the ordering problem.
 
-## Teardown across every granted site: code closed 2026-11-19, not verified live
+## Teardown across every granted site: closed and verified live 2026-11-19
 
 Found 2026-11-19, once the server ran with a grant on each of several department sites.
 `--delete-server-app` took one `--site`, revoked the server application's entry there, then
@@ -664,10 +664,54 @@ recorded as already gone, never as revoked, and the run carries on. Two URLs tha
 site are refused before any write. The preview and the outcome name each site. A single `--site`
 reads as it did. `docs/SETUP.md` describes it.
 
-**Not verified live.** This is known from the code and from tests against a fake `SetupGraph`
-(`tests/setup/delete-server-app.sites.test.ts`); no multi-site teardown has run against a tenant.
-A live rehearsal on the developer tenant's department sites is planned and is what would close
-this item.
+**Verified live 2026-11-19**, merged as PR #39, as the first step of a full deployment rehearsal
+on the developer tenant (the section below). The preview named four sites and changed nothing;
+with `--confirm` it revoked the server application's entry on each of the four, then deleted and
+purged the application. Afterward **Deleted applications** was empty and the application's
+service principal was gone from Enterprise applications. That answers both questions the teardown
+was built to answer, including the one the 2026-09-12 and 2026-09-18 sittings left open: deleting
+an application registration removes its service principal too, so neither this mode nor the
+rollback in `runSetup` needs a separate step for it. One more fact the run showed: the server
+application's permission entry carried the same id on every site, because SharePoint derives it
+from the application's identity.
+
+Only the success path ran. The stop-before-delete on a failed revoke, the already-gone 404 and the
+duplicate-site refusal are still known from the fakes only.
+
+## Full deployment rehearsal, 2026-11-19
+
+The deployment runbook written for the pilot was run end to end on the developer tenant, from
+removing the previous install through a write session through Copilot Studio, with three
+department sites (Service Desk, Professional Services, Technology Success). What it proved and
+what it changed:
+
+- **Removal**, multi-site, as above. Then `--delete-bootstrap --confirm` and `--create-bootstrap`,
+  because the grant issuer's stored secret no longer matched the tenant.
+- **Creating the server application** failed once with AADSTS7000215 at the new application's
+  first token exchange and rolled back cleanly. The secret had been issued seconds earlier and had
+  not reached every Entra server. PR #40 lengthened that one exchange's retries to 94 seconds; the
+  grant issuer keeps its short ladder. The rerun succeeded.
+- **`department:setup`** on all three profiles, dry run then real: it created the two journal
+  lists that were missing, created grants on the two sites that had none (write, then read), and
+  left Service Desk's read grant read after widening it to create nothing.
+- **The journal lists made read only for members** by hand on all three sites.
+- **A new inbound key**, the compiled server (`build:prod` then `npm start`) behind the existing
+  Cloudflare tunnel, and a new Copilot Studio tool and connection. Health answered 200 over the
+  tunnel and a wrong key 401. The agent listed the three workflows, then read each site's cases.
+- **A write session** on Service Desk: grant widened with `probe:assessment:grant`, server
+  restarted with writes on, tool re-added in Studio, one incident opened with its workspace, then
+  the grant narrowed and the server restarted read only. The opening wrote eight journal entries
+  (two items created, one updated, five folders) to the Incident Journal list after members had
+  been set to read on it, and `get_assessment` read them back through Studio: the per-list
+  permissions do not touch the server, whose access is its own site grant.
+
+One operator pitfall worth carrying into the runbook, and now carried: a PowerShell window that
+once ran a write session keeps `IW_ALLOW_WRITES=true`, and a later start that leaves the variable
+unset inherits it. The first read only start of the rehearsal came up with writes enabled, harmless
+only because every grant was at read. The operator's start script now always sets it.
+
+The scripts the rehearsal used live outside the repository with the developer tenant's values in
+them. Whether a generic copy belongs in the source, for example under `scripts/operator/`, is open.
 
 ## CLOSED: an already-absent grant issuer reports success, not failure
 
