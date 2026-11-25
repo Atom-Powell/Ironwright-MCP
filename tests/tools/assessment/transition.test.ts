@@ -37,7 +37,7 @@ describe("transition_assessment", () => {
     });
     expect(calls.filter((call) => call.method === "patch").map((call) => call.body)).toEqual([values]);
     expect(resultText(result)).toBe(
-      'Moved ASM-2026-00002 from "In Progress" to "Completed" with disposition "Approved", risk "Low" and State "LIFECYCLE", as read back from Assessments item 2.',
+      'Moved ASM-2026-00002 from "In Progress" to "Completed" with disposition "Approved" and risk "Low", as read back from Assessments item 2.',
     );
 
     const journal = await context.store.listJournal(PROFILE, ID);
