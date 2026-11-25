@@ -60,7 +60,7 @@ export const GET_OUTPUT_SCHEMA = {
   journalEntries: z
     .array(z.object(JOURNAL_ENTRY_SHAPE))
     .optional()
-    .describe('Every journal entry under this assessment id, oldest first, for example [{"operation": "folder_created"}]. Present only when include names "journal". The writes an open makes before the id exists are journaled under a placeholder and are not here.'),
+    .describe('Every journal entry under this assessment id, oldest first, for example [{"operation": "folder_created"}]. Present only when include names "journal". Every write the server made for this assessment is here, its opening writes included.'),
   summary: z.string().optional().describe('The assessment summary record_findings wrote to the item, for example "Three findings, one high.". Present only when include names "findings" and the item holds one.'),
   findings: z
     .array(z.object(FINDING_READ_SHAPE))
@@ -151,7 +151,7 @@ export async function runGetAssessment(input: unknown, context: ToolContext): Pr
       }
       const state = await readAssessmentState(context.graph, ac, record);
       // The journal is keyed by the assessment id as the list stores it, which the lookup can match in
-      // another case; entries written under a placeholder before the id existed are not read here.
+      // another case. An open journals its creates under that id since 1dc027b.
       const assessmentId = record.assessmentId;
       const entries = await readJournal(context, ac, assessmentId);
       const journal = journalSummary(entries);
@@ -195,7 +195,7 @@ export async function runGetAssessment(input: unknown, context: ToolContext): Pr
 
       const present = artifacts.filter((artifact) => artifact.present).map((artifact) => artifact.kind);
       const sentences = [
-        `${assessmentId}: item ${record.itemId} in ${listName}, status ${JSON.stringify(record.status ?? null)}, state ${JSON.stringify(record.state ?? null)}.`,
+        `${assessmentId}: item ${record.itemId} in ${listName}, status ${JSON.stringify(record.status ?? null)}.`,
         state.rootPath === undefined
           ? `The workspace root path could not be computed: ${state.rootPathUnavailable ?? "the state carries no root path"}, so the drive was not read.`
           : `Workspace root ${state.rootPath} ${state.rootPresent ? "is present" : "was not found"}. Artifacts present: ${present.length === 0 ? "none" : present.join(", ")}.`,

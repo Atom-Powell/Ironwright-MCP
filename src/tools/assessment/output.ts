@@ -15,7 +15,7 @@ export const ASSESSMENT_SUMMARY_SHAPE = {
   vendorFolder: z.string().optional().describe('The vendor\'s folder name, for example "Acme Corp".'),
   scope: z.string().optional().describe('What the assessment covers, for example "Security".'),
   status: z.string().optional().describe('The status label, for example "In Progress".'),
-  state: z.string().optional().describe('The last stage the assessment reached, for example "ID". Absent when the item holds none.'),
+  state: z.string().optional().describe('An internal marker of the last write stage, for example "ID" right after opening or "LIFECYCLE" after a status change. Not for people: describe the assessment by its status instead. Absent when the item holds none.'),
   disposition: z.string().optional().describe('The recorded disposition, for example "Approved with conditions". Absent until one is recorded.'),
   risk: z.string().optional().describe('The recorded overall risk, for example "Medium". Absent until one is recorded.'),
 } satisfies z.ZodRawShape;

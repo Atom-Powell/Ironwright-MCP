@@ -89,3 +89,29 @@ describe("methods the stateless transport does not implement", () => {
     expectNoStackTrace(response.text);
   });
 });
+
+describe("a failure inside the MCP handler", () => {
+  it("answers a generic internal error that carries none of the thrown message", async () => {
+    const leaky = new McpServer({ name: "test", version: "0.0.0" });
+    leaky.connect = () => Promise.reject(new Error("Graph said: secret-site-path /sites/hidden"));
+    const failing = createApp({ auth: { mode: "none", header: "x-api-key" }, serverFactory: () => leaky });
+
+    const response = await request(failing)
+      .post("/mcp")
+      .set("accept", "application/json, text/event-stream")
+      .send({ jsonrpc: "2.0", method: "ping", id: 1 });
+
+    expect(response.status).toBe(500);
+    expect(response.body.error.code).toBe(-32603);
+    expect(response.text).not.toContain("secret-site-path");
+    expect(response.body.error.message).toMatch(/^Internal error\. Reference [0-9a-f-]{36}\.$/);
+  });
+});
+
+describe("response headers", () => {
+  it("does not advertise the framework", async () => {
+    const response = await request(app()).get("/health");
+
+    expect(response.headers["x-powered-by"]).toBeUndefined();
+  });
+});

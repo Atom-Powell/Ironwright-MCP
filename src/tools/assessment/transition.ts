@@ -167,8 +167,8 @@ async function transitionAssessment(args: z.infer<typeof InputObject>, context: 
       graphRequests: context.graph.requests() - before,
     };
     const text =
-      `Moved ${assessmentId} from ${JSON.stringify(item.status ?? null)} to "${read.status}" with disposition "${read.disposition}", risk "${read.risk}" ` +
-      `and ${columns.state} "${read.state}", as read back from ${listName} item ${item.itemId}.`;
+      `Moved ${assessmentId} from ${JSON.stringify(item.status ?? null)} to "${read.status}" with disposition "${read.disposition}" and risk "${read.risk}", ` +
+      `as read back from ${listName} item ${item.itemId}.`;
     return { structuredContent: output, content: [{ type: "text" as const, text }] };
   } catch (error) {
     console.error(`${TOOL} failed for profile "${args.profileId}"`, error);

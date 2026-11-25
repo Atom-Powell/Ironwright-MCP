@@ -127,7 +127,7 @@ export function buildServer(opts: BuildServerOptions): McpServer {
   const tools = selectTools(opts.allowWrites, opts.tools);
 
   for (const tool of tools) {
-    const message = `${tool.name} is registered but not implemented yet.`;
+    const message = `${tool.name} is registered but not implemented yet. Nothing was done.`;
     const handler = tool.handler;
 
     server.registerTool(
@@ -140,10 +140,9 @@ export function buildServer(opts: BuildServerOptions): McpServer {
         annotations: tool.annotations,
       },
       handler === undefined
-        ? () => ({
-            structuredContent: { stub: true as const, message },
-            content: [{ type: "text" as const, text: message }],
-          })
+        ? // An error, not a success-shaped answer: an agent relays a success as
+          // "done", and this tool did nothing.
+          () => ({ isError: true, content: [{ type: "text" as const, text: message }] })
         : opts.onToolCall === undefined
           ? (input: unknown) => handler(input, opts.context)
           : recorded(tool, handler, opts.context, opts.onToolCall),

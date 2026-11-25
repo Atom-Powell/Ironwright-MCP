@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import express from "express";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -20,6 +21,8 @@ export interface AppOptions {
 
 export function createApp(opts: AppOptions): express.Express {
   const app = express();
+  // Nothing gains from a caller learning the framework, and a questionnaire asks.
+  app.disable("x-powered-by");
 
   // Kept separate from the MCP route because container probes issue GET and the
   // MCP endpoint only answers POST.
@@ -79,10 +82,15 @@ export function createApp(opts: AppOptions): express.Express {
       // Also guard on `closed`: a mid-request client abort fires the close
       // handler while handleRequest is still pending, and when that rejection
       // lands here headersSent is still false even though the socket is gone.
+      // The thrown message can carry a Graph response body, a site path or a
+      // list name, so it stays in the local log. The caller gets a reference an
+      // operator can find in that log.
+      const reference = randomUUID();
+      console.error(`MCP request failed, reference ${reference}`, error);
       if (!res.headersSent && !closed) {
         res.status(500).json({
           jsonrpc: "2.0",
-          error: { code: -32603, message: error instanceof Error ? error.message : "internal error" },
+          error: { code: -32603, message: `Internal error. Reference ${reference}.` },
           id: null,
         });
       }
@@ -149,10 +157,11 @@ export function createApp(opts: AppOptions): express.Express {
       return;
     }
 
-    console.error("unhandled error on an MCP request", error);
+    const reference = randomUUID();
+    console.error(`unhandled error on an MCP request, reference ${reference}`, error);
     res.status(500).json({
       jsonrpc: "2.0",
-      error: { code: -32603, message: "Internal error." },
+      error: { code: -32603, message: `Internal error. Reference ${reference}.` },
       id: null,
     });
   }) satisfies express.ErrorRequestHandler);

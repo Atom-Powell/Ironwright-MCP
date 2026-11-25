@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import type express from "express";
 
 /**
@@ -24,11 +24,12 @@ export interface InboundAuthConfig {
 export const MIN_INBOUND_KEY_LENGTH = 16;
 
 function keysMatch(supplied: string, expected: string): boolean {
-  const a = Buffer.from(supplied);
-  const b = Buffer.from(expected);
-  // timingSafeEqual throws on unequal lengths, and a length difference is
-  // itself a rejection, so check it first rather than catching.
-  return a.length === b.length && timingSafeEqual(a, b);
+  // Both sides are hashed so the comparison always runs over 32 bytes. Comparing
+  // the raw keys needed a length check first, and returning early on a length
+  // mismatch told a caller how long the key is.
+  const a = createHash("sha256").update(supplied).digest();
+  const b = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(a, b);
 }
 
 function suppliedKey(req: express.Request, config: InboundAuthConfig): string | undefined {

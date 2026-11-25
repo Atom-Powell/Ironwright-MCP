@@ -100,10 +100,11 @@ describe("buildServer", () => {
     expect(sawProfileIds).toEqual(["example"]);
   });
 
-  it("still serves the stub answer for a tool with no handler", async () => {
+  it("answers a tool with no handler as an error, so an agent cannot report it as done", async () => {
     const result = await callTool([STUBBED], "stubbed_tool", { echo: "hello" });
 
-    expect(result.structuredContent).toMatchObject({ stub: true });
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([{ type: "text", text: "stubbed_tool is registered but not implemented yet. Nothing was done." }]);
   });
 
   it("defaults to the full registry when no tool list is given", () => {
